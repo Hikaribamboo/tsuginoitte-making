@@ -100,6 +100,8 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
     setAnalyzing(false);
+    setLines(new Map());
+    setDepth(0);
     onBestMove?.(null);
     onCandidateMoves?.([]);
   }, [onBestMove, onCandidateMoves]);

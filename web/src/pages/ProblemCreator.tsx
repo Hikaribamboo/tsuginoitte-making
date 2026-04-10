@@ -27,7 +27,7 @@ import type { Board as BoardType, HandPieces, Side, HandPieceType, PieceType } f
 import { CAN_PROMOTE, pieceKanji } from '../types/shogi';
 
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
-const WINRATE_SCALE = 600;
+const WINRATE_SCALE = 800;
 const CHOICE_EVAL_DEPTH = 18;
 const SLOT_ORDER: SlotKey[] = ['correct', 'incorrect1', 'incorrect2'];
 const AUTOSAVE_DEBOUNCE_MS = 3000;
@@ -146,7 +146,6 @@ const ProblemCreator: React.FC = () => {
   }, []);
 
   const arrows: ArrowInfo[] = candidateMoves
-    .filter((m) => m.from !== null)
     .slice(0, 3)
     .map((m, idx) => ({
       from: m.from,

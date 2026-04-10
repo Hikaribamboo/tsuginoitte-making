@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import Board from '../components/Board';
 import type { ArrowInfo } from '../components/Board';
 import TagSelector from '../components/TagSelector';
@@ -6,7 +6,8 @@ import AnalysisPanel from '../components/AnalysisPanel';
 import type { BestMove } from '../components/AnalysisPanel';
 import { useBoardStore } from '../hooks/useBoardStore';
 import { createFavorite, updateFavorite } from '../api/favorites';
-import { toUsiSquare } from '../lib/sfen';
+import { toUsiSquare, parseSfen, applyUsiMove } from '../lib/sfen';
+import { usiToLabel } from '../lib/usi-to-label';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
 import type { HandPieceType, PieceType, Side } from '../types/shogi';
 import { CAN_PROMOTE, pieceKanji } from '../types/shogi';
@@ -216,6 +217,70 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
     setTimeout(() => setMessage(''), 2000);
   };
 
+  const nodeLabelMap = useMemo(() => {
+    const labels: Record<string, string> = {
+      [store.rootNodeId]: '開始局面',
+    };
+
+    const root = parseSfen(store.baseSfen);
+
+    const walk = (
+      nodeId: string,
+      board: ReturnType<typeof parseSfen>['board'],
+      senteHand: ReturnType<typeof parseSfen>['senteHand'],
+      goteHand: ReturnType<typeof parseSfen>['goteHand'],
+      sideToMove: ReturnType<typeof parseSfen>['sideToMove'],
+    ) => {
+      const node = store.moveTree[nodeId];
+      if (!node) return;
+
+      for (const childId of node.children) {
+        const child = store.moveTree[childId];
+        if (!child?.move) continue;
+
+        labels[childId] = usiToLabel(child.move, board, sideToMove);
+        const result = applyUsiMove(board, senteHand, goteHand, sideToMove, child.move);
+        const nextSide: Side = sideToMove === 'sente' ? 'gote' : 'sente';
+        walk(childId, result.board, result.senteHand, result.goteHand, nextSide);
+      }
+    };
+
+    walk(store.rootNodeId, root.board, root.senteHand, root.goteHand, root.sideToMove);
+    return labels;
+  }, [store.baseSfen, store.moveTree, store.rootNodeId]);
+
+  const renderTree = useCallback((nodeId: string, hasParent = false, isLast = true): React.ReactNode => {
+    const node = store.moveTree[nodeId];
+    if (!node) return null;
+
+    const isCurrent = nodeId === store.currentNodeId;
+    const title = nodeLabelMap[nodeId] ?? (node.move ?? '開始局面');
+
+    return (
+      <div key={nodeId} className="relative flex flex-col gap-1">
+        {hasParent && (
+          <>
+            <span className="absolute left-0 top-3 w-2 border-t border-slate-300" />
+            <span className={`absolute left-0 border-l border-slate-300 ${isLast ? 'top-0 h-3' : 'top-0 bottom-0'}`} />
+          </>
+        )}
+        <button
+          type="button"
+          className={`ml-3 w-[80px] text-left text-[11px] px-1.5 py-0.5 rounded border leading-tight truncate ${isCurrent ? 'bg-sky-100 border-sky-400 text-sky-900' : 'bg-white border-gray-200 text-gray-700'}`}
+          onClick={() => store.jumpToNode(nodeId)}
+          title={title}
+        >
+          {title}
+        </button>
+        {node.children.length > 0 && (
+          <div className="ml-3 pl-2 border-l border-slate-200/80 flex flex-col gap-1">
+            {node.children.map((childId, idx) => renderTree(childId, true, idx === node.children.length - 1))}
+          </div>
+        )}
+      </div>
+    );
+  }, [store, nodeLabelMap]);
+
   return (
     <div className="flex gap-6 items-start">
       <div className="flex flex-col gap-2 flex-shrink-0">
@@ -246,6 +311,9 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
           <button onClick={() => store.undoMove()} disabled={store.moveHistory.length === 0}>
             ↩ 一手戻す
           </button>
+          <button onClick={() => store.redoMove()} disabled={!store.canRedo()}>
+            ↪ 一手進める
+          </button>
           <button onClick={() => store.resetToInitial()}>初期配置に戻す</button>
         </div>
 
@@ -271,6 +339,15 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
       </div>
 
       <div className="flex-1 basis-[620px] max-w-[820px] min-w-[420px] flex flex-col gap-3">
+        <div className="self-start w-[820px] flex flex-col gap-1 p-1.5 bg-white/80 border border-gray-200 rounded">
+          <div className="text-[11px] font-semibold text-gray-500">手順ツリー</div>
+          <div className="h-[120px] overflow-auto">
+            <div className="flex flex-col gap-1 pr-1">
+              {renderTree(store.rootNodeId)}
+            </div>
+          </div>
+        </div>
+
         <div className="flex flex-col gap-1.5">
           <div className="text-[13px] font-semibold text-gray-500">SFEN</div>
           <div className="font-mono text-xs p-2 bg-white border border-gray-200 rounded break-all cursor-pointer hover:bg-gray-100" onClick={handleCopySfen} title="クリックでコピー">
