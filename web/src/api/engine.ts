@@ -1,5 +1,6 @@
-// Use same-origin proxy by default so remote access (e.g. ngrok) works.
-const ENGINE_API = import.meta.env.VITE_ENGINE_API_URL ?? '/engine-api';
+// In production (served by Express), /api is direct.
+// In Vite dev, /api is proxied to the engine server.
+const ENGINE_API = import.meta.env.VITE_ENGINE_API_URL ?? '';
 
 export interface EngineEvalResult {
   eval_cp: number;

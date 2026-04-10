@@ -1,10 +1,13 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { existsSync } from 'fs';
 import { ShogiEngine } from './engine.js';
 import type { AnalysisLine } from './engine.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '8765', 10);
+const HOST = process.env.HOST ?? '0.0.0.0';
 
 app.use(cors());
 app.use(express.json());
@@ -66,6 +69,7 @@ app.get('/api/analyze', (req, res) => {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
   });
 
   const handler = (info: AnalysisLine) => {
@@ -100,12 +104,23 @@ app.post('/api/analyze/stop', async (_req, res) => {
   }
 });
 
+// Serve built frontend (web/dist) if available — for ngrok / production sharing.
+const distDir = path.resolve(import.meta.dirname, '..', '..', 'web', 'dist');
+if (existsSync(distDir)) {
+  app.use(express.static(distDir));
+  // SPA fallback: any non-API route → index.html
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+  console.log(`Serving frontend from ${distDir}`);
+}
+
 // Start server after engine is ready
 async function main() {
   try {
     await engine.start();
-    app.listen(PORT, () => {
-      console.log(`Engine API server running on http://localhost:${PORT}`);
+    app.listen(PORT, HOST, () => {
+      console.log(`Engine API server running on http://${HOST}:${PORT}`);
     });
   } catch (err) {
     console.error('Failed to start engine:', err);
