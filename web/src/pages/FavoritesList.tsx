@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchFavorites, deleteFavorite } from '../api/favorites';
+import { fetchFavorites, deleteFavorite, listFavoriteIdsWithProblemDraft } from '../api/favorites';
 import { AVAILABLE_TAGS } from '../lib/constants';
 import MiniBoard from '../components/MiniBoard';
 import type { FavoritePosition } from '../types/problem';
@@ -9,6 +9,7 @@ const TAG_LABEL_MAP = Object.fromEntries(AVAILABLE_TAGS.map(t => [t.value, t.lab
 
 const FavoritesList: React.FC = () => {
   const [favorites, setFavorites] = useState<FavoritePosition[]>([]);
+  const [draftFavoriteIds, setDraftFavoriteIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const navigate = useNavigate();
@@ -18,6 +19,9 @@ const FavoritesList: React.FC = () => {
     try {
       const data = await fetchFavorites();
       setFavorites(data);
+      const ids = await listFavoriteIdsWithProblemDraft();
+      const draftIds = new Set(ids);
+      setDraftFavoriteIds(draftIds);
       setError('');
     } catch (e: any) {
       setError(e.message);
@@ -35,6 +39,11 @@ const FavoritesList: React.FC = () => {
     try {
       await deleteFavorite(id);
       setFavorites((prev) => prev.filter((f) => f.id !== id));
+      setDraftFavoriteIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     } catch (e: any) {
       setError(e.message);
     }
@@ -53,6 +62,7 @@ const FavoritesList: React.FC = () => {
   const handleCreateProblem = (fav: FavoritePosition) => {
     navigate('/problem', {
       state: {
+        favorite_id: fav.id,
         root_sfen: fav.root_sfen,
         tags: fav.tags,
         last_move: fav.last_move ?? null,
@@ -96,7 +106,7 @@ const FavoritesList: React.FC = () => {
               <div className="flex flex-col gap-1 flex-shrink-0">
                 <button className="w-[100px] text-xs" onClick={() => handleEdit(fav)}>編集</button>
                 <button className="w-[100px] text-xs bg-blue-600 text-white border-blue-600 hover:bg-blue-700" onClick={() => handleCreateProblem(fav)}>
-                  問題作成
+                  {fav.id && draftFavoriteIds.has(fav.id) ? '再開' : '問題作成'}
                 </button>
                 <button className="w-[100px] text-xs bg-red-600 text-white border-red-600 hover:bg-red-700" onClick={() => handleDelete(fav.id!)}>
                   削除

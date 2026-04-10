@@ -13,16 +13,79 @@ import { usiToLabel } from '../lib/usi-to-label';
 import { cpToWinRatePercentFromRootSfen } from '../lib/eval-percent';
 import { evaluatePosition } from '../api/engine';
 import { saveProblem, getNextDisplayNo } from '../api/problems';
+import {
+  deleteFavorite,
+  fetchProblemDraftForFavorite,
+  saveProblemDraftForFavorite,
+  clearProblemDraftForFavorite,
+} from '../api/favorites';
 import { DEFAULT_PROMPT } from '../lib/constants';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
 import type { ChoiceDraft } from '../types/problem';
+import type { ProblemCreatorDraft } from '../lib/problem-draft';
 import type { Board as BoardType, HandPieces, Side, HandPieceType, PieceType } from '../types/shogi';
 import { CAN_PROMOTE, pieceKanji } from '../types/shogi';
 
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 const WINRATE_SCALE = 600;
-const CHOICE_EVAL_DEPTH = 20;
+const CHOICE_EVAL_DEPTH = 18;
 const SLOT_ORDER: SlotKey[] = ['correct', 'incorrect1', 'incorrect2'];
+const AUTOSAVE_DEBOUNCE_MS = 3000;
+const AUTOSYNC_INTERVAL_MS = 3000;
+
+function draftSignature(draft: ProblemCreatorDraft): string {
+  const { savedAt: _ignoredSavedAt, ...stablePart } = draft;
+  return JSON.stringify(stablePart);
+}
+
+function pickString(local: string, remote: string): string {
+  if (local.trim()) return local;
+  return remote;
+}
+
+function pickNullableNumber(local: number | null, remote: number | null): number | null {
+  if (local !== null) return local;
+  return remote;
+}
+
+function pickArray<T>(local: T[], remote: T[]): T[] {
+  if (local.length > 0) return local;
+  return remote;
+}
+
+function mergeChoicePreferLocal(local: ChoiceDraft, remote: ChoiceDraft): ChoiceDraft {
+  return {
+    slotLabel: local.slotLabel,
+    usi: pickString(local.usi, remote.usi),
+    label: pickString(local.label, remote.label),
+    explanation: pickString(local.explanation, remote.explanation),
+    line: pickArray(local.line, remote.line),
+    eval_cp: pickNullableNumber(local.eval_cp, remote.eval_cp),
+    eval_percent: pickNullableNumber(local.eval_percent, remote.eval_percent),
+  };
+}
+
+function mergeDraftPreferLocal(local: ProblemCreatorDraft, remote: ProblemCreatorDraft): ProblemCreatorDraft {
+  return {
+    version: 1,
+    favoriteId: local.favoriteId,
+    rootSfen: local.rootSfen,
+    prompt: pickString(local.prompt, remote.prompt),
+    tags: pickArray(local.tags, remote.tags),
+    displayNo: pickNullableNumber(local.displayNo, remote.displayNo),
+    introMoves: pickString(local.introMoves, remote.introMoves),
+    problemRating: local.problemRating,
+    rootEvalCp: pickNullableNumber(local.rootEvalCp, remote.rootEvalCp),
+    rootEvalPercent: pickNullableNumber(local.rootEvalPercent, remote.rootEvalPercent),
+    activeSlot: local.activeSlot ?? remote.activeSlot,
+    choices: {
+      correct: mergeChoicePreferLocal(local.choices.correct, remote.choices.correct),
+      incorrect1: mergeChoicePreferLocal(local.choices.incorrect1, remote.choices.incorrect1),
+      incorrect2: mergeChoicePreferLocal(local.choices.incorrect2, remote.choices.incorrect2),
+    },
+    savedAt: new Date().toISOString(),
+  };
+}
 
 const EMPTY_CHOICE: ChoiceDraft = {
   slotLabel: '',
@@ -38,12 +101,14 @@ const ProblemCreator: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const state = location.state as {
+    favorite_id?: number;
     root_sfen?: string;
     name?: string;
     tags?: string[] | null;
     last_move?: string | null;
   } | null;
 
+  const favoriteId = state?.favorite_id ?? null;
   const rootSfen = state?.root_sfen ?? '';
   const parsed = rootSfen ? parseSfen(rootSfen) : null;
 
@@ -117,11 +182,156 @@ const ProblemCreator: React.FC = () => {
     toSq: string;
     pieceType: PieceType;
   } | null>(null);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [autosaveState, setAutosaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const lastSyncedSignatureRef = React.useRef<string>('');
+  const lastSyncedAtRef = React.useRef<string>('');
+
+  const buildDraft = useCallback((): ProblemCreatorDraft => ({
+    version: 1,
+    favoriteId: favoriteId ?? 0,
+    rootSfen,
+    prompt,
+    tags,
+    displayNo,
+    introMoves,
+    problemRating,
+    rootEvalCp,
+    rootEvalPercent,
+    activeSlot,
+    choices,
+    savedAt: new Date().toISOString(),
+  }), [favoriteId, rootSfen, prompt, tags, displayNo, introMoves, problemRating, rootEvalCp, rootEvalPercent, activeSlot, choices]);
+
+  const applyDraft = useCallback((draft: ProblemCreatorDraft) => {
+    setPrompt(draft.prompt);
+    setTags(draft.tags);
+    setDisplayNo(draft.displayNo);
+    setIntroMoves(draft.introMoves);
+    setProblemRating(draft.problemRating);
+    setRootEvalCp(draft.rootEvalCp);
+    setRootEvalPercent(draft.rootEvalPercent);
+    setActiveSlot(draft.activeSlot);
+    setChoices(draft.choices);
+  }, []);
 
   // Auto-fetch next display_no on mount
   React.useEffect(() => {
     getNextDisplayNo().then(setDisplayNo).catch(() => {});
   }, []);
+
+  React.useEffect(() => {
+    if (draftRestored) return;
+    setDraftRestored(true);
+    if (!favoriteId || !rootSfen) return;
+
+    void (async () => {
+      try {
+        const snapshot = await fetchProblemDraftForFavorite(favoriteId);
+        if (!snapshot) {
+          const initialSignature = draftSignature(buildDraft());
+          lastSyncedSignatureRef.current = initialSignature;
+          lastSyncedAtRef.current = '';
+          return;
+        }
+
+        const draft = snapshot.draft;
+        if (draft.favoriteId !== favoriteId) return;
+        if (draft.rootSfen !== rootSfen) return;
+
+        applyDraft(draft);
+        lastSyncedSignatureRef.current = draftSignature(draft);
+        lastSyncedAtRef.current = snapshot.updatedAt;
+        setMessage('途中保存データを読み込みました');
+      } catch {
+        // Continue without draft if retrieval fails.
+      }
+    })();
+  }, [favoriteId, rootSfen, draftRestored, applyDraft, buildDraft]);
+
+  React.useEffect(() => {
+    if (!favoriteId || !rootSfen || !draftRestored) return;
+    const draft = buildDraft();
+    const nextSignature = draftSignature(draft);
+    if (nextSignature === lastSyncedSignatureRef.current) return;
+
+    const timerId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          setAutosaveState('saving');
+          let draftToSave = draft;
+          const snapshot = await fetchProblemDraftForFavorite(favoriteId);
+          if (snapshot) {
+            const remoteDraft = snapshot.draft;
+            if (remoteDraft.favoriteId === favoriteId && remoteDraft.rootSfen === rootSfen) {
+              draftToSave = mergeDraftPreferLocal(draft, remoteDraft);
+            }
+          }
+
+          await saveProblemDraftForFavorite(favoriteId, draftToSave);
+          applyDraft(draftToSave);
+          lastSyncedSignatureRef.current = draftSignature(draftToSave);
+          lastSyncedAtRef.current = draftToSave.savedAt;
+          setAutosaveState('saved');
+        } catch {
+          setAutosaveState('error');
+        }
+      })();
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [favoriteId, rootSfen, draftRestored, buildDraft, applyDraft]);
+
+  React.useEffect(() => {
+    if (!favoriteId || !rootSfen || !draftRestored) return;
+
+    const intervalId = window.setInterval(() => {
+      void (async () => {
+        const localDraft = buildDraft();
+        const localSignature = draftSignature(localDraft);
+        const localIsDirty = localSignature !== lastSyncedSignatureRef.current;
+
+        try {
+          const snapshot = await fetchProblemDraftForFavorite(favoriteId);
+          if (!snapshot) return;
+          if (!snapshot.updatedAt || snapshot.updatedAt <= lastSyncedAtRef.current) return;
+
+          const remoteDraft = snapshot.draft;
+          if (remoteDraft.favoriteId !== favoriteId || remoteDraft.rootSfen !== rootSfen) return;
+
+          if (localIsDirty) {
+            const mergedDraft = mergeDraftPreferLocal(localDraft, remoteDraft);
+            await saveProblemDraftForFavorite(favoriteId, mergedDraft);
+            applyDraft(mergedDraft);
+            lastSyncedSignatureRef.current = draftSignature(mergedDraft);
+            lastSyncedAtRef.current = mergedDraft.savedAt;
+            setAutosaveState('saved');
+            setMessage('途中保存データを同期してマージしました');
+            return;
+          }
+
+          const remoteSignature = draftSignature(remoteDraft);
+          if (remoteSignature === lastSyncedSignatureRef.current) {
+            lastSyncedAtRef.current = snapshot.updatedAt;
+            return;
+          }
+
+          applyDraft(remoteDraft);
+          lastSyncedSignatureRef.current = remoteSignature;
+          lastSyncedAtRef.current = snapshot.updatedAt;
+          setMessage('途中保存データを同期しました');
+        } catch {
+          // ignore periodic sync failures
+        }
+      })();
+    }, AUTOSYNC_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [favoriteId, rootSfen, draftRestored, applyDraft, buildDraft]);
 
   // ---- Move handling ----
 
@@ -297,12 +507,9 @@ const ProblemCreator: React.FC = () => {
       // Keep cp as raw engine output.
       const rawCp = result.eval_cp;
 
-      // For win-rate conversion only, normalize by root side-to-move.
-      // If root is gote, invert so that positive means better for gote.
-      const rootSide = parseSfen(rootSfen).sideToMove;
-      const percentCp = rootSide === 'sente' ? rawCp : -rawCp;
+      // Win-rate conversion handles perspective internally from root side-to-move.
       const choicePct = cpToWinRatePercentFromRootSfen({
-        cp: percentCp,
+        cp: rawCp,
         rootSfen,
         scale: WINRATE_SCALE,
       });
@@ -363,6 +570,7 @@ const ProblemCreator: React.FC = () => {
 
   const validate = (): string[] => {
     const errors: string[] = [];
+    if (!favoriteId) errors.push('お気に入り一覧から問題作成を開始してください');
     if (!rootSfen) errors.push('局面（root_sfen）が未設定です');
     if (!choices.correct.usi) errors.push('正解手が未設定です');
     if (!choices.incorrect1.usi) errors.push('不正解手１が未設定です');
@@ -380,6 +588,38 @@ const ProblemCreator: React.FC = () => {
     if (choices.incorrect1.usi && !choices.incorrect1.explanation) w.push('不正解手１の解説が未入力です');
     if (choices.incorrect2.usi && !choices.incorrect2.explanation) w.push('不正解手２の解説が未入力です');
     return w;
+  };
+
+  const handleSaveDraft = async () => {
+    if (!favoriteId) {
+      setMessage('お気に入り一覧から開始した局面のみ途中保存できます');
+      return;
+    }
+
+    const draft: ProblemCreatorDraft = {
+      version: 1,
+      favoriteId,
+      rootSfen,
+      prompt,
+      tags,
+      displayNo,
+      introMoves,
+      problemRating,
+      rootEvalCp,
+      rootEvalPercent,
+      activeSlot,
+      choices,
+      savedAt: new Date().toISOString(),
+    };
+
+    try {
+      await saveProblemDraftForFavorite(favoriteId, draft);
+      lastSyncedSignatureRef.current = draftSignature(draft);
+      lastSyncedAtRef.current = draft.savedAt;
+      setMessage('途中保存しました（DB）');
+    } catch (e: any) {
+      setMessage(`途中保存エラー: ${e.message}`);
+    }
   };
 
   // ---- Save ----
@@ -418,7 +658,7 @@ const ProblemCreator: React.FC = () => {
         root_eval_cp: rootEvalCp,
         root_eval_percent: rootEvalPercent,
         problem_rating: problemRating,
-        problem_rating_games: null,
+        problem_rating_games: 0,
         display_no: displayNo,
         tags: tags.length > 0 ? tags : null,
       };
@@ -430,7 +670,31 @@ const ProblemCreator: React.FC = () => {
       ];
 
       const { problemId } = await saveProblem(problem, choiceData);
-      setMessage(`保存しました (problem_id: ${problemId})`);
+
+      if (favoriteId) {
+        await clearProblemDraftForFavorite(favoriteId);
+        lastSyncedSignatureRef.current = '';
+        lastSyncedAtRef.current = '';
+      }
+
+      if (!favoriteId) {
+        setMessage(`保存しました (problem_id: ${problemId})`);
+        return;
+      }
+
+      const shouldDeleteFavorite = window.confirm('問題を保存しました。お気に入りから削除しますか？');
+      if (!shouldDeleteFavorite) {
+        setMessage(`保存しました (problem_id: ${problemId})\nお気に入りは削除していません`);
+        return;
+      }
+
+      try {
+        await deleteFavorite(favoriteId);
+        setMessage(`保存しました (problem_id: ${problemId})\nお気に入りから削除しました`);
+        navigate('/favorites');
+      } catch (deleteError: any) {
+        setMessage(`保存しました (problem_id: ${problemId})\nお気に入り削除エラー: ${deleteError.message}`);
+      }
     } catch (e: any) {
       setMessage(`保存エラー: ${e.message}`);
     } finally {
@@ -497,6 +761,11 @@ const ProblemCreator: React.FC = () => {
           />
           <div className="flex gap-3 mt-1.5 text-[13px] text-gray-500 flex-wrap items-center">
             <span>手番: {(analysisMode ? store.sideToMove : sideToMove) === 'sente' ? '☗先手' : '☖後手'}</span>
+            {favoriteId && (
+              <span>
+                自動保存: {autosaveState === 'saving' ? '保存中...' : autosaveState === 'saved' ? '保存済み' : autosaveState === 'error' ? '失敗' : '待機中'}
+              </span>
+            )}
             {selectedHandPiece && (
               <span className="text-blue-600 font-semibold">打: {selectedHandPiece.type}</span>
             )}
@@ -618,6 +887,12 @@ const ProblemCreator: React.FC = () => {
 
             <div className="flex gap-2 mt-1">
               <button
+                onClick={handleSaveDraft}
+                type="button"
+              >
+                途中保存
+              </button>
+              <button
                 onClick={() => setShowPreview(true)}
                 type="button"
               >
@@ -672,6 +947,7 @@ const ProblemCreator: React.FC = () => {
                   root_eval_cp: rootEvalCp,
                   root_eval_percent: rootEvalPercent,
                   problem_rating: problemRating,
+                  problem_rating_games: 0,
                   display_no: displayNo,
                   tags,
                 },

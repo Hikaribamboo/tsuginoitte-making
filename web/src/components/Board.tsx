@@ -57,19 +57,19 @@ const Board: React.FC<BoardProps> = ({
 
         <div className="flex items-start gap-0.5">
           <div className="relative">
-            <div className="grid grid-cols-[repeat(9,48px)] grid-rows-[repeat(9,48px)] border-2 border-[#8b6914] bg-[#deb862]">
+            <div className="grid grid-cols-[repeat(9,48px)] grid-rows-[repeat(9,48px)] border-2 border-blue-700/70 bg-blue-100/65 backdrop-blur-[1px]">
               {board.map((row, ri) =>
                 row.map((cell, ci) => {
                   const isSelected = selectedCell?.row === ri && selectedCell?.col === ci;
                   return (
                     <div
                       key={`${ri}-${ci}`}
-                      className={`w-12 h-12 border border-[#c5a23e] flex items-center justify-center cursor-pointer relative select-none hover:bg-white/30 ${isSelected ? 'bg-blue-500/35' : ''}`}
+                      className={`w-12 h-12 border border-blue-700/35 flex items-center justify-center cursor-pointer relative select-none hover:bg-cyan-100/80 ${isSelected ? 'bg-sky-500/45' : ''}`}
                       onClick={() => onCellClick?.(ri, ci)}
                     >
                       {cell && (
                         <span
-                          className={`text-[22px] font-bold leading-none ${cell.side === 'gote' ? 'rotate-180' : ''} ${cell.promoted ? 'text-red-700' : 'text-[#1a1a1a]'}`}
+                          className={`text-[22px] font-bold leading-none ${cell.side === 'gote' ? 'rotate-180' : ''} ${cell.promoted ? 'text-rose-700' : 'text-slate-800'}`}
                         >
                           {pieceKanji(cell)}
                         </span>
@@ -120,7 +120,7 @@ interface HandDisplayProps {
 const HandDisplay: React.FC<HandDisplayProps> = ({ side, hand, onClick, label }) => {
   const pieces = HAND_ORDER.filter((t) => hand[t] > 0);
   return (
-    <div className={`min-w-12 p-2 bg-[#f0e6c8] border border-[#c5a23e] rounded ${side === 'sente' ? 'self-end' : 'self-start'}`}>
+    <div className={`min-w-12 p-2 bg-sky-100/70 border border-sky-400/45 rounded backdrop-blur-[1px] ${side === 'sente' ? 'self-end' : 'self-start'}`}>
       <div className="text-xs text-gray-500 mb-1 whitespace-nowrap">{label}</div>
       <div className="flex flex-col gap-1">
         {pieces.length === 0 && <span className="text-[11px] text-gray-400">なし</span>}
