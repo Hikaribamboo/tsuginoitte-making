@@ -33,8 +33,8 @@ import type {
 import { CAN_PROMOTE, pieceKanji } from "../types/shogi";
 
 type SlotKey = "correct" | "incorrect1" | "incorrect2";
-const WINRATE_SCALE = 600;
-const CHOICE_EVAL_DEPTH = 24;
+const WINRATE_SCALE = 800;
+const CHOICE_EVAL_DEPTH = 18;
 const SLOT_ORDER: SlotKey[] = ["correct", "incorrect1", "incorrect2"];
 const AUTOSAVE_DEBOUNCE_MS = 3000;
 const AUTOSYNC_INTERVAL_MS = 3000;
@@ -182,15 +182,12 @@ const ProblemCreator: React.FC = () => {
     setCandidateMoves(moves.slice(0, 3));
   }, []);
 
-  const arrows: ArrowInfo[] = candidateMoves
-    .filter((m) => m.from !== null)
-    .slice(0, 3)
-    .map((m, idx) => ({
-      from: m.from,
-      to: m.to,
-      style: idx === 0 ? "primary" : idx === 1 ? "secondary" : "tertiary",
-      showNextLabel: idx === 1,
-    }));
+  const arrows: ArrowInfo[] = candidateMoves.slice(0, 3).map((m, idx) => ({
+    from: m.from,
+    to: m.to,
+    style: idx === 0 ? "primary" : idx === 1 ? "secondary" : "tertiary",
+    showNextLabel: idx === 1,
+  }));
 
   // Choice drafts
   const [choices, setChoices] = useState<Record<SlotKey, ChoiceDraft>>({

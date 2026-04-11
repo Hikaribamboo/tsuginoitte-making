@@ -1,16 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import { existsSync } from 'fs';
 import { ShogiEngine } from './engine.js';
 import type { AnalysisLine } from './engine.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '8765', 10);
-
-// tsuginoitte-making ルート
-const ROOT_DIR = path.resolve(import.meta.dirname, '..', '..');
-// Vite の build 出力先
-const WEB_DIST_DIR = path.join(ROOT_DIR, 'web', 'dist');
+const HOST = process.env.HOST ?? '0.0.0.0';
 
 app.use(cors());
 app.use(express.json());
@@ -68,7 +65,8 @@ app.get('/api/analyze', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
   });
 
   const handler = (info: AnalysisLine) => {
@@ -101,21 +99,23 @@ app.post('/api/analyze/stop', async (_req, res) => {
   }
 });
 
-// ここから Web 配信
-app.use(express.static(WEB_DIST_DIR));
-
-// SPA フォールバック
-app.get(/^(?!\/api).*/, (_req, res) => {
-  res.sendFile(path.join(WEB_DIST_DIR, 'index.html'));
-});
+// Serve built frontend (web/dist) if available — for ngrok / production sharing.
+const distDir = path.resolve(import.meta.dirname, '..', '..', 'web', 'dist');
+if (existsSync(distDir)) {
+  app.use(express.static(distDir));
+  // SPA fallback: any non-API route → index.html
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+  console.log(`Serving frontend from ${distDir}`);
+}
 
 // Start server after engine is ready
 async function main() {
   try {
     await engine.start();
-    app.listen(PORT, () => {
-      console.log(`Engine API server running on http://localhost:${PORT}`);
-      console.log(`Serving web from ${WEB_DIST_DIR}`);
+    app.listen(PORT, HOST, () => {
+      console.log(`Engine API server running on http://${HOST}:${PORT}`);
     });
   } catch (err) {
     console.error('Failed to start engine:', err);

@@ -171,7 +171,8 @@ const ARROW_STYLE = {
 const ArrowOverlay: React.FC<ArrowOverlayProps> = ({ arrows }) => {
   const boardW = 9 * CELL_SIZE;
   const boardH = 9 * CELL_SIZE;
-  const drawable = arrows.filter((a) => a.from !== null);
+  const lineArrows = arrows.filter((a) => a.from !== null);
+  const dropArrows = arrows.filter((a) => a.from === null);
 
   return (
     <svg className="absolute top-[2px] left-[2px] pointer-events-none z-10" style={{ width: boardW, height: boardH }} viewBox={`0 0 ${boardW} ${boardH}`}>
@@ -196,7 +197,7 @@ const ArrowOverlay: React.FC<ArrowOverlayProps> = ({ arrows }) => {
           );
         })}
       </defs>
-      {drawable.map((a, idx) => {
+      {lineArrows.map((a, idx) => {
         const styleKey = a.style ?? 'primary';
         const style = ARROW_STYLE[styleKey];
         const from = a.from!;
@@ -222,6 +223,45 @@ const ArrowOverlay: React.FC<ArrowOverlayProps> = ({ arrows }) => {
               <text
                 x={String(midX + 8)}
                 y={String(midY - 8)}
+                fill="rgba(220,38,38,0.72)"
+                fontSize="14"
+                fontWeight="700"
+              >
+                次
+              </text>
+            )}
+          </g>
+        );
+      })}
+      {dropArrows.map((a, idx) => {
+        const styleKey = a.style ?? 'primary';
+        const style = ARROW_STYLE[styleKey];
+        const x = a.to.col * CELL_SIZE + CELL_SIZE / 2;
+        const y = a.to.row * CELL_SIZE + CELL_SIZE / 2;
+        return (
+          <g key={`drop-${a.to.row}-${a.to.col}-${idx}`}>
+            <circle
+              cx={String(x)}
+              cy={String(y)}
+              r="10"
+              fill="rgba(255,255,255,0.68)"
+              stroke={style.stroke}
+              strokeWidth={String(Math.max(2, style.strokeWidth - 1))}
+            />
+            <text
+              x={String(x)}
+              y={String(y + 4)}
+              textAnchor="middle"
+              fill={style.stroke}
+              fontSize="11"
+              fontWeight="700"
+            >
+              打
+            </text>
+            {a.showNextLabel && (
+              <text
+                x={String(x + 12)}
+                y={String(y - 12)}
                 fill="rgba(220,38,38,0.72)"
                 fontSize="14"
                 fontWeight="700"
