@@ -4,4 +4,3 @@ dist/
 *.local
 
 engines/
-engines/eval/
