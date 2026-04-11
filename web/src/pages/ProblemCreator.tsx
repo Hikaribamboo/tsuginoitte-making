@@ -749,14 +749,14 @@ const ProblemCreator: React.FC = () => {
             ...prev,
             [slot]: {
               ...prev[slot],
-              eval_cp: senteCp,
+              eval_cp: rawCp,
               eval_percent: choicePct,
               line: result.pv.slice(0, Math.min(result.pv.length, 14)),
             },
           };
 
           if (slot === "correct") {
-            setRootEvalCp(senteCp);
+            setRootEvalCp(rawCp);
             setRootEvalPercent(choicePct);
           }
 
