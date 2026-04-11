@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process';
-import { chmodSync, accessSync, constants as fsConst } from 'fs';
+import { chmodSync, accessSync, constants as fsConst, existsSync } from 'fs';
 import path from 'path';
+import os from 'os';
 import { EventEmitter } from 'events';
 
 export interface EngineResult {
@@ -55,19 +56,7 @@ export class ShogiEngine {
   private collectedLines: string[] = [];
   private supportedOptions = new Set<string>();
 
-  private static readonly DEFAULT_HASH_MB = 1024;
-  private static readonly DEFAULT_THREADS = 4;
-  private static readonly DEFAULT_CORES = 4;
-  private static readonly DEFAULT_PV_INTERVAL_MS = 300;
-  private static readonly DEFAULT_MULTIPV = 3;
-
-  private tuning: AnalysisTuning = {
-    hashMb: ShogiEngine.DEFAULT_HASH_MB,
-    threads: ShogiEngine.DEFAULT_THREADS,
-    cores: ShogiEngine.DEFAULT_CORES,
-    pvIntervalMs: ShogiEngine.DEFAULT_PV_INTERVAL_MS,
-    multipv: ShogiEngine.DEFAULT_MULTIPV,
-  };
+  private tuning: AnalysisTuning;
 
   // For streaming analysis
   public analysisEmitter = new EventEmitter();
@@ -75,6 +64,8 @@ export class ShogiEngine {
 
   constructor(enginePath?: string, evalDir?: string) {
     const root = path.resolve(import.meta.dirname, '..', '..');
+    this.tuning = ShogiEngine.detectDefaultTuning();
+
     if (enginePath) {
       this.enginePath = enginePath;
     } else {
@@ -82,10 +73,23 @@ export class ShogiEngine {
       this.enginePath = path.join(
         root, 'engines',
         isMac ? 'mac' : 'windows',
-        isMac ? 'YaneuraOu.exe' : 'AobaNNUE_ZEN2.exe',
+        isMac ? 'YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1' : 'AobaNNUE_ZEN2.exe',
       );
     }
-    this.evalDir = evalDir ?? path.join(root, 'engines', 'eval');
+
+    if (evalDir) {
+      this.evalDir = evalDir;
+    } else {
+      const candidateEvalDirs = [
+        path.join(path.dirname(this.enginePath), 'eval'),
+        path.join(root, 'engines', 'eval'),
+      ];
+      this.evalDir = candidateEvalDirs.find((dir) => existsSync(dir)) ?? '';
+    }
+
+    console.log(
+      `[engine] default tuning: hash=${this.tuning.hashMb}MB threads=${this.tuning.threads} pvInterval=${this.tuning.pvIntervalMs} multipv=${this.tuning.multipv}`,
+    );
   }
 
   async start(): Promise<void> {
@@ -99,7 +103,7 @@ export class ShogiEngine {
     }
 
     console.log(`Starting engine: ${this.enginePath}`);
-    console.log(`Eval dir: ${this.evalDir}`);
+    console.log(`Eval dir: ${this.evalDir || '(engine default)'}`);
 
     this.process = spawn(this.enginePath, [], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -128,7 +132,11 @@ export class ShogiEngine {
     console.log('USI init done');
 
     // Set eval dir and performance options (match ShogiGUI defaults)
-    this.send(`setoption name EvalDir value ${this.evalDir}`);
+    if (this.evalDir && existsSync(this.evalDir)) {
+      this.send(`setoption name EvalDir value ${this.evalDir}`);
+    } else {
+      console.warn('[engine] EvalDir not found; using engine default');
+    }
     await this.applyTuning(this.tuning);
 
     // Check ready
@@ -385,6 +393,32 @@ export class ShogiEngine {
       this.resolveQueue.push({ resolve, terminator });
       this.send(command);
     });
+  }
+
+  private static detectDefaultTuning(): AnalysisTuning {
+    const logicalCpu = Math.max(1, os.cpus().length);
+    const totalMemMb = Math.floor(os.totalmem() / (1024 * 1024));
+
+    if (process.platform === 'darwin') {
+      // macOS defaults: leave headroom for UI/server while keeping strong depth speed.
+      const threads = Math.min(8, Math.max(3, Math.floor(logicalCpu * 0.6)));
+      const hashMb = Math.min(2048, Math.max(768, Math.floor(totalMemMb / 8)));
+      return {
+        hashMb,
+        threads,
+        cores: threads,
+        pvIntervalMs: 300,
+        multipv: 3,
+      };
+    }
+
+    return {
+      hashMb: 1024,
+      threads: 4,
+      cores: 4,
+      pvIntervalMs: 300,
+      multipv: 3,
+    };
   }
 
   private async applyTuning(tuning: AnalysisTuning): Promise<void> {
