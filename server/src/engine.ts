@@ -17,6 +17,21 @@ export interface AnalysisLine {
   pv: string[];
 }
 
+export interface AnalysisTuning {
+  hashMb: number;
+  threads: number;
+  cores: number;
+  pvIntervalMs: number;
+  multipv: number;
+}
+
+export interface DepthBenchmarkResult {
+  tuning: AnalysisTuning;
+  reached: boolean;
+  elapsedMs: number;
+  maxDepth: number;
+}
+
 interface EvaluateOptions {
   depth?: number;
   nodes?: number;
@@ -40,8 +55,19 @@ export class ShogiEngine {
   private collectedLines: string[] = [];
   private supportedOptions = new Set<string>();
 
+  private static readonly DEFAULT_HASH_MB = 1024;
   private static readonly DEFAULT_THREADS = 8;
   private static readonly DEFAULT_CORES = 8;
+  private static readonly DEFAULT_PV_INTERVAL_MS = 300;
+  private static readonly DEFAULT_MULTIPV = 3;
+
+  private tuning: AnalysisTuning = {
+    hashMb: ShogiEngine.DEFAULT_HASH_MB,
+    threads: ShogiEngine.DEFAULT_THREADS,
+    cores: ShogiEngine.DEFAULT_CORES,
+    pvIntervalMs: ShogiEngine.DEFAULT_PV_INTERVAL_MS,
+    multipv: ShogiEngine.DEFAULT_MULTIPV,
+  };
 
   // For streaming analysis
   public analysisEmitter = new EventEmitter();
@@ -103,11 +129,7 @@ export class ShogiEngine {
 
     // Set eval dir and performance options (match ShogiGUI defaults)
     this.send(`setoption name EvalDir value ${this.evalDir}`);
-    this.send('setoption name USI_Hash value 1024');
-    this.send(`setoption name Threads value ${ShogiEngine.DEFAULT_THREADS}`);
-    this.send('setoption name PvInterval value 300');
-    this.setOptionIfSupported('Cores', String(ShogiEngine.DEFAULT_CORES));
-    this.send('setoption name MultiPV value 3');
+    await this.applyTuning(this.tuning);
 
     // Check ready
     await this.sendAndWait('isready', 'readyok');
@@ -218,15 +240,83 @@ export class ShogiEngine {
 
     if (stable) {
       // Restore default analysis performance settings.
-      this.send(`setoption name Threads value ${ShogiEngine.DEFAULT_THREADS}`);
+      this.send(`setoption name Threads value ${this.tuning.threads}`);
       await this.sendAndWait('isready', 'readyok');
     }
 
     return { eval_cp: evalCp, pv, bestmove };
   }
 
+  getCurrentTuning(): AnalysisTuning {
+    return { ...this.tuning };
+  }
+
+  async configureAnalysisTuning(tuning: Partial<AnalysisTuning>): Promise<AnalysisTuning> {
+    const merged: AnalysisTuning = {
+      ...this.tuning,
+      ...tuning,
+    };
+    await this.applyTuning(merged);
+    return { ...this.tuning };
+  }
+
+  async benchmarkDepthReach(args: {
+    sfen: string;
+    moves?: string[];
+    targetDepth: number;
+    timeoutMs: number;
+    tuning: AnalysisTuning;
+  }): Promise<DepthBenchmarkResult> {
+    if (!this.ready) throw new Error('Engine not ready');
+
+    const { sfen, moves = [], targetDepth, timeoutMs, tuning } = args;
+    await this.configureAnalysisTuning(tuning);
+
+    if (this.analyzing) {
+      await this.stopAnalysis();
+    }
+
+    const startedAt = Date.now();
+    let finished = false;
+    let maxDepth = 0;
+
+    return new Promise((resolve) => {
+      const finalize = async (reached: boolean) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeoutId);
+        this.analysisEmitter.removeListener('info', infoHandler);
+        await this.stopAnalysis();
+        resolve({
+          tuning,
+          reached,
+          elapsedMs: Date.now() - startedAt,
+          maxDepth,
+        });
+      };
+
+      const infoHandler = (info: AnalysisLine) => {
+        maxDepth = Math.max(maxDepth, info.depth);
+        if (info.multipv === 1 && info.depth >= targetDepth) {
+          void finalize(true);
+        }
+      };
+
+      const timeoutId = setTimeout(() => {
+        void finalize(false);
+      }, timeoutMs);
+
+      this.analysisEmitter.on('info', infoHandler);
+      try {
+        this.startAnalysis(sfen, moves, tuning.multipv);
+      } catch {
+        void finalize(false);
+      }
+    });
+  }
+
   /** Start infinite analysis (streaming MultiPV). Emits 'info' events. */
-  startAnalysis(sfen: string, moves: string[] = [], multipv = 5): void {
+  startAnalysis(sfen: string, moves: string[] = [], multipv = this.tuning.multipv): void {
     if (!this.ready) throw new Error('Engine not ready');
 
     // Stop any previous analysis first (synchronously send stop)
@@ -295,6 +385,16 @@ export class ShogiEngine {
       this.resolveQueue.push({ resolve, terminator });
       this.send(command);
     });
+  }
+
+  private async applyTuning(tuning: AnalysisTuning): Promise<void> {
+    this.send(`setoption name USI_Hash value ${tuning.hashMb}`);
+    this.send(`setoption name Threads value ${tuning.threads}`);
+    this.send(`setoption name PvInterval value ${tuning.pvIntervalMs}`);
+    this.setOptionIfSupported('Cores', String(tuning.cores));
+    this.send(`setoption name MultiPV value ${tuning.multipv}`);
+    await this.sendAndWait('isready', 'readyok');
+    this.tuning = { ...tuning };
   }
 
   private setOptionIfSupported(name: string, value: string): void {

@@ -4,6 +4,7 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { ShogiEngine } from './engine.js';
 import type { AnalysisLine } from './engine.js';
+import type { AnalysisTuning, DepthBenchmarkResult } from './engine.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '8765', 10);
@@ -16,6 +17,7 @@ const engine = new ShogiEngine(
   process.env.ENGINE_PATH,
   process.env.EVAL_DIR,
 );
+let benchRunning = false;
 
 // API routes
 app.get('/api/health', (_req, res) => {
@@ -116,6 +118,115 @@ app.post('/api/analyze/stop', async (_req, res) => {
     res.json({ status: 'stopped' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bench/auto', async (req, res) => {
+  if (benchRunning) {
+    res.status(409).json({ error: 'benchmark is already running' });
+    return;
+  }
+
+  const {
+    sfen,
+    moves = [],
+    targetDepth = 20,
+    timeoutMs = 20000,
+    threads = [3, 4, 5, 6],
+    hashMb = [1024, 2048],
+    pvIntervalMs = [300],
+    multipv = 3,
+  } = req.body ?? {};
+
+  if (!sfen || typeof sfen !== 'string') {
+    res.status(400).json({ error: 'sfen is required' });
+    return;
+  }
+  if (!Array.isArray(moves)) {
+    res.status(400).json({ error: 'moves must be an array' });
+    return;
+  }
+  if (typeof targetDepth !== 'number' || targetDepth < 10 || targetDepth > 40) {
+    res.status(400).json({ error: 'targetDepth must be 10-40' });
+    return;
+  }
+  if (typeof timeoutMs !== 'number' || timeoutMs < 3000 || timeoutMs > 120000) {
+    res.status(400).json({ error: 'timeoutMs must be 3000-120000' });
+    return;
+  }
+
+  const isIntArray = (arr: unknown, min: number, max: number) =>
+    Array.isArray(arr) && arr.every((v) => Number.isInteger(v) && v >= min && v <= max);
+
+  if (!isIntArray(threads, 1, 32)) {
+    res.status(400).json({ error: 'threads must be an integer array (1-32)' });
+    return;
+  }
+  if (!isIntArray(hashMb, 16, 32768)) {
+    res.status(400).json({ error: 'hashMb must be an integer array (16-32768)' });
+    return;
+  }
+  if (!isIntArray(pvIntervalMs, 50, 5000)) {
+    res.status(400).json({ error: 'pvIntervalMs must be an integer array (50-5000)' });
+    return;
+  }
+  if (!Number.isInteger(multipv) || multipv < 1 || multipv > 10) {
+    res.status(400).json({ error: 'multipv must be integer (1-10)' });
+    return;
+  }
+
+  benchRunning = true;
+  try {
+    const current = engine.getCurrentTuning();
+    const candidates: AnalysisTuning[] = [];
+    for (const th of threads) {
+      for (const hash of hashMb) {
+        for (const pvi of pvIntervalMs) {
+          candidates.push({
+            hashMb: hash,
+            threads: th,
+            cores: th,
+            pvIntervalMs: pvi,
+            multipv,
+          });
+        }
+      }
+    }
+
+    const results: DepthBenchmarkResult[] = [];
+    for (const tuning of candidates) {
+      const result = await engine.benchmarkDepthReach({
+        sfen,
+        moves,
+        targetDepth,
+        timeoutMs,
+        tuning,
+      });
+      results.push(result);
+    }
+
+    const sorted = [...results].sort((a, b) => {
+      if (a.reached !== b.reached) return a.reached ? -1 : 1;
+      if (a.reached && b.reached) return a.elapsedMs - b.elapsedMs;
+      if (a.maxDepth !== b.maxDepth) return b.maxDepth - a.maxDepth;
+      return a.elapsedMs - b.elapsedMs;
+    });
+    const best = sorted[0];
+    await engine.configureAnalysisTuning(best.tuning);
+
+    res.json({
+      targetDepth,
+      timeoutMs,
+      tested: candidates.length,
+      previous: current,
+      best,
+      results: sorted,
+    });
+  } catch (err: any) {
+    console.error('Auto bench error:', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    benchRunning = false;
   }
 });
 
