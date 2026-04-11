@@ -23,6 +23,8 @@ interface BoardProps {
 
 const FILE_LABELS = ['９', '８', '７', '６', '５', '４', '３', '２', '１'];
 const RANK_LABELS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
+const BOARD_CELL_SIZE = 38.4;
+const BOARD_SIZE = BOARD_CELL_SIZE * 9;
 
 const Board: React.FC<BoardProps> = ({
   board,
@@ -49,7 +51,10 @@ const Board: React.FC<BoardProps> = ({
 
       <div className="flex flex-col items-center">
         {/* File labels */}
-        <div className="grid grid-cols-[repeat(9,48px)] justify-items-center text-[13px] text-gray-500 mb-0.5">
+        <div
+          className="grid justify-items-center text-[13px] text-gray-500 mb-0.5"
+          style={{ gridTemplateColumns: `repeat(9, ${BOARD_CELL_SIZE}px)` }}
+        >
           {FILE_LABELS.map((f, i) => (
             <span key={i}>{f}</span>
           ))}
@@ -57,14 +62,21 @@ const Board: React.FC<BoardProps> = ({
 
         <div className="flex items-start gap-0.5">
           <div className="relative">
-            <div className="grid grid-cols-[repeat(9,48px)] grid-rows-[repeat(9,48px)] border-2 border-blue-700/70 bg-blue-100/65 backdrop-blur-[1px]">
+            <div
+              className="grid border-2 border-blue-700/70 bg-blue-100/65 backdrop-blur-[1px]"
+              style={{
+                gridTemplateColumns: `repeat(9, ${BOARD_CELL_SIZE}px)`,
+                gridTemplateRows: `repeat(9, ${BOARD_CELL_SIZE}px)`,
+              }}
+            >
               {board.map((row, ri) =>
                 row.map((cell, ci) => {
                   const isSelected = selectedCell?.row === ri && selectedCell?.col === ci;
                   return (
                     <div
                       key={`${ri}-${ci}`}
-                      className={`w-12 h-12 border border-blue-700/35 flex items-center justify-center cursor-pointer relative select-none hover:bg-cyan-100/80 ${isSelected ? 'bg-sky-500/45' : ''}`}
+                      className={`border border-blue-700/35 flex items-center justify-center cursor-pointer relative select-none hover:bg-cyan-100/80 ${isSelected ? 'bg-sky-500/45' : ''}`}
+                      style={{ width: BOARD_CELL_SIZE, height: BOARD_CELL_SIZE }}
                       onClick={() => onCellClick?.(ri, ci)}
                     >
                       {cell && (
@@ -84,7 +96,10 @@ const Board: React.FC<BoardProps> = ({
             )}
           </div>
           {/* Rank labels */}
-          <div className="flex flex-col justify-around h-[calc(48px*9+2px)] text-[13px] text-gray-500 pl-1">
+          <div
+            className="flex flex-col justify-around text-[13px] text-gray-500 pl-1"
+            style={{ height: BOARD_SIZE + 2 }}
+          >
             {RANK_LABELS.map((r, i) => (
               <span key={i}>{r}</span>
             ))}
@@ -141,7 +156,7 @@ const HandDisplay: React.FC<HandDisplayProps> = ({ side, hand, onClick, label })
 
 // ---- Arrow overlay ----
 
-const CELL_SIZE = 48;
+const CELL_SIZE = BOARD_CELL_SIZE;
 
 interface ArrowOverlayProps {
   arrows: ArrowInfo[];
@@ -169,8 +184,8 @@ const ARROW_STYLE = {
 } as const;
 
 const ArrowOverlay: React.FC<ArrowOverlayProps> = ({ arrows }) => {
-  const boardW = 9 * CELL_SIZE;
-  const boardH = 9 * CELL_SIZE;
+  const boardW = BOARD_SIZE;
+  const boardH = BOARD_SIZE;
   const lineArrows = arrows.filter((a) => a.from !== null);
   const dropArrows = arrows.filter((a) => a.from === null);
 

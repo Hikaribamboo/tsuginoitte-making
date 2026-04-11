@@ -17,6 +17,13 @@ export interface AnalysisLine {
   pv: string[];
 }
 
+interface EvaluateOptions {
+  depth?: number;
+  nodes?: number;
+  stable?: boolean;
+  searchMoves?: string[];
+}
+
 /**
  * Manages communication with a USI engine process.
  */
@@ -100,8 +107,15 @@ export class ShogiEngine {
     console.log('Engine ready');
   }
 
-  async evaluate(sfen: string, moves: string[] = [], depth = 20): Promise<EngineResult> {
+  async evaluate(sfen: string, moves: string[] = [], options: EvaluateOptions = {}): Promise<EngineResult> {
     if (!this.ready) throw new Error('Engine not ready');
+
+    const {
+      depth = 20,
+      nodes,
+      stable = false,
+      searchMoves = [],
+    } = options;
 
     // Stop any ongoing analysis
     if (this.analyzing) {
@@ -111,6 +125,13 @@ export class ShogiEngine {
     // Reset MultiPV to 1 so we only get the best line.
     // (startAnalysis may have set it to 5.)
     this.send('setoption name MultiPV value 1');
+
+    // Stable mode for repeatable choice scoring: single-thread + clear hash.
+    if (stable) {
+      this.send('setoption name Threads value 1');
+      this.send('setoption name Clear Hash');
+    }
+
     await this.sendAndWait('isready', 'readyok');
 
     let posCmd = `position sfen ${sfen}`;
@@ -119,7 +140,11 @@ export class ShogiEngine {
     }
     this.send(posCmd);
 
-    const lines = await this.sendAndWait(`go depth ${depth}`, 'bestmove');
+    const baseGoCmd = typeof nodes === 'number' ? `go nodes ${nodes}` : `go depth ${depth}`;
+    const goCmd = searchMoves.length > 0
+      ? `${baseGoCmd} searchmoves ${searchMoves.join(' ')}`
+      : baseGoCmd;
+    const lines = await this.sendAndWait(goCmd, 'bestmove');
 
     let evalCp = 0;
     let pv: string[] = [];
@@ -133,8 +158,10 @@ export class ShogiEngine {
 
       // Match only multipv 1 (or lines without multipv token) at the target depth.
       // Use word-boundary regex to avoid e.g. "depth 2" matching "depth 24".
-      const depthRe = new RegExp(`\\bdepth ${depth}\\b`);
-      if (!depthRe.test(line)) continue;
+      if (typeof nodes !== 'number') {
+        const depthRe = new RegExp(`\\bdepth ${depth}\\b`);
+        if (!depthRe.test(line)) continue;
+      }
       // Skip non-best multipv lines (multipv 2, 3, …)
       if (line.includes('multipv') && !line.includes('multipv 1 ')) continue;
 
@@ -179,6 +206,12 @@ export class ShogiEngine {
           break;
         }
       }
+    }
+
+    if (stable) {
+      // Restore default analysis performance settings.
+      this.send('setoption name Threads value 2');
+      await this.sendAndWait('isready', 'readyok');
     }
 
     return { eval_cp: evalCp, pv, bestmove };

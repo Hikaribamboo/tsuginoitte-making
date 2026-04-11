@@ -24,7 +24,7 @@ app.get('/api/health', (_req, res) => {
 
 app.post('/api/evaluate', async (req, res) => {
   try {
-    const { sfen, moves = [], depth = 20 } = req.body;
+    const { sfen, moves = [], depth = 20, nodes, stable = false, searchMoves = [] } = req.body;
 
     if (!sfen || typeof sfen !== 'string') {
       res.status(400).json({ error: 'sfen is required' });
@@ -36,12 +36,32 @@ app.post('/api/evaluate', async (req, res) => {
       return;
     }
 
+    if (!Array.isArray(searchMoves)) {
+      res.status(400).json({ error: 'searchMoves must be an array' });
+      return;
+    }
+
     if (typeof depth !== 'number' || depth < 1 || depth > 40) {
       res.status(400).json({ error: 'depth must be 1-40' });
       return;
     }
 
-    const result = await engine.evaluate(sfen, moves, depth);
+    if (nodes !== undefined && (typeof nodes !== 'number' || nodes < 1000 || nodes > 50000000)) {
+      res.status(400).json({ error: 'nodes must be 1000-50000000' });
+      return;
+    }
+
+    if (typeof stable !== 'boolean') {
+      res.status(400).json({ error: 'stable must be boolean' });
+      return;
+    }
+
+    const result = await engine.evaluate(sfen, moves, {
+      depth,
+      nodes,
+      stable,
+      searchMoves,
+    });
     res.json({
       eval_cp: result.eval_cp,
       pv: result.pv,

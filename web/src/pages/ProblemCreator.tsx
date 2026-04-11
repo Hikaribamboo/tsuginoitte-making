@@ -34,7 +34,7 @@ import { CAN_PROMOTE, pieceKanji } from "../types/shogi";
 
 type SlotKey = "correct" | "incorrect1" | "incorrect2";
 const WINRATE_SCALE = 800;
-const CHOICE_EVAL_DEPTH = 18;
+const CHOICE_EVAL_DEPTH = 24;
 const SLOT_ORDER: SlotKey[] = ["correct", "incorrect1", "incorrect2"];
 const AUTOSAVE_DEBOUNCE_MS = 3000;
 const AUTOSYNC_INTERVAL_MS = 3000;
@@ -77,10 +77,26 @@ function mergeChoicePreferLocal(
   };
 }
 
+/**
+ * Merge drafts. `lockedSlot` is the slot whose explanation the local user is
+ * currently editing — its explanation is NEVER overwritten by remote.
+ */
 function mergeDraftPreferLocal(
   local: ProblemCreatorDraft,
   remote: ProblemCreatorDraft,
+  lockedSlot?: SlotKey | null,
 ): ProblemCreatorDraft {
+  const mergeChoice = (slot: SlotKey): ChoiceDraft => {
+    const l = local.choices[slot];
+    const r = remote.choices[slot];
+    const merged = mergeChoicePreferLocal(l, r);
+    // If this slot is locked locally, always keep local explanation.
+    if (slot === lockedSlot) {
+      return { ...merged, explanation: l.explanation };
+    }
+    return merged;
+  };
+
   return {
     version: 1,
     favoriteId: local.favoriteId,
@@ -97,20 +113,13 @@ function mergeDraftPreferLocal(
     ),
     activeSlot: local.activeSlot ?? remote.activeSlot,
     choices: {
-      correct: mergeChoicePreferLocal(
-        local.choices.correct,
-        remote.choices.correct,
-      ),
-      incorrect1: mergeChoicePreferLocal(
-        local.choices.incorrect1,
-        remote.choices.incorrect1,
-      ),
-      incorrect2: mergeChoicePreferLocal(
-        local.choices.incorrect2,
-        remote.choices.incorrect2,
-      ),
+      correct: mergeChoice("correct"),
+      incorrect1: mergeChoice("incorrect1"),
+      incorrect2: mergeChoice("incorrect2"),
     },
     savedAt: new Date().toISOString(),
+    editingSlot: local.editingSlot ?? null,
+    editingAt: local.editingSlot ? new Date().toISOString() : null,
   };
 }
 
@@ -179,13 +188,14 @@ const ProblemCreator: React.FC = () => {
   });
 
   const handleCandidateMoves = useCallback((moves: BestMove[]) => {
-    setCandidateMoves(moves.slice(0, 3));
+    setCandidateMoves(moves);
   }, []);
 
-  const arrows: ArrowInfo[] = candidateMoves.slice(0, 3).map((m, idx) => ({
+  const arrows: ArrowInfo[] = candidateMoves.map((m, idx) => ({
     from: m.from,
     to: m.to,
-    style: idx === 0 ? "primary" : idx === 1 ? "secondary" : "tertiary",
+    style:
+      idx === 0 ? "primary" : idx === 1 ? "secondary" : ("tertiary" as const),
     showNextLabel: idx === 1,
   }));
 
@@ -222,6 +232,11 @@ const ProblemCreator: React.FC = () => {
   >("idle");
   const lastSyncedSignatureRef = React.useRef<string>("");
   const lastSyncedAtRef = React.useRef<string>("");
+  const inputFocusedRef = React.useRef(false);
+  const [editingSlot, setEditingSlot] = useState<SlotKey | null>(null);
+  const [remoteEditingSlot, setRemoteEditingSlot] = useState<SlotKey | null>(
+    null,
+  );
 
   const buildDraft = useCallback(
     (): ProblemCreatorDraft => ({
@@ -238,6 +253,8 @@ const ProblemCreator: React.FC = () => {
       activeSlot,
       choices,
       savedAt: new Date().toISOString(),
+      editingSlot: editingSlot ?? null,
+      editingAt: editingSlot ? new Date().toISOString() : null,
     }),
     [
       favoriteId,
@@ -251,6 +268,7 @@ const ProblemCreator: React.FC = () => {
       rootEvalPercent,
       activeSlot,
       choices,
+      editingSlot,
     ],
   );
 
@@ -320,7 +338,11 @@ const ProblemCreator: React.FC = () => {
               remoteDraft.favoriteId === favoriteId &&
               remoteDraft.rootSfen === rootSfen
             ) {
-              draftToSave = mergeDraftPreferLocal(draft, remoteDraft);
+              draftToSave = mergeDraftPreferLocal(
+                draft,
+                remoteDraft,
+                editingSlot,
+              );
             }
           }
 
@@ -338,7 +360,14 @@ const ProblemCreator: React.FC = () => {
     return () => {
       window.clearTimeout(timerId);
     };
-  }, [favoriteId, rootSfen, draftRestored, buildDraft, applyDraft]);
+  }, [
+    favoriteId,
+    rootSfen,
+    draftRestored,
+    buildDraft,
+    applyDraft,
+    editingSlot,
+  ]);
 
   React.useEffect(() => {
     if (!favoriteId || !rootSfen || !draftRestored) return;
@@ -365,8 +394,24 @@ const ProblemCreator: React.FC = () => {
           )
             return;
 
-          if (localIsDirty) {
-            const mergedDraft = mergeDraftPreferLocal(localDraft, remoteDraft);
+          // Check if the remote side has a slot locked for editing.
+          const remoteLockedSlot = remoteDraft.editingSlot ?? null;
+          const remoteEditingAt = remoteDraft.editingAt ?? null;
+          const LOCK_TIMEOUT_MS = 15_000;
+          const remoteEditingExpired =
+            !remoteEditingAt ||
+            Date.now() - new Date(remoteEditingAt).getTime() > LOCK_TIMEOUT_MS;
+          const effectiveRemoteLock =
+            remoteLockedSlot && !remoteEditingExpired ? remoteLockedSlot : null;
+          setRemoteEditingSlot(effectiveRemoteLock);
+
+          if (localIsDirty && inputFocusedRef.current) {
+            // User is actively editing — local wins, protect locked slot.
+            const mergedDraft = mergeDraftPreferLocal(
+              localDraft,
+              remoteDraft,
+              editingSlot,
+            );
             await saveProblemDraftForFavorite(favoriteId, mergedDraft);
             applyDraft(mergedDraft);
             lastSyncedSignatureRef.current = draftSignature(mergedDraft);
@@ -382,10 +427,36 @@ const ProblemCreator: React.FC = () => {
             return;
           }
 
-          applyDraft(remoteDraft);
-          lastSyncedSignatureRef.current = remoteSignature;
-          lastSyncedAtRef.current = snapshot.updatedAt;
-          setMessage("途中保存データを同期しました");
+          // Remote wins, but protect locally-locked slot explanation.
+          if (editingSlot) {
+            const safeDraft: ProblemCreatorDraft = {
+              ...remoteDraft,
+              choices: {
+                ...remoteDraft.choices,
+                [editingSlot]: {
+                  ...remoteDraft.choices[editingSlot],
+                  explanation: localDraft.choices[editingSlot].explanation,
+                },
+              },
+              editingSlot: editingSlot,
+              editingAt: new Date().toISOString(),
+            };
+            applyDraft(safeDraft);
+            lastSyncedSignatureRef.current = draftSignature(safeDraft);
+            lastSyncedAtRef.current = snapshot.updatedAt;
+            setMessage("途中保存データを同期しました");
+          } else if (effectiveRemoteLock) {
+            // Remote user is editing a slot — accept remote fully.
+            applyDraft(remoteDraft);
+            lastSyncedSignatureRef.current = remoteSignature;
+            lastSyncedAtRef.current = snapshot.updatedAt;
+            setMessage("途中保存データを同期しました");
+          } else {
+            applyDraft(remoteDraft);
+            lastSyncedSignatureRef.current = remoteSignature;
+            lastSyncedAtRef.current = snapshot.updatedAt;
+            setMessage("途中保存データを同期しました");
+          }
         } catch {
           // ignore periodic sync failures
         }
@@ -395,7 +466,36 @@ const ProblemCreator: React.FC = () => {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [favoriteId, rootSfen, draftRestored, applyDraft, buildDraft]);
+  }, [
+    favoriteId,
+    rootSfen,
+    draftRestored,
+    applyDraft,
+    buildDraft,
+    editingSlot,
+  ]);
+
+  // Track whether any text input / textarea is focused.
+  React.useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) {
+        inputFocusedRef.current = true;
+      }
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) {
+        inputFocusedRef.current = false;
+      }
+    };
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    return () => {
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
 
   // ---- Move handling ----
 
@@ -628,11 +728,11 @@ const ProblemCreator: React.FC = () => {
       setMessage("");
 
       try {
-        const result = await evaluatePosition(
-          rootSfen,
-          [choice.usi],
-          CHOICE_EVAL_DEPTH,
-        );
+        const result = await evaluatePosition(rootSfen, [], {
+          depth: CHOICE_EVAL_DEPTH,
+          searchMoves: [choice.usi],
+          stable: true,
+        });
 
         // Keep cp as raw engine output.
         const rawCp = result.eval_cp;
@@ -649,14 +749,14 @@ const ProblemCreator: React.FC = () => {
             ...prev,
             [slot]: {
               ...prev[slot],
-              eval_cp: rawCp,
+              eval_cp: senteCp,
               eval_percent: choicePct,
               line: result.pv.slice(0, Math.min(result.pv.length, 14)),
             },
           };
 
           if (slot === "correct") {
-            setRootEvalCp(rawCp);
+            setRootEvalCp(senteCp);
             setRootEvalPercent(choicePct);
           }
 
@@ -959,6 +1059,28 @@ const ProblemCreator: React.FC = () => {
                 </button>
               )}
             </div>
+            <div className="flex gap-2 mt-1.5">
+              <button
+                onClick={() => {
+                  store.undoMove();
+                  setSelectedCell(null);
+                  setSelectedHandPiece(null);
+                }}
+                disabled={!analysisMode || store.moveHistory.length === 0}
+              >
+                ↩ 一手戻す
+              </button>
+              <button
+                onClick={() => {
+                  store.redoMove();
+                  setSelectedCell(null);
+                  setSelectedHandPiece(null);
+                }}
+                disabled={!analysisMode || !store.canRedo()}
+              >
+                ↪ 一手進める
+              </button>
+            </div>
             {promotionChoice && (
               <div className="flex items-center gap-2.5 px-3 py-2 bg-amber-50 border-2 border-amber-400 rounded-md text-[13px] font-semibold">
                 <span>成りますか？</span>
@@ -1016,10 +1138,16 @@ const ProblemCreator: React.FC = () => {
                     slot={slot}
                     draft={choices[slot]}
                     isActive={activeSlot === slot}
+                    isEditing={editingSlot === slot}
+                    remoteEditing={
+                      remoteEditingSlot === slot && editingSlot !== slot
+                    }
                     onActivate={() => {
                       const nextSlot = activeSlot === slot ? null : slot;
                       setActiveSlot(nextSlot);
-                      if (nextSlot !== null) {
+                      // Only switch to registration mode when user needs to pick a move.
+                      // If the slot already has a move, stay in analysis mode.
+                      if (nextSlot !== null && !choices[nextSlot].usi) {
                         setAnalysisMode(false);
                         store.loadFromSfen(rootSfen);
                       }
@@ -1035,6 +1163,10 @@ const ProblemCreator: React.FC = () => {
                     onExplanationChange={(text) =>
                       handleExplanationChange(slot, text)
                     }
+                    onExplanationFocus={() => setEditingSlot(slot)}
+                    onExplanationBlur={() => {
+                      if (editingSlot === slot) setEditingSlot(null);
+                    }}
                     onClear={() => handleClearSlot(slot)}
                   />
                 ),

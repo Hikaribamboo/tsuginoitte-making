@@ -83,10 +83,11 @@ const FavoritesList: React.FC = () => {
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {favorites.map((fav) => (
+          {favorites.map((fav, index) => (
             <div key={fav.id} className="flex justify-between items-start px-4 py-3 bg-white border border-gray-200 rounded-md gap-4">
               <MiniBoard sfen={fav.root_sfen} size={18} />
               <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-gray-600 mb-1">#{fav.id ?? index + 1}</div>
                 {fav.tags && fav.tags.length > 0 && (
                   <div className="flex gap-1 mt-1">
                     {fav.tags.map((t) => (

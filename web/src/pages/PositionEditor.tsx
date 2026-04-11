@@ -38,16 +38,14 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
   const [candidateMoves, setCandidateMoves] = useState<BestMove[]>([]);
 
   const handleCandidateMoves = useCallback((moves: BestMove[]) => {
-    setCandidateMoves(moves.slice(0, 3));
+    setCandidateMoves(moves);
   }, []);
 
   const arrows: ArrowInfo[] = candidateMoves
-    .filter((m) => m.from !== null)
-    .slice(0, 3)
     .map((m, idx) => ({
       from: m.from,
       to: m.to,
-      style: idx === 0 ? 'primary' : idx === 1 ? 'secondary' : 'tertiary',
+      style: idx === 0 ? 'primary' : idx === 1 ? 'secondary' : 'tertiary' as const,
       showNextLabel: idx === 1,
     }));
 

@@ -16,6 +16,10 @@ export interface ProblemCreatorDraft {
   activeSlot: SlotKey | null;
   choices: Record<SlotKey, ChoiceDraft>;
   savedAt: string;
+  /** Slot currently being edited (explanation input focused). null = no one editing. */
+  editingSlot?: SlotKey | null;
+  /** ISO timestamp of when editingSlot was set. */
+  editingAt?: string | null;
 }
 
 export function isProblemCreatorDraft(value: unknown): value is ProblemCreatorDraft {
