@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import PositionEditor from './pages/PositionEditor';
 import FavoritesList from './pages/FavoritesList';
 import ProblemCreator from './pages/ProblemCreator';
+import PasteProblemCreator from './pages/PasteProblemCreator';
 
 const PositionEditorWrapper: React.FC = () => {
   const location = useLocation();
@@ -31,6 +32,7 @@ const App: React.FC = () => {
           <Route path="/" element={<PositionEditorWrapper />} />
           <Route path="/favorites" element={<FavoritesList />} />
           <Route path="/problem" element={<ProblemCreator />} />
+          <Route path="/paste-problem" element={<PasteProblemCreator />} />
         </Routes>
       </Layout>
     </BrowserRouter>
