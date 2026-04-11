@@ -56,8 +56,8 @@ export class ShogiEngine {
   private supportedOptions = new Set<string>();
 
   private static readonly DEFAULT_HASH_MB = 1024;
-  private static readonly DEFAULT_THREADS = 8;
-  private static readonly DEFAULT_CORES = 8;
+  private static readonly DEFAULT_THREADS = 4;
+  private static readonly DEFAULT_CORES = 4;
   private static readonly DEFAULT_PV_INTERVAL_MS = 300;
   private static readonly DEFAULT_MULTIPV = 3;
 
@@ -82,7 +82,7 @@ export class ShogiEngine {
       this.enginePath = path.join(
         root, 'engines',
         isMac ? 'mac' : 'windows',
-        isMac ? 'YaneuraOu.exe' : 'AobaNNUE_AVX2.exe',
+        isMac ? 'YaneuraOu.exe' : 'AobaNNUE_ZEN2.exe',
       );
     }
     this.evalDir = evalDir ?? path.join(root, 'engines', 'eval');
