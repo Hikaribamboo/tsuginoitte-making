@@ -3,4 +3,5 @@ dist/
 .env
 *.local
 
-engines/eval/engines/eval/
+engines/
+engines/eval/
