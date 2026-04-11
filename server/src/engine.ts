@@ -107,7 +107,7 @@ export class ShogiEngine {
     this.send(`setoption name Threads value ${ShogiEngine.DEFAULT_THREADS}`);
     this.send('setoption name PvInterval value 300');
     this.setOptionIfSupported('Cores', String(ShogiEngine.DEFAULT_CORES));
-    this.send('setoption name MultiPV value 5');
+    this.send('setoption name MultiPV value 3');
 
     // Check ready
     await this.sendAndWait('isready', 'readyok');

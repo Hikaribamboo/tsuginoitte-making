@@ -87,7 +87,7 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
 
     const es = startAnalysisStream(
       sfenRef.current,
-      5,
+      3,
       (info) => {
         const next = new Map(bufferedLinesRef.current);
         next.set(info.multipv, info);

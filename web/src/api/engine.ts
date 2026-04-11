@@ -54,7 +54,7 @@ export async function evaluatePosition(
  */
 export function startAnalysisStream(
   sfen: string,
-  multipv = 5,
+  multipv = 3,
   onInfo: (line: AnalysisLine) => void,
   onError?: (err: string) => void,
 ): EventSource {
