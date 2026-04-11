@@ -101,9 +101,11 @@ export class ShogiEngine {
     this.captureSupportedOptions(usiLines);
     console.log('USI init done');
 
-    // Set eval dir
+    // Set eval dir and performance options (match ShogiGUI defaults)
     this.send(`setoption name EvalDir value ${this.evalDir}`);
+    this.send('setoption name USI_Hash value 1024');
     this.send(`setoption name Threads value ${ShogiEngine.DEFAULT_THREADS}`);
+    this.send('setoption name PvInterval value 300');
     this.setOptionIfSupported('Cores', String(ShogiEngine.DEFAULT_CORES));
     this.send('setoption name MultiPV value 5');
 
