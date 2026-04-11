@@ -43,6 +43,9 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
   const [error, setError] = useState('');
   const eventSourceRef = useRef<EventSource | null>(null);
   const sfenRef = useRef(sfen);
+  const bufferedLinesRef = useRef<Map<number, AnalysisLine>>(new Map());
+  const bufferedDepthRef = useRef(0);
+  const timerRef = useRef<number | null>(null);
 
   // Keep sfenRef in sync
   useEffect(() => {
@@ -52,6 +55,10 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
   // Clean up on unmount
   useEffect(() => {
     return () => {
+      if (timerRef.current !== null) {
+        window.clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
       eventSourceRef.current?.close();
     };
   }, []);
@@ -73,6 +80,8 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
     setError('');
     setLines(new Map());
     setDepth(0);
+    bufferedLinesRef.current = new Map();
+    bufferedDepthRef.current = 0;
     onBestMove?.(null);
     onCandidateMoves?.([]);
 
@@ -80,25 +89,37 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
       sfenRef.current,
       5,
       (info) => {
-        setLines((prev) => {
-          const next = new Map(prev);
-          next.set(info.multipv, info);
-          return next;
-        });
-        setDepth((prev) => Math.max(prev, info.depth));
+        const next = new Map(bufferedLinesRef.current);
+        next.set(info.multipv, info);
+        bufferedLinesRef.current = next;
+        bufferedDepthRef.current = Math.max(bufferedDepthRef.current, info.depth);
       },
       (err) => {
         setError(err);
       },
     );
 
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+    }
+    timerRef.current = window.setInterval(() => {
+      setLines(new Map(bufferedLinesRef.current));
+      setDepth(bufferedDepthRef.current);
+    }, 2000);
+
     eventSourceRef.current = es;
     setAnalyzing(true);
   }, [onBestMove, onCandidateMoves]);
 
   const stopAnalysis = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
+    bufferedLinesRef.current = new Map();
+    bufferedDepthRef.current = 0;
     setAnalyzing(false);
     setLines(new Map());
     setDepth(0);
@@ -118,6 +139,7 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
     () => Array.from(lines.values()).sort((a, b) => a.multipv - b.multipv),
     [lines],
   );
+  const canShowAnalysis = depth >= 20;
 
   // Engine score is from side-to-move perspective. Convert to sente-fixed perspective.
   const senteSign = useMemo(() => {
@@ -127,13 +149,19 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
 
   // Emit best move arrow
   useEffect(() => {
+    if (!canShowAnalysis) {
+      onCandidateMoves?.([]);
+      onBestMove?.(null);
+      return;
+    }
+
     const topMoves = sortedLines
       .map((line) => parseBestMove(line.pv))
       .filter((m): m is BestMove => m !== null);
 
     onCandidateMoves?.(topMoves);
     onBestMove?.(topMoves[0] ?? null);
-  }, [sortedLines, onBestMove, onCandidateMoves]);
+  }, [canShowAnalysis, sortedLines, onBestMove, onCandidateMoves]);
 
   return (
     <div className="mt-1 bg-white border border-gray-200 rounded-md px-3 py-2.5 min-w-[300px] max-w-[550px]">
@@ -150,7 +178,7 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
 
       {error && <div className="bg-red-50 border border-red-300 text-red-700 px-2.5 py-1.5 rounded text-xs mb-1.5">{error}</div>}
 
-      {sortedLines.length > 0 && (
+      {canShowAnalysis && sortedLines.length > 0 && (
         <div className="max-h-[280px] overflow-y-auto">
           <table className="w-full border-collapse text-xs table-fixed">
             <thead>
@@ -185,8 +213,12 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
         </div>
       )}
 
-      {analyzing && sortedLines.length === 0 && (
-        <div className="text-gray-400 text-[13px] py-2 animate-pulse">計算中...</div>
+      {analyzing && !canShowAnalysis && (
+        <div className="text-gray-500 text-[13px] py-2 animate-pulse">検討中です</div>
+      )}
+
+      {analyzing && canShowAnalysis && sortedLines.length === 0 && (
+        <div className="text-gray-400 text-[13px] py-2 animate-pulse">検討中です</div>
       )}
     </div>
   );

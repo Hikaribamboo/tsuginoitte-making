@@ -38,6 +38,10 @@ export class ShogiEngine {
     terminator: string;
   }> = [];
   private collectedLines: string[] = [];
+  private supportedOptions = new Set<string>();
+
+  private static readonly DEFAULT_THREADS = 4;
+  private static readonly DEFAULT_CORES = -4;
 
   // For streaming analysis
   public analysisEmitter = new EventEmitter();
@@ -93,12 +97,14 @@ export class ShogiEngine {
     });
 
     // Initialize USI
-    await this.sendAndWait('usi', 'usiok');
+    const usiLines = await this.sendAndWait('usi', 'usiok');
+    this.captureSupportedOptions(usiLines);
     console.log('USI init done');
 
     // Set eval dir
     this.send(`setoption name EvalDir value ${this.evalDir}`);
-    this.send('setoption name Threads value 2');
+    this.send(`setoption name Threads value ${ShogiEngine.DEFAULT_THREADS}`);
+    this.setOptionIfSupported('Cores', String(ShogiEngine.DEFAULT_CORES));
     this.send('setoption name MultiPV value 5');
 
     // Check ready
@@ -210,7 +216,7 @@ export class ShogiEngine {
 
     if (stable) {
       // Restore default analysis performance settings.
-      this.send('setoption name Threads value 2');
+      this.send(`setoption name Threads value ${ShogiEngine.DEFAULT_THREADS}`);
       await this.sendAndWait('isready', 'readyok');
     }
 
@@ -287,6 +293,23 @@ export class ShogiEngine {
       this.resolveQueue.push({ resolve, terminator });
       this.send(command);
     });
+  }
+
+  private setOptionIfSupported(name: string, value: string): void {
+    if (!this.supportedOptions.has(name)) {
+      console.warn(`[engine] option not supported: ${name}`);
+      return;
+    }
+    this.send(`setoption name ${name} value ${value}`);
+  }
+
+  private captureSupportedOptions(lines: string[]): void {
+    for (const line of lines) {
+      if (!line.startsWith('option name ')) continue;
+      const match = line.match(/^option name\s+(.+?)\s+type\s+/);
+      if (!match) continue;
+      this.supportedOptions.add(match[1]);
+    }
   }
 
   private processBuffer(): void {
