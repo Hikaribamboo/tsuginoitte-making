@@ -1,10 +1,16 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { ShogiEngine } from './engine.js';
 import type { AnalysisLine } from './engine.js';
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '8765', 10);
+
+// tsuginoitte-making ルート
+const ROOT_DIR = path.resolve(import.meta.dirname, '..', '..');
+// Vite の build 出力先
+const WEB_DIST_DIR = path.join(ROOT_DIR, 'web', 'dist');
 
 app.use(cors());
 app.use(express.json());
@@ -14,12 +20,11 @@ const engine = new ShogiEngine(
   process.env.EVAL_DIR,
 );
 
-// Health check
+// API routes
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Evaluate a position (single shot)
 app.post('/api/evaluate', async (req, res) => {
   try {
     const { sfen, moves = [], depth = 20 } = req.body;
@@ -51,21 +56,19 @@ app.post('/api/evaluate', async (req, res) => {
   }
 });
 
-// Start streaming analysis (SSE)
 app.get('/api/analyze', (req, res) => {
   const sfen = req.query.sfen as string;
-  const multipv = parseInt(req.query.multipv as string ?? '5', 10);
+  const multipv = parseInt((req.query.multipv as string) ?? '5', 10);
 
   if (!sfen) {
     res.status(400).json({ error: 'sfen is required' });
     return;
   }
 
-  // SSE headers
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
+    Connection: 'keep-alive',
   });
 
   const handler = (info: AnalysisLine) => {
@@ -83,14 +86,12 @@ app.get('/api/analyze', (req, res) => {
     return;
   }
 
-  // Client disconnects → stop analysis
   req.on('close', async () => {
     engine.analysisEmitter.removeListener('info', handler);
     await engine.stopAnalysis();
   });
 });
 
-// Stop analysis
 app.post('/api/analyze/stop', async (_req, res) => {
   try {
     await engine.stopAnalysis();
@@ -100,12 +101,21 @@ app.post('/api/analyze/stop', async (_req, res) => {
   }
 });
 
+// ここから Web 配信
+app.use(express.static(WEB_DIST_DIR));
+
+// SPA フォールバック
+app.get(/^(?!\/api).*/, (_req, res) => {
+  res.sendFile(path.join(WEB_DIST_DIR, 'index.html'));
+});
+
 // Start server after engine is ready
 async function main() {
   try {
     await engine.start();
     app.listen(PORT, () => {
       console.log(`Engine API server running on http://localhost:${PORT}`);
+      console.log(`Serving web from ${WEB_DIST_DIR}`);
     });
   } catch (err) {
     console.error('Failed to start engine:', err);
@@ -113,7 +123,6 @@ async function main() {
   }
 }
 
-// Graceful shutdown
 process.on('SIGINT', () => {
   console.log('Shutting down...');
   engine.stop();
