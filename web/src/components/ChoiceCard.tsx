@@ -5,12 +5,16 @@ interface ChoiceCardProps {
   slot: 'correct' | 'incorrect1' | 'incorrect2';
   draft: ChoiceDraft;
   isActive: boolean;
+  isEditing: boolean;
+  remoteEditing: boolean;
   onActivate: () => void;
   onEvaluate: () => void;
   evalLoading?: boolean;
   onEvalCpChange: (value: number | null) => void;
   onEvalPercentChange: (value: number | null) => void;
   onExplanationChange: (text: string) => void;
+  onExplanationFocus: () => void;
+  onExplanationBlur: () => void;
   onClear: () => void;
 }
 
@@ -24,18 +28,26 @@ const ChoiceCard: React.FC<ChoiceCardProps> = ({
   slot,
   draft,
   isActive,
+  isEditing,
+  remoteEditing,
   onActivate,
   onEvaluate,
   evalLoading = false,
   onEvalCpChange,
   onEvalPercentChange,
   onExplanationChange,
+  onExplanationFocus,
+  onExplanationBlur,
   onClear,
 }) => {
   return (
     <div className={`border-2 rounded-md px-3 py-2.5 bg-white transition-colors w-[392px] max-w-full ${isActive ? 'border-blue-600 bg-[#f8faff]' : draft.usi ? 'border-emerald-300' : 'border-gray-200'}`}>
       <div className="flex justify-between items-center mb-1">
-        <span className="font-semibold text-sm">{SLOT_LABELS[slot]}</span>
+        <span className="font-semibold text-sm">
+          {SLOT_LABELS[slot]}
+          {isEditing && <span className="ml-1.5 text-blue-500" title="自分が編集中">✏️</span>}
+          {remoteEditing && !isEditing && <span className="ml-1.5 text-orange-400" title="他のユーザーが編集中">🔒</span>}
+        </span>
         {draft.usi && (
           <button className="text-[11px] px-1.5 py-0.5 text-red-600 border-red-300 hover:bg-red-50" onClick={onClear} type="button">
             クリア
@@ -88,6 +100,8 @@ const ChoiceCard: React.FC<ChoiceCardProps> = ({
             placeholder="解説を入力..."
             value={draft.explanation}
             onChange={(e) => onExplanationChange(e.target.value)}
+            onFocus={onExplanationFocus}
+            onBlur={onExplanationBlur}
             rows={2}
           />
         </div>

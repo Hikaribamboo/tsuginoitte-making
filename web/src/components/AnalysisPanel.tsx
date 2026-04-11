@@ -128,7 +128,6 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
   // Emit best move arrow
   useEffect(() => {
     const topMoves = sortedLines
-      .slice(0, 3)
       .map((line) => parseBestMove(line.pv))
       .filter((m): m is BestMove => m !== null);
 

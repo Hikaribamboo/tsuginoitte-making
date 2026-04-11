@@ -7,6 +7,13 @@ export interface EngineEvalResult {
   pv: string[];
 }
 
+export interface EvaluateOptions {
+  depth?: number;
+  nodes?: number;
+  stable?: boolean;
+  searchMoves?: string[];
+}
+
 export interface AnalysisLine {
   multipv: number;
   depth: number;
@@ -21,12 +28,19 @@ export interface AnalysisLine {
 export async function evaluatePosition(
   sfen: string,
   moves: string[] = [],
-  depth = 20,
+  options: EvaluateOptions = {},
 ): Promise<EngineEvalResult> {
+  const {
+    depth = 20,
+    nodes,
+    stable = false,
+    searchMoves = [],
+  } = options;
+
   const res = await fetch(`${ENGINE_API}/api/evaluate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sfen, moves, depth }),
+    body: JSON.stringify({ sfen, moves, depth, nodes, stable, searchMoves }),
   });
   if (!res.ok) {
     const text = await res.text();

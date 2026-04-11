@@ -84,4 +84,4 @@ export const TAG_CATEGORIES: TagCategory[] = [
 
 export const AVAILABLE_TAGS = TAG_CATEGORIES.flatMap((g) => g.tags);
 
-export const DEFAULT_PROMPT = '手の広い中終盤戦';
+export const DEFAULT_PROMPT = '最善手を選んでください';
