@@ -40,8 +40,8 @@ export class ShogiEngine {
   private collectedLines: string[] = [];
   private supportedOptions = new Set<string>();
 
-  private static readonly DEFAULT_THREADS = 6;
-  private static readonly DEFAULT_CORES = 10;
+  private static readonly DEFAULT_THREADS = 8;
+  private static readonly DEFAULT_CORES = 8;
 
   // For streaming analysis
   public analysisEmitter = new EventEmitter();
