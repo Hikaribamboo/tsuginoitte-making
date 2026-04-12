@@ -93,3 +93,36 @@ export function startAnalysisStream(
 export async function stopAnalysis(): Promise<void> {
   await fetch(`${ENGINE_API}/api/analyze/stop`, { method: 'POST' });
 }
+
+// ---- Explanation generation via Anthropic ----
+
+export interface ExplanationChoice {
+  label: string;
+  eval_cp: number | null;
+  eval_percent: number | null;
+  line_labels: string;
+  is_correct: boolean;
+}
+
+export interface GeneratedExplanation {
+  index: number;
+  explanation: string;
+}
+
+export async function generateExplanations(
+  sfen: string,
+  sideToMove: 'sente' | 'gote',
+  choices: ExplanationChoice[],
+): Promise<GeneratedExplanation[]> {
+  const res = await fetch(`${ENGINE_API}/api/generate-explanations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sfen, sideToMove, choices }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API error ${res.status}: ${text}`);
+  }
+  const data = await res.json();
+  return data.explanations;
+}

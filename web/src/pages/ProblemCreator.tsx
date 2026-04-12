@@ -1320,11 +1320,12 @@ const ProblemCreator: React.FC = () => {
 
 // Helper to extract fields for saving
 function pickChoiceFields(draft: ChoiceDraft) {
+  const line = draft.line[0] === draft.usi ? draft.line.slice(1) : draft.line;
   return {
     usi: draft.usi,
     label: draft.label,
     explanation: draft.explanation,
-    line: draft.line,
+    line,
     eval_cp: draft.eval_cp,
     eval_percent: draft.eval_percent,
   };

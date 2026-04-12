@@ -39,7 +39,7 @@ export function parseKifMoveToken(
   token: string,
   prevDest: { file: number; rank: number } | null,
 ): ParsedKifMove | null {
-  let s = token.trim();
+  let s = token.trim().replace(/[ \t　]+/g, '');
 
   // Strip side marker ▲△☗☖
   if (/^[▲△☗☖]/.test(s)) {
@@ -188,14 +188,16 @@ export interface ReadingLineResult {
  *   *検討 候補1 時間 00:06.0 深さ 27/43 ノード数 44995318 評価値 -7 読み筋 △８四歩(83) ▲７八金(69) ...
  */
 export function parseReadingLine(text: string): ReadingLineResult | null {
+  const normalizedText = text.replace(/\r\n?/g, '\n');
+
   // Extract evaluation value
-  const evalMatch = text.match(/評価値\s+(-?\d+)/);
+  const evalMatch = normalizedText.match(/評価値\s+(-?\d+)/);
   const evalCp = evalMatch ? parseInt(evalMatch[1], 10) : null;
 
   // Extract move sequence after "読み筋"
-  const lineMatch = text.match(/読み筋[\s　]+(.+)$/);
+  const lineMatch = normalizedText.match(/読み筋[\s　]+([\s\S]+)/);
   if (!lineMatch) return null;
-  const lineText = lineMatch[1].trim();
+  const lineText = lineMatch[1].replace(/\n/g, ' ').replace(/[ \t　]+/g, ' ').trim();
 
   // Split by side markers (▲△☗☖)
   const moveTexts = lineText.match(/[▲△☗☖][^▲△☗☖]+/g);

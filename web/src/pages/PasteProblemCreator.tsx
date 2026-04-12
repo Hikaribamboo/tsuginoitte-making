@@ -4,10 +4,11 @@ import PasteChoiceCard from '../components/PasteChoiceCard';
 import ReadingLineModal from '../components/ReadingLineModal';
 import TagSelector from '../components/TagSelector';
 import { parseSfen, toUsiSquare } from '../lib/sfen';
-import { usiToLabel } from '../lib/usi-to-label';
+import { usiToLabel, pvToJapanese } from '../lib/usi-to-label';
 import { cpToWinRatePercentFromRootSfen } from '../lib/eval-percent';
 import { parseKifRecord, parseReadingLine } from '../lib/kif-parser';
 import { saveProblem, getNextDisplayNo } from '../api/problems';
+import { generateExplanations } from '../api/engine';
 import { DEFAULT_PROMPT } from '../lib/constants';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
 import type { ChoiceDraft } from '../types/problem';
@@ -16,7 +17,9 @@ import { CAN_PROMOTE, pieceKanji } from '../types/shogi';
 
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 const WINRATE_SCALE = 800;
-const BOARD_SCALE = 0.82;
+const BOARD_SCALE = 0.72;
+const AUTOSAVE_INTERVAL_MS = 10_000;
+const LOCALSTORAGE_KEY = 'paste-problem-draft';
 
 const EMPTY_CHOICE: ChoiceDraft = {
   slotLabel: '',
@@ -28,28 +31,62 @@ const EMPTY_CHOICE: ChoiceDraft = {
   eval_percent: null,
 };
 
+interface PasteDraft {
+  kifText: string;
+  rootSfen: string;
+  kifMoves: string[];
+  choices: Record<SlotKey, ChoiceDraft>;
+  readingLineInputs: Record<SlotKey, string>;
+  prompt: string;
+  tags: string[];
+  displayNo: number | null;
+  problemRating: number;
+  rootEvalCp: number | null;
+  rootEvalPercent: number | null;
+  savedAt: string;
+}
+
+function loadDraft(): PasteDraft | null {
+  try {
+    const raw = localStorage.getItem(LOCALSTORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as PasteDraft;
+  } catch {
+    return null;
+  }
+}
+
+function persistDraft(draft: PasteDraft) {
+  try {
+    localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(draft));
+  } catch { /* ignore quota errors */ }
+}
+
 const PasteProblemCreator: React.FC = () => {
+  // ---- Restore draft from localStorage ----
+  const saved = useMemo(() => loadDraft(), []);
+
   // ---- KIF state ----
-  const [kifText, setKifText] = useState('');
+  const [kifText, setKifText] = useState(saved?.kifText ?? '');
   const [kifError, setKifError] = useState('');
-  const [rootSfen, setRootSfen] = useState('');
-  const [kifMoves, setKifMoves] = useState<string[]>([]);
+  const [rootSfen, setRootSfen] = useState(saved?.rootSfen ?? '');
+  const [kifMoves, setKifMoves] = useState<string[]>(saved?.kifMoves ?? []);
 
   const parsed = useMemo(() => (rootSfen ? parseSfen(rootSfen) : null), [rootSfen]);
 
   // ---- Choice drafts ----
-  const [choices, setChoices] = useState<Record<SlotKey, ChoiceDraft>>({
-    correct: { ...EMPTY_CHOICE, slotLabel: 'correct' },
-    incorrect1: { ...EMPTY_CHOICE, slotLabel: 'incorrect1' },
-    incorrect2: { ...EMPTY_CHOICE, slotLabel: 'incorrect2' },
-  });
+  const [choices, setChoices] = useState<Record<SlotKey, ChoiceDraft>>(
+    saved?.choices ?? {
+      correct: { ...EMPTY_CHOICE, slotLabel: 'correct' },
+      incorrect1: { ...EMPTY_CHOICE, slotLabel: 'incorrect1' },
+      incorrect2: { ...EMPTY_CHOICE, slotLabel: 'incorrect2' },
+    },
+  );
 
   // Reading-line inputs / errors per card
-  const [readingLineInputs, setReadingLineInputs] = useState<Record<SlotKey, string>>({
-    correct: '',
-    incorrect1: '',
-    incorrect2: '',
-  });
+  const [readingLineInputs, setReadingLineInputs] = useState<Record<SlotKey, string>>(
+    saved?.readingLineInputs ?? { correct: '', incorrect1: '', incorrect2: '' },
+  );
   const [readingLineErrors, setReadingLineErrors] = useState<Record<SlotKey, string>>({
     correct: '',
     incorrect1: '',
@@ -57,18 +94,20 @@ const PasteProblemCreator: React.FC = () => {
   });
 
   // ---- Form fields ----
-  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
-  const [tags, setTags] = useState<string[]>([]);
-  const [displayNo, setDisplayNo] = useState<number | null>(null);
-  const [problemRating, setProblemRating] = useState<number>(1200);
-  const [rootEvalCp, setRootEvalCp] = useState<number | null>(null);
-  const [rootEvalPercent, setRootEvalPercent] = useState<number | null>(null);
+  const [prompt, setPrompt] = useState(saved?.prompt ?? DEFAULT_PROMPT);
+  const [tags, setTags] = useState<string[]>(saved?.tags ?? []);
+  const [displayNo, setDisplayNo] = useState<number | null>(saved?.displayNo ?? null);
+  const [problemRating, setProblemRating] = useState<number>(saved?.problemRating ?? 1200);
+  const [rootEvalCp, setRootEvalCp] = useState<number | null>(saved?.rootEvalCp ?? null);
+  const [rootEvalPercent, setRootEvalPercent] = useState<number | null>(saved?.rootEvalPercent ?? null);
 
   // ---- UI state ----
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [message, setMessage] = useState(saved ? '途中保存データを復元しました' : '');
   const [showPreview, setShowPreview] = useState(false);
   const [replaySlot, setReplaySlot] = useState<SlotKey | null>(null);
+  const [autosaveState, setAutosaveState] = useState<'idle' | 'saved'>('idle');
 
   // ---- Board interaction state ----
   const [activeSlot, setActiveSlot] = useState<SlotKey | null>(null);
@@ -80,11 +119,52 @@ const PasteProblemCreator: React.FC = () => {
     pieceType: PieceType;
   } | null>(null);
 
-  // Auto-fetch next display_no
+  // ---- Build draft snapshot ----
+  const buildDraft = useCallback((): PasteDraft => ({
+    kifText,
+    rootSfen,
+    kifMoves,
+    choices,
+    readingLineInputs,
+    prompt,
+    tags,
+    displayNo,
+    problemRating,
+    rootEvalCp,
+    rootEvalPercent,
+    savedAt: new Date().toISOString(),
+  }), [kifText, rootSfen, kifMoves, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent]);
+
+  // ---- Auto-save every 10s ----
+  const lastSavedRef = React.useRef<string>('');
   React.useEffect(() => {
+    const id = window.setInterval(() => {
+      const draft = buildDraft();
+      const sig = JSON.stringify({ ...draft, savedAt: '' });
+      if (sig === lastSavedRef.current) return;
+      persistDraft(draft);
+      lastSavedRef.current = sig;
+      setAutosaveState('saved');
+    }, AUTOSAVE_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [buildDraft]);
+
+  // Manual save
+  const handleSaveDraft = useCallback(() => {
+    const draft = buildDraft();
+    persistDraft(draft);
+    lastSavedRef.current = JSON.stringify({ ...draft, savedAt: '' });
+    setMessage('途中保存しました');
+    setAutosaveState('saved');
+  }, [buildDraft]);
+
+  // Auto-fetch next display_no on mount (only if draft didn't have one)
+  React.useEffect(() => {
+    if (saved?.displayNo != null) return;
     getNextDisplayNo()
       .then(setDisplayNo)
       .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---- KIF parsing ----
@@ -119,6 +199,13 @@ const PasteProblemCreator: React.FC = () => {
 
   // ---- Reading-line parsing ----
 
+  const markerSide = useCallback((label: string): Side | null => {
+    const m = label.trim().charAt(0);
+    if (m === '▲' || m === '☗') return 'sente';
+    if (m === '△' || m === '☖') return 'gote';
+    return null;
+  }, []);
+
   const handleParseReadingLine = useCallback(
     (slot: SlotKey, text: string) => {
       setReadingLineErrors((prev) => ({ ...prev, [slot]: '' }));
@@ -143,7 +230,28 @@ const PasteProblemCreator: React.FC = () => {
         return;
       }
 
-      const choiceUsi = result.moves[0];
+      const firstMoveSide = result.labels.length > 0 ? markerSide(result.labels[0]) : null;
+      const rootSide = parsed?.sideToMove ?? 'sente';
+
+      // Support two formats:
+      // 1) candidate move is included at the head of PV
+      // 2) PV starts from the move after candidate
+      const includesChoiceMove = firstMoveSide === rootSide;
+      const existingChoiceUsi = choices[slot].usi;
+
+      const choiceUsi = includesChoiceMove ? result.moves[0] : existingChoiceUsi;
+      if (!choiceUsi) {
+        setReadingLineErrors((prev) => ({
+          ...prev,
+          [slot]: 'この形式の読み筋は先に盤面で選択肢の手を登録してください',
+        }));
+        return;
+      }
+
+      const continuationMoves = includesChoiceMove
+        ? result.moves.slice(1, 13)
+        : result.moves.slice(0, 12);
+
       const board = parsed?.board;
       const side = parsed?.sideToMove ?? 'sente';
       const label = board ? usiToLabel(choiceUsi, board, side) : choiceUsi;
@@ -169,7 +277,7 @@ const PasteProblemCreator: React.FC = () => {
           label,
           eval_cp: result.evalCp,
           eval_percent: evalPercent,
-          line: result.moves.slice(1, 13),
+          line: continuationMoves,
         },
       }));
 
@@ -178,7 +286,7 @@ const PasteProblemCreator: React.FC = () => {
         setRootEvalPercent(evalPercent);
       }
     },
-    [rootSfen, parsed],
+    [rootSfen, parsed, markerSide, choices],
   );
 
   // ---- Recalculate % from cp ----
@@ -339,6 +447,67 @@ const PasteProblemCreator: React.FC = () => {
     setReadingLineErrors((prev) => ({ ...prev, [slot]: '' }));
   };
 
+  // ---- Generate explanations via AI ----
+
+  const handleGenerateExplanations = useCallback(async () => {
+    if (!rootSfen || !parsed) {
+      setMessage('先に棋譜を読み込んでください');
+      return;
+    }
+    const slots: SlotKey[] = ['correct', 'incorrect1', 'incorrect2'];
+    const filledSlots = slots.filter((s) => choices[s].usi);
+    if (filledSlots.length === 0) {
+      setMessage('選択肢を1つ以上設定してください');
+      return;
+    }
+
+    const targetSlots = filledSlots.filter((s) => !choices[s].explanation.trim());
+    if (targetSlots.length === 0) {
+      setMessage('すべての選択肢に解説が入力済みです');
+      return;
+    }
+
+    setGenerating(true);
+    setMessage('');
+    try {
+      const choiceData = targetSlots.map((slot) => {
+        const c = choices[slot];
+        // Convert USI reading line to Japanese labels
+        const fullPv = [c.usi, ...c.line];
+        const labels = pvToJapanese(fullPv, rootSfen, fullPv.length);
+        return {
+          label: c.label,
+          eval_cp: c.eval_cp,
+          eval_percent: c.eval_percent,
+          line_labels: labels.slice(1).join(' '), // exclude the choice move itself
+          is_correct: slot === 'correct',
+        };
+      });
+
+      const results = await generateExplanations(
+        rootSfen,
+        parsed.sideToMove,
+        choiceData,
+      );
+
+      setChoices((prev) => {
+        const next = { ...prev };
+        results.forEach((r) => {
+          const slot = targetSlots[r.index];
+          if (slot) {
+            next[slot] = { ...next[slot], explanation: r.explanation };
+          }
+        });
+        return next;
+      });
+      setMessage(`解説を生成しました（${targetSlots.length}件）`);
+    } catch (e: any) {
+      setMessage(`解説生成エラー: ${e.message}`);
+    } finally {
+      setGenerating(false);
+    }
+  }, [rootSfen, parsed, choices]);
+
   // ---- Validation ----
 
   const validate = (): string[] => {
@@ -387,6 +556,8 @@ const PasteProblemCreator: React.FC = () => {
       ];
 
       const { problemId } = await saveProblem(problem, choiceData);
+      localStorage.removeItem(LOCALSTORAGE_KEY);
+      lastSavedRef.current = '';
       setMessage(`保存しました (problem_id: ${problemId})`);
     } catch (e: any) {
       setMessage(`保存エラー: ${e.message}`);
@@ -401,23 +572,23 @@ const PasteProblemCreator: React.FC = () => {
 
   return (
     <>
-      <div className="w-full h-[calc(100vh-84px)] overflow-hidden">
-        <h2 className="text-lg font-semibold mb-2">問題作成（貼付）</h2>
+      <div className="w-full h-[calc(100vh-84px)] overflow-auto">
+        <div className="flex items-center gap-3 mb-2">
+          <h2 className="text-lg font-semibold">問題作成（貼付）</h2>
+          <span className="text-[12px] text-gray-400">
+            {autosaveState === 'saved' ? '自動保存済み' : ''}
+          </span>
+        </div>
 
-        <div className="flex w-full h-[calc(100%-26px)] min-w-0 gap-3 items-start justify-start overflow-hidden">
-          {/* ---- Left: Board area ---- */}
-          <div className="flex-shrink-0 w-[440px] flex flex-col gap-2">
+        <div className="flex w-full h-[calc(100%-26px)] min-w-0 gap-2 items-start justify-start overflow-auto">
+          {/* ---- Left: Board + KIF paste ---- */}
+          <div className="flex-shrink-0 w-[320px] md:w-[350px] flex flex-col gap-1">
             {/* KIF paste area */}
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-gray-500">
-                棋譜を貼り付け (KIF / SFEN)
-              </label>
+            <div className="flex flex-col gap-0.5">
               <textarea
-                className="text-[11px] font-mono leading-tight w-full"
-                rows={rootSfen ? 3 : 6}
-                placeholder={
-                  '手数----指手---------消費時間--\n   1 ７六歩(77)        ( 0:00/00:00:00)\n   2 ３四歩(33)        ( 0:00/00:00:00)\n\nまたは SFEN 文字列を貼り付け'
-                }
+                className="text-[10px] font-mono leading-tight w-full"
+                rows={rootSfen ? 2 : 3}
+                placeholder={'KIF棋譜 / SFEN を貼り付け'}
                 value={kifText}
                 onChange={(e) => setKifText(e.target.value)}
                 onPaste={(e) => {
@@ -429,24 +600,24 @@ const PasteProblemCreator: React.FC = () => {
                   }
                 }}
               />
-              <div className="flex gap-2">
+              <div className="flex gap-1">
                 <button
-                  className="text-[11px] px-2 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
+                  className="text-[10px] px-1.5 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
                   type="button"
                   onClick={handleParseKif}
                 >
-                  棋譜を解析
+                  解析
                 </button>
                 <button
-                  className="text-[11px] px-2 py-0.5 bg-blue-100 border-blue-300 hover:bg-blue-200"
+                  className="text-[10px] px-1.5 py-0.5 bg-blue-100 border-blue-300 hover:bg-blue-200"
                   type="button"
                   onClick={handlePasteFromClipboard}
                 >
-                  📋 クリップボードから貼り付け
+                  📋 貼り付け
                 </button>
               </div>
               {kifError && (
-                <div className="text-[11px] text-red-600 bg-red-50 px-2 py-1 rounded">
+                <div className="text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
                   {kifError}
                 </div>
               )}
@@ -476,9 +647,9 @@ const PasteProblemCreator: React.FC = () => {
             )}
 
             {parsed && (
-              <div className="flex gap-3 text-[13px] text-gray-500 flex-wrap items-center">
+              <div className="flex gap-2 text-[11px] text-gray-500 flex-wrap items-center">
                 <span>
-                  手番: {parsed.sideToMove === 'sente' ? '☗先手' : '☖後手'}
+                  {parsed.sideToMove === 'sente' ? '☗先手' : '☖後手'}
                 </span>
                 {kifMoves.length > 0 && <span>{kifMoves.length}手目</span>}
                 {selectedHandPiece && (
@@ -488,16 +659,16 @@ const PasteProblemCreator: React.FC = () => {
                 )}
                 {rootEvalCp !== null && (
                   <span>
-                    root評価値: {rootEvalCp}cp ({rootEvalPercent}%)
+                    {rootEvalCp}cp ({rootEvalPercent}%)
                   </span>
                 )}
               </div>
             )}
             {promotionChoice && parsed && (
-              <div className="flex items-center gap-2.5 px-3 py-2 bg-amber-50 border-2 border-amber-400 rounded-md text-[13px] font-semibold">
-                <span>成りますか？</span>
+              <div className="flex items-center gap-2 px-2 py-1 bg-amber-50 border-2 border-amber-400 rounded-md text-[12px] font-semibold">
+                <span>成?</span>
                 <button
-                  className="w-12 h-12 text-2xl font-bold flex items-center justify-center border-2 border-gray-300 rounded bg-white cursor-pointer hover:border-blue-600 hover:bg-blue-100"
+                  className="w-10 h-10 text-xl font-bold flex items-center justify-center border-2 border-gray-300 rounded bg-white cursor-pointer hover:border-blue-600 hover:bg-blue-100"
                   onClick={() => handlePromotionSelect(false)}
                 >
                   {pieceKanji({
@@ -507,7 +678,7 @@ const PasteProblemCreator: React.FC = () => {
                   })}
                 </button>
                 <button
-                  className="w-12 h-12 text-2xl font-bold flex items-center justify-center border-2 border-gray-300 rounded bg-white cursor-pointer hover:border-blue-600 hover:bg-blue-100 text-red-700"
+                  className="w-10 h-10 text-xl font-bold flex items-center justify-center border-2 border-gray-300 rounded bg-white cursor-pointer hover:border-blue-600 hover:bg-blue-100 text-red-700"
                   onClick={() => handlePromotionSelect(true)}
                 >
                   {pieceKanji({
@@ -518,12 +689,51 @@ const PasteProblemCreator: React.FC = () => {
                 </button>
               </div>
             )}
+
+            <div className="flex flex-col gap-1 mt-1">
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[11px] font-semibold text-gray-500">問題文</label>
+                <input
+                  type="text"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  className="h-7 text-[12px]"
+                />
+              </div>
+
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[11px] font-semibold text-gray-500">display_no</label>
+                <input
+                  type="number"
+                  value={displayNo ?? ''}
+                  onChange={(e) =>
+                    setDisplayNo(e.target.value ? parseInt(e.target.value, 10) : null)
+                  }
+                  className="h-7 text-[12px]"
+                />
+              </div>
+
+              <div className="flex flex-col gap-0.5">
+                <label className="text-[11px] font-semibold text-gray-500">レート</label>
+                <select
+                  value={problemRating}
+                  onChange={(e) => setProblemRating(parseInt(e.target.value, 10))}
+                  className="h-7 text-[12px]"
+                >
+                  {Array.from({ length: 19 }, (_, i) => 600 + i * 100).map((rating) => (
+                    <option key={rating} value={rating}>
+                      {rating}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
 
           {/* ---- Middle + Right ---- */}
-          <div className="flex-1 grid grid-cols-[440px_minmax(200px,280px)] gap-3 items-start min-w-0 max-w-full">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(180px,240px)] gap-2 items-start min-w-0 max-w-full">
             {/* Choice cards */}
-            <div className="flex flex-col gap-1.5 items-start w-[440px]">
+            <div className="flex flex-col gap-1.5 items-start min-w-0">
               {(['correct', 'incorrect1', 'incorrect2'] as SlotKey[]).map((slot) => (
                 <PasteChoiceCard
                   key={slot}
@@ -552,55 +762,29 @@ const PasteProblemCreator: React.FC = () => {
               ))}
             </div>
 
-            {/* Settings (narrower than ProblemCreator) */}
-            <div className="min-w-[200px] max-w-[280px] flex flex-col gap-1.5">
-              <div className="flex flex-col gap-0.5">
-                <label className="text-xs font-semibold text-gray-500">問題文 (prompt)</label>
-                <input
-                  type="text"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  className="h-8"
-                />
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <label className="text-xs font-semibold text-gray-500">display_no</label>
-                <input
-                  type="number"
-                  value={displayNo ?? ''}
-                  onChange={(e) =>
-                    setDisplayNo(e.target.value ? parseInt(e.target.value, 10) : null)
-                  }
-                  className="h-8"
-                />
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <label className="text-xs font-semibold text-gray-500">問題レート</label>
-                <select
-                  value={problemRating}
-                  onChange={(e) => setProblemRating(parseInt(e.target.value, 10))}
-                  className="h-8"
-                >
-                  {Array.from({ length: 19 }, (_, i) => 600 + i * 100).map((rating) => (
-                    <option key={rating} value={rating}>
-                      {rating}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
+            {/* Settings (narrower) */}
+            <div className="min-w-[180px] max-w-[240px] flex flex-col gap-1">
               <TagSelector selected={tags} onChange={setTags} />
 
-              <div className="flex gap-2 mt-1">
-                <button onClick={() => setShowPreview(true)} type="button">
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                <button onClick={handleSaveDraft} type="button" className="text-[11px]">
+                  途中保存
+                </button>
+                <button onClick={() => setShowPreview(true)} type="button" className="text-[11px]">
                   プレビュー
+                </button>
+                <button
+                  onClick={handleGenerateExplanations}
+                  disabled={generating}
+                  type="button"
+                  className="bg-purple-600 text-white border-purple-600 hover:bg-purple-700 text-[11px]"
+                >
+                  {generating ? '生成中...' : '🤖 解説生成'}
                 </button>
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
+                  className="bg-blue-600 text-white border-blue-600 hover:bg-blue-700 text-[11px]"
                 >
                   {saving ? '保存中...' : 'Supabaseに保存'}
                 </button>
@@ -609,7 +793,7 @@ const PasteProblemCreator: React.FC = () => {
 
             {message && (
               <div
-                className={`px-3 py-2 rounded text-[13px] whitespace-pre-wrap col-span-2 ${
+                className={`px-2 py-1.5 rounded text-[12px] whitespace-pre-wrap lg:col-span-2 ${
                   message.includes('エラー')
                     ? 'bg-red-50 border border-red-300 text-red-700'
                     : 'bg-emerald-50 border border-emerald-300 text-emerald-800'
@@ -684,10 +868,10 @@ const PasteProblemCreator: React.FC = () => {
       )}
 
       {/* Reading-line replay modal */}
-      {replaySlot && choices[replaySlot].line.length > 0 && rootSfen && (
+      {replaySlot && choices[replaySlot].usi && rootSfen && (
         <ReadingLineModal
           rootSfen={rootSfen}
-          line={choices[replaySlot].line}
+          line={[choices[replaySlot].usi, ...choices[replaySlot].line]}
           onClose={() => setReplaySlot(null)}
         />
       )}
@@ -696,11 +880,12 @@ const PasteProblemCreator: React.FC = () => {
 };
 
 function pickChoiceFields(draft: ChoiceDraft) {
+  const line = draft.line[0] === draft.usi ? draft.line.slice(1) : draft.line;
   return {
     usi: draft.usi,
     label: draft.label,
     explanation: draft.explanation,
-    line: draft.line,
+    line,
     eval_cp: draft.eval_cp,
     eval_percent: draft.eval_percent,
   };

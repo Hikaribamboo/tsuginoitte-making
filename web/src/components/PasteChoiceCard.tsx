@@ -42,7 +42,7 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
 }) => {
   return (
     <div
-      className={`border-2 rounded-md px-3 py-2 bg-white transition-colors w-[440px] max-w-full ${
+      className={`border-2 rounded-md px-3 py-2 bg-white transition-colors w-full max-w-[420px] ${
         isActive ? 'border-blue-600 bg-[#f8faff]' : draft.usi ? 'border-emerald-300' : 'border-gray-200'
       }`}
     >
@@ -85,7 +85,7 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
           >
             読み筋を解析
           </button>
-          {draft.line.length > 0 && (
+          {draft.usi && (
             <button
               className="text-[11px] px-2 py-0.5 bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700"
               type="button"
@@ -106,10 +106,10 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
       {draft.usi ? (
         <div className="flex flex-col gap-1 mt-1">
           {/* Move title + eval values in one row */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <span className="text-[26px] font-bold leading-none flex-shrink-0">{draft.label}</span>
-            <span className="font-mono text-[10px] text-gray-400 flex-shrink-0">({draft.usi})</span>
-            <div className="flex items-center gap-1 ml-auto flex-shrink-0">
+            <span className="font-mono text-[9px] text-gray-400 flex-shrink-0">({draft.usi})</span>
+            <div className="flex items-center gap-0.5 ml-auto flex-shrink-0">
               <input
                 type="number"
                 value={draft.eval_cp ?? ''}
@@ -117,7 +117,7 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
                   onEvalCpChange(e.target.value ? parseInt(e.target.value, 10) : null)
                 }
                 placeholder="cp"
-                className="h-6 w-[60px] text-[11px]"
+                className="h-6 !w-[82px] text-[10px] px-1 flex-shrink-0"
                 title="評価値 cp"
               />
               <input
@@ -129,11 +129,11 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
                   onEvalPercentChange(e.target.value ? parseInt(e.target.value, 10) : null)
                 }
                 placeholder="%"
-                className="h-6 w-[48px] text-[11px]"
+                className="h-6 !w-[82px] text-[10px] px-1 flex-shrink-0"
                 title="勝率 %"
               />
               <button
-                className="text-[10px] px-1 py-0.5 bg-teal-700 text-white border-teal-700 hover:bg-teal-800 h-6 whitespace-nowrap"
+                className="text-[9px] px-1 py-0.5 bg-teal-700 text-white border-teal-700 hover:bg-teal-800 h-6 whitespace-nowrap"
                 type="button"
                 onClick={onRecalculatePercent}
                 disabled={draft.eval_cp === null}

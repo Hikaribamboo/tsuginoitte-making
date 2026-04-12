@@ -8,8 +8,11 @@
     "start": "cross-env PORT=8765 tsx src/index.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.88.0",
     "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "dotenv": "^17.4.1",
+    "express": "^4.19.2",
+    "openai": "^6.34.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

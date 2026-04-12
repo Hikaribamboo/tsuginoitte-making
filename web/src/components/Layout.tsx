@@ -6,7 +6,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const navItems = [
     { path: '/', label: '局面作成' },
-    { path: '/paste-problem', label: '問題作成(貼付)' },
+    { path: '/paste-problem', label: '問題作成' },
     { path: '/favorites', label: 'お気に入り一覧' },
   ];
 
