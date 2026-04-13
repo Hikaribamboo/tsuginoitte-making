@@ -405,30 +405,47 @@ export interface ReadingLineResult {
 export function parseReadingLine(text: string): ReadingLineResult | null {
   const normalizedText = text.replace(/\r\n?/g, '\n');
 
-  // Extract evaluation value
-  const evalMatch = normalizedText.match(/評価値\s+(-?\d+)/);
-  const evalCp = evalMatch ? parseInt(evalMatch[1], 10) : null;
+  // Extract evaluation value from *#評価値=... (only this form)
+  let evalCp: number | null = null;
+  const evalMatch = normalizedText.match(/\*#評価値=\s*(-?\d+)/);
+  if (evalMatch) {
+    evalCp = parseInt(evalMatch[1], 10);
+  }
 
-  // Extract move sequence after "読み筋"
-  const lineMatch = normalizedText.match(/読み筋[\s　]+([\s\S]+)/);
-  if (!lineMatch) return null;
-  const lineText = lineMatch[1].replace(/\n/g, ' ').replace(/[ \t　]+/g, ' ').trim();
 
-  // Split by side markers (▲△☗☖)
-  const moveTexts = lineText.match(/[▲△☗☖][^▲△☗☖]+/g);
+  // *#読み筋=... があっても無視し、KIF手順リストのみを読み筋とする
+  const kifLines = normalizedText.split('\n').filter(l => l.match(/^\s*\d+\s+/));
+  let moveTexts: string[] | null = null;
+  if (kifLines.length > 0) {
+    moveTexts = kifLines.map(l => {
+      // " 46 ６六角(44)   ( 0:00/00:00:00)" → "６六角(44)"
+      // " 57 ３三桂成(25) ( 0:00/00:00:00)" → "３三桂成(25)"
+      // " 54 ７四桂打     ( 0:00/00:00:00)" → "７四桂打"
+      // " 58 同　金(32)   ( 0:00/00:00:00)" → "同　金(32)"
+      const m = l.match(/^\s*\d+\s+((同　)?[^\s]+(成|不成)?(打)?(\([^)]+\))?)/);
+      return m ? m[1] : '';
+    }).filter(Boolean);
+  }
   if (!moveTexts || moveTexts.length === 0) return null;
 
   const moves: string[] = [];
   const labels: string[] = [];
   let prevDest: { file: number; rank: number } | null = null;
 
-  for (const mt of moveTexts) {
+  for (let i = 0; i < moveTexts.length; i++) {
+    const mt = moveTexts[i];
     const trimmed = mt.trim();
     const parsed = parseKifMoveToken(trimmed, prevDest);
+    console.log('[parseReadingLine] label:', trimmed, 'parsed:', parsed, 'prevDest:', prevDest);
     if (!parsed) continue;
     moves.push(parsed.usi);
     labels.push(trimmed);
-    prevDest = parsed.dest;
+    // 1手目のfrom→toをprevDestにセット（途中局面対応）
+    if (i === 0) {
+      prevDest = parsed.dest;
+    } else {
+      prevDest = parsed.dest;
+    }
   }
 
   if (moves.length === 0) return null;

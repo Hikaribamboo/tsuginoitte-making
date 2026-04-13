@@ -340,6 +340,8 @@ const PasteProblemCreator: React.FC = () => {
       }
 
       const result = parseReadingLine(text);
+      console.log('[handleParseReadingLine] text:', text);
+      console.log('[handleParseReadingLine] parseReadingLine result:', result);
       if (!result || result.moves.length === 0) {
         setReadingLineErrors((prev) => ({
           ...prev,
@@ -350,25 +352,31 @@ const PasteProblemCreator: React.FC = () => {
 
       const firstMoveSide = result.labels.length > 0 ? markerSide(result.labels[0]) : null;
       const rootSide = parsed?.sideToMove ?? 'sente';
+      console.log('[handleParseReadingLine] firstMoveSide:', firstMoveSide, 'rootSide:', rootSide);
 
-      // Support two formats:
+      // Support three formats:
       // 1) candidate move is included at the head of PV
-      // 2) PV starts from the move after candidate
+      // 2) PV starts from the move after candidate (選択肢usiが既に登録されている場合)
+      // 3) PV starts from the move after candidate かつ 選択肢usi未設定の場合 → 先頭手を自動採用
       const includesChoiceMove = firstMoveSide === rootSide;
-      const existingChoiceUsi = choices[slot].usi;
-
-      const choiceUsi = includesChoiceMove ? result.moves[0] : existingChoiceUsi;
-      if (!choiceUsi) {
+      let choiceUsi = includesChoiceMove ? result.moves[0] : choices[slot].usi;
+      let continuationMoves: string[];
+      if (includesChoiceMove) {
+        continuationMoves = result.moves.slice(1, 13);
+      } else if (choiceUsi) {
+        continuationMoves = result.moves.slice(0, 12);
+      } else if (result.moves.length > 0) {
+        // 自動で先頭手を選択肢usiに採用
+        choiceUsi = result.moves[0];
+        continuationMoves = result.moves.slice(1, 13);
+      } else {
         setReadingLineErrors((prev) => ({
           ...prev,
           [slot]: 'この形式の読み筋は先に盤面で選択肢の手を登録してください',
         }));
         return;
       }
-
-      const continuationMoves = includesChoiceMove
-        ? result.moves.slice(1, 13)
-        : result.moves.slice(0, 12);
+      console.log('[handleParseReadingLine] includesChoiceMove:', includesChoiceMove, 'choiceUsi:', choiceUsi, 'continuationMoves:', continuationMoves);
 
       const board = parsed?.board;
       const side = parsed?.sideToMove ?? 'sente';
@@ -756,36 +764,37 @@ const PasteProblemCreator: React.FC = () => {
                 onChange={(e) => setKifText(e.target.value)}
                 onPaste={(e) => {
                   const pasted = e.clipboardData.getData('text/plain');
-                  if (pasted) {
-                    e.preventDefault();
-                    setKifText(pasted);
-                    doParseKif(pasted);
+                  try {
+                    const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
+                    // Always use correct choice's eval for root_eval_cp/percent
+                    const correctEvalCp = choices.correct.eval_cp;
+                    /*...*/
+                    await saveProblem(
+                      {
+                        prompt,
+                        root_sfen: rootSfenForSave,
+                        correct_choice_id: 1,
+                        intro_moves_usi: introMovesUsi,
+                        root_eval_cp: correctEvalCp,
+                        root_eval_percent: choices.correct.eval_percent,
+                        problem_rating: problemRating,
+                        problem_rating_games: 0,
+                        display_no: displayNo,
+                        tags,
+                      },
+                      [
+                        { choice_id: 1, ...pickChoiceFields(choices.correct) },
+                        { choice_id: 2, ...pickChoiceFields(choices.incorrect1) },
+                        { choice_id: 3, ...pickChoiceFields(choices.incorrect2) },
+                      ],
+                    );
+                    setMessage('保存しました');
+                    setSaving(false);
+                    if (displayNo != null) setDisplayNo(displayNo + 1);
+                  } catch (e: any) {
+                    setMessage('保存に失敗しました: ' + (e.message || e.toString()));
+                    setSaving(false);
                   }
-                }}
-              />
-              <div className="flex gap-1">
-                <button
-                  className="text-[10px] px-1.5 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
-                  type="button"
-                  onClick={handleParseKif}
-                >
-                  解析
-                </button>
-                <button
-                  className="text-[10px] px-1.5 py-0.5 bg-blue-100 border-blue-300 hover:bg-blue-200"
-                  type="button"
-                  onClick={handlePasteFromClipboard}
-                >
-                  📋 貼り付け
-                </button>
-              </div>
-              {kifError && (
-                <div className="text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
-                  {kifError}
-                </div>
-              )}
-
-              {/* Branch tree diagram */}
               {kifBranches.length > 1 && (
                 <BranchTree
                   branches={kifBranches}

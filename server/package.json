@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "cross-env PORT=8765 tsx watch src/index.ts",
-    "start": "cross-env PORT=8765 tsx src/index.ts"
+    "start": "cross-env PORT=8765 tsx src/index.ts",
+    "dev:with-web-build": "cd ../web && npm run build && cd ../server && npm run dev"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",

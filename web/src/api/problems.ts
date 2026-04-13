@@ -11,7 +11,7 @@ export async function getNextDisplayNo(): Promise<number> {
     .single();
   if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows
   const currentMax = data?.display_no ?? 0;
-  return Math.max(currentMax + 1, 201);
+  return Math.max(currentMax + 1, 35);
 }
 
 /** Save a problem and its choices in a single transaction-like flow */

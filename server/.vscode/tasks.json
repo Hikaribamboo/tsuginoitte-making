@@ -1,0 +1,12 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start Server with Web Build",
+			"type": "shell",
+			"command": "cd ../web && npm run build && cd ../server && npm run dev",
+			"isBackground": false,
+			"group": "none"
+		}
+	]
+}
