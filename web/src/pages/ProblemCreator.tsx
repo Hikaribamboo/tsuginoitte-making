@@ -9,9 +9,9 @@ import type { BestMove } from "../components/AnalysisPanel";
 import Toggle from "../components/Toggle";
 import { useBoardStore } from "../hooks/useBoardStore";
 import { parseSfen, toUsiSquare } from "../lib/sfen";
-import { usiToLabel } from "../lib/usi-to-label";
+import { usiToLabel, pvToJapanese } from "../lib/usi-to-label";
 import { cpToWinRatePercentFromRootSfen } from "../lib/eval-percent";
-import { evaluatePosition } from "../api/engine";
+import { evaluatePosition, generateExplanations } from "../api/engine";
 import { saveProblem, getNextDisplayNo } from "../api/problems";
 import {
   deleteFavorite,
@@ -217,6 +217,7 @@ const ProblemCreator: React.FC = () => {
 
   // UI state
   const [evaluatingSlot, setEvaluatingSlot] = useState<SlotKey | null>(null);
+  const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [showPreview, setShowPreview] = useState(false);
@@ -802,6 +803,61 @@ const ProblemCreator: React.FC = () => {
     setRootEvalPercent(choices.correct.eval_percent);
   }, [choices.correct.eval_cp, choices.correct.eval_percent]);
 
+  const handleGenerateExplanations = useCallback(async () => {
+    if (!rootSfen) {
+      setMessage("局面（root_sfen）が未設定です");
+      return;
+    }
+
+    const slots: SlotKey[] = ["correct", "incorrect1", "incorrect2"];
+    const filledSlots = slots.filter((s) => choices[s].usi);
+    if (filledSlots.length === 0) {
+      setMessage("選択肢を1つ以上設定してください");
+      return;
+    }
+
+    const targetSlots = filledSlots.filter((s) => !choices[s].explanation.trim());
+    if (targetSlots.length === 0) {
+      setMessage("すべての選択肢に解説が入力済みです");
+      return;
+    }
+
+    setGenerating(true);
+    setMessage("");
+    try {
+      const choiceData = targetSlots.map((slot) => {
+        const c = choices[slot];
+        const fullPv = [c.usi, ...c.line];
+        const labels = pvToJapanese(fullPv, rootSfen, fullPv.length);
+        return {
+          label: c.label,
+          eval_cp: c.eval_cp,
+          eval_percent: c.eval_percent,
+          line_labels: labels.slice(1).join(" "),
+          is_correct: slot === "correct",
+        };
+      });
+
+      const results = await generateExplanations(rootSfen, sideToMove, choiceData);
+
+      setChoices((prev) => {
+        const next = { ...prev };
+        results.forEach((r) => {
+          const slot = targetSlots[r.index];
+          if (slot) {
+            next[slot] = { ...next[slot], explanation: r.explanation };
+          }
+        });
+        return next;
+      });
+      setMessage(`解説を生成しました（${targetSlots.length}件）`);
+    } catch (e: any) {
+      setMessage(`解説生成エラー: ${e.message}`);
+    } finally {
+      setGenerating(false);
+    }
+  }, [rootSfen, sideToMove, choices]);
+
   // ---- Validation ----
 
   const validate = (): string[] => {
@@ -891,8 +947,6 @@ const ProblemCreator: React.FC = () => {
 
     try {
       // Assign choice_ids: correct=1, incorrect1=2, incorrect2=3
-      // Actually the correct_choice_id should match the choice_id of the correct choice
-      // Let's say correct gets choice_id based on slot order but correct_choice_id points to it
       const correctChoiceId = 1;
 
       // intro_moves_usi must be exactly one move: the move immediately before choices.
@@ -904,14 +958,17 @@ const ProblemCreator: React.FC = () => {
         : null;
       const introMovesUsi = introMoveUsi ? [introMoveUsi] : [];
 
+      // Always use correct choice's eval for root_eval_cp/percent
+      const correctEvalCp = choices.correct.eval_cp;
+      const correctEvalPercent = choices.correct.eval_percent;
       const problem = {
         prompt: prompt.trim() || DEFAULT_PROMPT,
         root_sfen: rootSfen,
         correct_choice_id: correctChoiceId,
         intro_moves_usi: introMovesUsi,
         source_run_id: null,
-        root_eval_cp: rootEvalCp,
-        root_eval_percent: rootEvalPercent,
+        root_eval_cp: correctEvalCp,
+        root_eval_percent: correctEvalPercent,
         problem_rating: problemRating,
         problem_rating_games: 0,
         display_no: displayNo,
@@ -1236,6 +1293,14 @@ const ProblemCreator: React.FC = () => {
                 </button>
                 <button onClick={() => setShowPreview(true)} type="button">
                   プレビュー
+                </button>
+                <button
+                  onClick={handleGenerateExplanations}
+                  disabled={generating}
+                  type="button"
+                  className="bg-purple-600 text-white border-purple-600 hover:bg-purple-700"
+                >
+                  {generating ? "生成中..." : "解説生成"}
                 </button>
                 <button
                   onClick={handleSave}

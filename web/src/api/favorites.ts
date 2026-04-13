@@ -83,12 +83,10 @@ export async function fetchProblemDraftForFavorite(id: number): Promise<ProblemC
     .from('problem_creator_drafts')
     .select('draft_json, updated_at')
     .eq('favorite_id', id)
-    .single();
+    .maybeSingle();
 
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
-  }
+  if (error) throw error;
+  if (!data) return null;
 
   const draftJson = data?.draft_json;
   if (!isProblemCreatorDraft(draftJson)) return null;

@@ -682,14 +682,17 @@ const PasteProblemCreator: React.FC = () => {
     setMessage('');
     try {
       const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
+      // Always use correct choice's eval for root_eval_cp/percent
+      const correctEvalCp = choices.correct.eval_cp;
+      const correctEvalPercent = choices.correct.eval_percent;
       const problem = {
         prompt: prompt.trim() || DEFAULT_PROMPT,
         root_sfen: rootSfenForSave,
         correct_choice_id: 1,
         intro_moves_usi: introMovesUsi,
         source_run_id: null,
-        root_eval_cp: rootEvalCp,
-        root_eval_percent: rootEvalPercent,
+        root_eval_cp: correctEvalCp,
+        root_eval_percent: correctEvalPercent,
         problem_rating: problemRating,
         problem_rating_games: 0,
         display_no: displayNo,
