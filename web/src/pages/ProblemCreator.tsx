@@ -895,9 +895,14 @@ const ProblemCreator: React.FC = () => {
       // Let's say correct gets choice_id based on slot order but correct_choice_id points to it
       const correctChoiceId = 1;
 
-      const introMovesUsi = introMoves.trim()
+      // intro_moves_usi must be exactly one move: the move immediately before choices.
+      const introTokens = introMoves.trim()
         ? introMoves.trim().split(/\s+/)
         : [];
+      const introMoveUsi = introTokens.length > 0
+        ? introTokens[introTokens.length - 1]
+        : null;
+      const introMovesUsi = introMoveUsi ? [introMoveUsi] : [];
 
       const problem = {
         prompt: prompt.trim() || DEFAULT_PROMPT,
@@ -1279,9 +1284,15 @@ const ProblemCreator: React.FC = () => {
                     prompt,
                     root_sfen: rootSfen,
                     correct_choice_id: 1,
-                    intro_moves_usi: introMoves.trim()
-                      ? introMoves.trim().split(/\s+/)
-                      : [],
+                    intro_moves_usi: (() => {
+                      const introTokens = introMoves.trim()
+                        ? introMoves.trim().split(/\s+/)
+                        : [];
+                      const introMoveUsi = introTokens.length > 0
+                        ? introTokens[introTokens.length - 1]
+                        : null;
+                      return introMoveUsi ? [introMoveUsi] : [];
+                    })(),
                     root_eval_cp: rootEvalCp,
                     root_eval_percent: rootEvalPercent,
                     problem_rating: problemRating,

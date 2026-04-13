@@ -17,25 +17,39 @@ export async function getNextDisplayNo(): Promise<number> {
 export async function saveProblem(
   problem: Omit<Problem, 'id' | 'created_at'>,
   choices: Omit<Choice, 'problem_id'>[],
-): Promise<{ problemId: number }> {
-  // Insert problem
-  const { data: problemData, error: problemError } = await supabase
-    .from('next_move_problems')
-    .insert(problem)
-    .select('id')
-    .single();
-  if (problemError) throw problemError;
+): Promise<{ problemId: number; reviewProblemId: number }> {
+  async function insertProblemWithChoices(
+    problemTable: string,
+    choiceTable: string,
+  ): Promise<number> {
+    const { data: problemData, error: problemError } = await supabase
+      .from(problemTable)
+      .insert(problem)
+      .select('id')
+      .single();
+    if (problemError) throw problemError;
 
-  const problemId = problemData.id;
+    const insertedProblemId = problemData.id;
 
-  // Insert choices with problem_id
-  const choiceRows = choices.map((c) => ({
-    ...c,
-    problem_id: problemId,
-  }));
+    const choiceRows = choices.map((c) => ({
+      ...c,
+      problem_id: insertedProblemId,
+    }));
 
-  const { error: choiceError } = await supabase.from('next_move_choices').insert(choiceRows);
-  if (choiceError) throw choiceError;
+    const { error: choiceError } = await supabase.from(choiceTable).insert(choiceRows);
+    if (choiceError) throw choiceError;
 
-  return { problemId };
+    return insertedProblemId;
+  }
+
+  // Main tables
+  const problemId = await insertProblemWithChoices('next_move_problems', 'next_move_choices');
+
+  // Review tables (same payload)
+  const reviewProblemId = await insertProblemWithChoices(
+    'review_next_move_problems',
+    'review_next_move_choices',
+  );
+
+  return { problemId, reviewProblemId };
 }

@@ -136,13 +136,16 @@ export function parseKifRecord(text: string): KifParseResult | null {
     // Skip comment lines
     if (line.trimStart().startsWith('*')) continue;
 
+    // Stop at first branch marker
+    if (/^変化：/.test(line.trim())) break;
+
     // Match move lines: "   1 ７六歩(77) ..."
     const m = line.match(/^\s*(\d+)\s+(.+)/);
     if (!m) continue;
 
     let moveText = m[2].trim();
-    // Strip trailing time section (always contains ":")
-    moveText = moveText.replace(/\s+\([^)]*:[^)]*\)\s*$/, '').trim();
+    // Strip trailing time section (always contains ":") and branch marker "+"
+    moveText = moveText.replace(/\s+\([^)]*:[^)]*\)\s*\+?\s*$/, '').trim();
 
     // Skip end-of-game tokens
     if (/^(投了|中断|千日手|持将棋|反則|詰み)/.test(moveText)) continue;
@@ -171,6 +174,218 @@ export function parseKifRecord(text: string): KifParseResult | null {
 
   const sfen = boardToSfen(board, sideToMove, senteHand, goteHand, moves.length + 1);
   return { sfen, moves, moveLabels };
+}
+
+// ---- Branching KIF record parser ----
+
+export interface KifBranch {
+  id: number;
+  name: string;
+  branchPoint: number; // 0-based index in the parent moves where this branch diverges
+  moves: string[];
+  moveLabels: string[];
+  sfen: string;
+}
+
+/** Tree node for rendering the branch diagram */
+export interface KifTreeNode {
+  moveNumber: number;  // 1-based
+  usi: string;
+  label: string;
+  branchId: number;    // which branch this node belongs to
+  children: KifTreeNode[];
+}
+
+export interface KifBranchParseResult {
+  branches: KifBranch[];
+  tree: KifTreeNode[];
+}
+
+/**
+ * Parse a KIF record that may contain branches (変化).
+ * Returns null if no moves can be parsed.
+ * If no branches are present, returns a single branch (main line).
+ */
+export function parseKifRecordWithBranches(text: string): KifBranchParseResult | null {
+  const trimmed = text.trim();
+
+  if (isLikelySfen(trimmed)) {
+    const branch: KifBranch = {
+      id: 0,
+      name: '本譜',
+      branchPoint: 0,
+      moves: [],
+      moveLabels: [],
+      sfen: trimmed,
+    };
+    return { branches: [branch], tree: [] };
+  }
+
+  const lines = trimmed.split('\n');
+
+  // Split into segments: main line + each 変化 block
+  interface RawSegment {
+    name: string;
+    branchMoveNumber: number; // 0 for main line
+    moveLines: string[];
+  }
+
+  const segments: RawSegment[] = [];
+  let currentSegment: RawSegment = { name: '本譜', branchMoveNumber: 0, moveLines: [] };
+
+  for (const line of lines) {
+    const branchMatch = line.trim().match(/^変化：(\d+)手$/);
+    if (branchMatch) {
+      segments.push(currentSegment);
+      currentSegment = {
+        name: `変化：${branchMatch[1]}手`,
+        branchMoveNumber: parseInt(branchMatch[1], 10),
+        moveLines: [],
+      };
+      continue;
+    }
+    currentSegment.moveLines.push(line);
+  }
+  segments.push(currentSegment);
+
+  // Parse each segment into moves
+  function parseMoveLines(
+    moveLines: string[],
+  ): { moves: string[]; labels: string[]; moveNumbers: number[] } {
+    const moves: string[] = [];
+    const labels: string[] = [];
+    const moveNumbers: number[] = [];
+    let prevDest: { file: number; rank: number } | null = null;
+
+    for (const line of moveLines) {
+      if (line.trimStart().startsWith('*')) continue;
+      const m = line.match(/^\s*(\d+)\s+(.+)/);
+      if (!m) continue;
+
+      const moveNum = parseInt(m[1], 10);
+      let moveText = m[2].trim();
+      moveText = moveText.replace(/\s+\([^)]*:[^)]*\)\s*\+?\s*$/, '').trim();
+
+      if (/^(投了|中断|千日手|持将棋|反則|詰み)/.test(moveText)) continue;
+
+      const parsed = parseKifMoveToken(moveText, prevDest);
+      if (!parsed) continue;
+
+      moves.push(parsed.usi);
+      labels.push(moveText);
+      moveNumbers.push(moveNum);
+      prevDest = parsed.dest;
+    }
+    return { moves, labels, moveNumbers };
+  }
+
+  // Parse main line first
+  const mainParsed = parseMoveLines(segments[0].moveLines);
+  if (mainParsed.moves.length === 0) return null;
+
+  // Compute SFEN for a given moves array
+  function computeSfen(moves: string[]): string {
+    const state = parseSfen(INITIAL_SFEN);
+    let { board, senteHand, goteHand, sideToMove } = state;
+    for (const usi of moves) {
+      const result = applyUsiMove(board, senteHand, goteHand, sideToMove, usi);
+      board = result.board;
+      senteHand = result.senteHand;
+      goteHand = result.goteHand;
+      sideToMove = sideToMove === 'sente' ? 'gote' : 'sente';
+    }
+    return boardToSfen(board, sideToMove, senteHand, goteHand, moves.length + 1);
+  }
+
+  const branches: KifBranch[] = [];
+
+  // Main branch
+  branches.push({
+    id: 0,
+    name: '本譜',
+    branchPoint: 0,
+    moves: mainParsed.moves,
+    moveLabels: mainParsed.labels,
+    sfen: computeSfen(mainParsed.moves),
+  });
+
+  // Process variation segments
+  for (let i = 1; i < segments.length; i++) {
+    const seg = segments[i];
+    const varParsed = parseMoveLines(seg.moveLines);
+    if (varParsed.moves.length === 0) continue;
+
+    // The branch diverges at branchMoveNumber, so we take the main line
+    // up to (branchMoveNumber - 1) as the shared prefix
+    const prefixLength = seg.branchMoveNumber - 1;
+    const sharedPrefix = mainParsed.moves.slice(0, prefixLength);
+    const fullMoves = [...sharedPrefix, ...varParsed.moves];
+
+    branches.push({
+      id: i,
+      name: seg.name,
+      branchPoint: prefixLength, // 0-based index where branch diverges
+      moves: fullMoves,
+      moveLabels: [
+        ...mainParsed.labels.slice(0, prefixLength),
+        ...varParsed.labels,
+      ],
+      sfen: computeSfen(fullMoves),
+    });
+  }
+
+  // Build tree for diagram
+  const tree = buildKifTree(branches);
+
+  return { branches, tree };
+}
+
+/** Build a tree structure from branches for rendering */
+function buildKifTree(branches: KifBranch[]): KifTreeNode[] {
+  if (branches.length === 0) return [];
+
+  // Start with the main line as the trunk
+  const mainBranch = branches[0];
+  const root: KifTreeNode[] = [];
+
+  // Build main line chain
+  let currentChildren = root;
+  const mainNodes: KifTreeNode[] = [];
+  for (let i = 0; i < mainBranch.moves.length; i++) {
+    const node: KifTreeNode = {
+      moveNumber: i + 1,
+      usi: mainBranch.moves[i],
+      label: mainBranch.moveLabels[i],
+      branchId: 0,
+      children: [],
+    };
+    currentChildren.push(node);
+    mainNodes.push(node);
+    currentChildren = node.children;
+  }
+
+  // Attach variation branches at their branch points
+  for (let b = 1; b < branches.length; b++) {
+    const branch = branches[b];
+    const parentIdx = branch.branchPoint - 1; // node index before divergence
+    const parentNode = parentIdx >= 0 ? mainNodes[parentIdx] : null;
+    const attachTo = parentNode ? parentNode.children : root;
+
+    let chainChildren = attachTo;
+    for (let i = branch.branchPoint; i < branch.moves.length; i++) {
+      const node: KifTreeNode = {
+        moveNumber: i + 1,
+        usi: branch.moves[i],
+        label: branch.moveLabels[i],
+        branchId: b,
+        children: [],
+      };
+      chainChildren.push(node);
+      chainChildren = node.children;
+    }
+  }
+
+  return root;
 }
 
 // ---- Reading line parser ----

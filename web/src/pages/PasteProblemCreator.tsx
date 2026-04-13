@@ -1,13 +1,17 @@
 import React, { useState, useCallback, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import Board from '../components/Board';
 import PasteChoiceCard from '../components/PasteChoiceCard';
 import ReadingLineModal from '../components/ReadingLineModal';
 import TagSelector from '../components/TagSelector';
-import { parseSfen, toUsiSquare } from '../lib/sfen';
+import BranchTree from '../components/BranchTree';
+import { INITIAL_SFEN, parseSfen, applyUsiMove, boardToSfen, toUsiSquare } from '../lib/sfen';
 import { usiToLabel, pvToJapanese } from '../lib/usi-to-label';
 import { cpToWinRatePercentFromRootSfen } from '../lib/eval-percent';
-import { parseKifRecord, parseReadingLine } from '../lib/kif-parser';
+import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches } from '../lib/kif-parser';
+import type { KifBranch, KifTreeNode } from '../lib/kif-parser';
 import { saveProblem, getNextDisplayNo } from '../api/problems';
+import { getWorkspace, saveWorkspaceDraft, deleteWorkspace } from '../api/workspaces';
 import { generateExplanations } from '../api/engine';
 import { DEFAULT_PROMPT } from '../lib/constants';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
@@ -63,14 +67,30 @@ function persistDraft(draft: PasteDraft) {
 }
 
 const PasteProblemCreator: React.FC = () => {
-  // ---- Restore draft from localStorage ----
-  const saved = useMemo(() => loadDraft(), []);
+  // ---- Workspace (DB-backed draft) ----
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const workspaceId = searchParams.get('workspace');
+
+  // ---- Restore draft from localStorage (fallback when no workspace) ----
+  const saved = useMemo(() => (workspaceId ? null : loadDraft()), [workspaceId]);
 
   // ---- KIF state ----
   const [kifText, setKifText] = useState(saved?.kifText ?? '');
   const [kifError, setKifError] = useState('');
   const [rootSfen, setRootSfen] = useState(saved?.rootSfen ?? '');
   const [kifMoves, setKifMoves] = useState<string[]>(saved?.kifMoves ?? []);
+
+  // ---- Branch state ----
+  const [kifBranches, setKifBranches] = useState<KifBranch[]>([]);
+  const [kifTree, setKifTree] = useState<KifTreeNode[]>([]);
+  const [activeBranchId, setActiveBranchId] = useState(0);
+
+  // ---- Workspace name (for display) ----
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
+  const [dbSaving, setDbSaving] = useState(false);
+  const [showDeleteWsModal, setShowDeleteWsModal] = useState(false);
+  const [savedProblemId, setSavedProblemId] = useState<number | null>(null);
 
   const parsed = useMemo(() => (rootSfen ? parseSfen(rootSfen) : null), [rootSfen]);
 
@@ -167,6 +187,74 @@ const PasteProblemCreator: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ---- Load workspace draft from DB ----
+  React.useEffect(() => {
+    if (!workspaceId) return;
+    let cancelled = false;
+    getWorkspace(workspaceId)
+      .then((ws) => {
+        if (cancelled || !ws) return;
+        setWorkspaceName(ws.name);
+        if (ws.draft) {
+          const d = ws.draft as unknown as PasteDraft;
+          setKifText(d.kifText ?? '');
+          setRootSfen(d.rootSfen ?? '');
+          setKifMoves(d.kifMoves ?? []);
+
+          // Rebuild branch tree from saved KIF text so branch UI is visible after restore
+          if (d.kifText?.trim()) {
+            const branchResult = parseKifRecordWithBranches(d.kifText);
+            if (branchResult && branchResult.branches.length > 1) {
+              setKifBranches(branchResult.branches);
+              setKifTree(branchResult.tree);
+              const matched = branchResult.branches.find((b) => b.sfen === d.rootSfen);
+              setActiveBranchId(matched?.id ?? 0);
+            } else {
+              setKifBranches([]);
+              setKifTree([]);
+              setActiveBranchId(0);
+            }
+          } else {
+            setKifBranches([]);
+            setKifTree([]);
+            setActiveBranchId(0);
+          }
+
+          setChoices(d.choices ?? {
+            correct: { ...EMPTY_CHOICE, slotLabel: 'correct' },
+            incorrect1: { ...EMPTY_CHOICE, slotLabel: 'incorrect1' },
+            incorrect2: { ...EMPTY_CHOICE, slotLabel: 'incorrect2' },
+          });
+          setReadingLineInputs(d.readingLineInputs ?? { correct: '', incorrect1: '', incorrect2: '' });
+          setPrompt(d.prompt ?? DEFAULT_PROMPT);
+          setTags(d.tags ?? []);
+          if (d.displayNo != null) setDisplayNo(d.displayNo);
+          if (d.problemRating != null) setProblemRating(d.problemRating);
+          setRootEvalCp(d.rootEvalCp ?? null);
+          setRootEvalPercent(d.rootEvalPercent ?? null);
+          setMessage('ワークスペースの下書きを復元しました');
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
+
+  // ---- Save draft to DB (workspace) ----
+  const handleSaveDraftToDb = useCallback(async () => {
+    if (!workspaceId) return;
+    setDbSaving(true);
+    try {
+      const draft = buildDraft();
+      await saveWorkspaceDraft(workspaceId, draft as unknown as Record<string, unknown>);
+      setMessage('ワークスペースに途中保存しました');
+    } catch (e: any) {
+      setMessage(`途中保存エラー: ${e.message}`);
+    } finally {
+      setDbSaving(false);
+    }
+  }, [workspaceId, buildDraft]);
+
   // ---- KIF parsing ----
 
   const doParseKif = useCallback((text: string) => {
@@ -175,17 +263,47 @@ const PasteProblemCreator: React.FC = () => {
       setKifError('棋譜を貼り付けてください');
       return;
     }
+
+    // Try branch-aware parser first
+    const branchResult = parseKifRecordWithBranches(text);
+    if (branchResult && branchResult.branches.length > 0) {
+      const mainBranch = branchResult.branches[0];
+      setKifBranches(branchResult.branches);
+      setKifTree(branchResult.tree);
+      setActiveBranchId(0);
+      setRootSfen(mainBranch.sfen);
+      setKifMoves(mainBranch.moves);
+      const branchMsg = branchResult.branches.length > 1
+        ? `（${branchResult.branches.length}分岐）`
+        : '';
+      setMessage(`棋譜を読み込みました（${mainBranch.moves.length}手）${branchMsg}`);
+      return;
+    }
+
+    // Fallback to simple parser
     const result = parseKifRecord(text);
     if (!result) {
       setKifError('棋譜を解析できませんでした。KIF形式またはSFEN文字列を確認してください。');
       return;
     }
+    setKifBranches([]);
+    setKifTree([]);
+    setActiveBranchId(0);
     setRootSfen(result.sfen);
     setKifMoves(result.moves);
     setMessage(`棋譜を読み込みました（${result.moves.length}手）`);
   }, []);
 
   const handleParseKif = useCallback(() => doParseKif(kifText), [kifText, doParseKif]);
+
+  const handleSelectBranch = useCallback((branchId: number) => {
+    const branch = kifBranches.find((b) => b.id === branchId);
+    if (!branch) return;
+    setActiveBranchId(branchId);
+    setRootSfen(branch.sfen);
+    setKifMoves(branch.moves);
+    setMessage(`${branch.name}に切り替えました（${branch.moves.length}手）`);
+  }, [kifBranches]);
 
   const handlePasteFromClipboard = useCallback(async () => {
     try {
@@ -510,6 +628,34 @@ const PasteProblemCreator: React.FC = () => {
 
   // ---- Validation ----
 
+  const buildSaveRootAndIntro = useCallback((): {
+    rootSfenForSave: string;
+    introMovesUsi: string[];
+  } => {
+    // intro = move immediately before the choice position
+    if (kifMoves.length === 0) {
+      return { rootSfenForSave: rootSfen, introMovesUsi: [] };
+    }
+
+    const introMove = kifMoves[kifMoves.length - 1];
+    const baseMoves = kifMoves.slice(0, -1);
+
+    const state = parseSfen(INITIAL_SFEN);
+    let { board, senteHand, goteHand, sideToMove } = state;
+    for (const usi of baseMoves) {
+      const result = applyUsiMove(board, senteHand, goteHand, sideToMove, usi);
+      board = result.board;
+      senteHand = result.senteHand;
+      goteHand = result.goteHand;
+      sideToMove = sideToMove === 'sente' ? 'gote' : 'sente';
+    }
+
+    return {
+      rootSfenForSave: boardToSfen(board, sideToMove, senteHand, goteHand, baseMoves.length + 1),
+      introMovesUsi: [introMove],
+    };
+  }, [kifMoves, rootSfen]);
+
   const validate = (): string[] => {
     const errors: string[] = [];
     if (!rootSfen) errors.push('局面が読み込まれていません');
@@ -535,11 +681,12 @@ const PasteProblemCreator: React.FC = () => {
     setSaving(true);
     setMessage('');
     try {
+      const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
       const problem = {
         prompt: prompt.trim() || DEFAULT_PROMPT,
-        root_sfen: rootSfen,
+        root_sfen: rootSfenForSave,
         correct_choice_id: 1,
-        intro_moves_usi: [] as string[],
+        intro_moves_usi: introMovesUsi,
         source_run_id: null,
         root_eval_cp: rootEvalCp,
         root_eval_percent: rootEvalPercent,
@@ -558,7 +705,13 @@ const PasteProblemCreator: React.FC = () => {
       const { problemId } = await saveProblem(problem, choiceData);
       localStorage.removeItem(LOCALSTORAGE_KEY);
       lastSavedRef.current = '';
+      setSavedProblemId(problemId);
       setMessage(`保存しました (problem_id: ${problemId})`);
+
+      // Show delete-workspace modal if opened from workspace
+      if (workspaceId) {
+        setShowDeleteWsModal(true);
+      }
     } catch (e: any) {
       setMessage(`保存エラー: ${e.message}`);
     } finally {
@@ -574,7 +727,14 @@ const PasteProblemCreator: React.FC = () => {
     <>
       <div className="w-full h-[calc(100vh-84px)] overflow-auto">
         <div className="flex items-center gap-3 mb-2">
-          <h2 className="text-lg font-semibold">問題作成（貼付）</h2>
+          <h2 className="text-lg font-semibold">
+            問題作成（貼付）
+            {workspaceName && (
+              <span className="text-[13px] font-normal text-blue-600 ml-2">
+                📁 {workspaceName}
+              </span>
+            )}
+          </h2>
           <span className="text-[12px] text-gray-400">
             {autosaveState === 'saved' ? '自動保存済み' : ''}
           </span>
@@ -620,6 +780,16 @@ const PasteProblemCreator: React.FC = () => {
                 <div className="text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
                   {kifError}
                 </div>
+              )}
+
+              {/* Branch tree diagram */}
+              {kifBranches.length > 1 && (
+                <BranchTree
+                  branches={kifBranches}
+                  tree={kifTree}
+                  activeBranchId={activeBranchId}
+                  onSelectBranch={handleSelectBranch}
+                />
               )}
             </div>
 
@@ -770,6 +940,16 @@ const PasteProblemCreator: React.FC = () => {
                 <button onClick={handleSaveDraft} type="button" className="text-[11px]">
                   途中保存
                 </button>
+                {workspaceId && (
+                  <button
+                    onClick={handleSaveDraftToDb}
+                    disabled={dbSaving}
+                    type="button"
+                    className="bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 text-[11px]"
+                  >
+                    {dbSaving ? '保存中...' : '💾 DBに途中保存'}
+                  </button>
+                )}
                 <button onClick={() => setShowPreview(true)} type="button" className="text-[11px]">
                   プレビュー
                 </button>
@@ -828,25 +1008,28 @@ const PasteProblemCreator: React.FC = () => {
             </div>
             <pre className="font-mono text-[11px] bg-gray-50 p-3 rounded overflow-auto flex-1 mb-4">
               {JSON.stringify(
-                {
-                  problem: {
-                    prompt,
-                    root_sfen: rootSfen,
-                    correct_choice_id: 1,
-                    intro_moves_usi: [],
-                    root_eval_cp: rootEvalCp,
-                    root_eval_percent: rootEvalPercent,
-                    problem_rating: problemRating,
-                    problem_rating_games: 0,
-                    display_no: displayNo,
-                    tags,
-                  },
-                  choices: [
-                    { choice_id: 1, ...pickChoiceFields(choices.correct) },
-                    { choice_id: 2, ...pickChoiceFields(choices.incorrect1) },
-                    { choice_id: 3, ...pickChoiceFields(choices.incorrect2) },
-                  ],
-                },
+                (() => {
+                  const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
+                  return {
+                    problem: {
+                      prompt,
+                      root_sfen: rootSfenForSave,
+                      correct_choice_id: 1,
+                      intro_moves_usi: introMovesUsi,
+                      root_eval_cp: rootEvalCp,
+                      root_eval_percent: rootEvalPercent,
+                      problem_rating: problemRating,
+                      problem_rating_games: 0,
+                      display_no: displayNo,
+                      tags,
+                    },
+                    choices: [
+                      { choice_id: 1, ...pickChoiceFields(choices.correct) },
+                      { choice_id: 2, ...pickChoiceFields(choices.incorrect1) },
+                      { choice_id: 3, ...pickChoiceFields(choices.incorrect2) },
+                    ],
+                  };
+                })(),
                 null,
                 2,
               )}
@@ -874,6 +1057,51 @@ const PasteProblemCreator: React.FC = () => {
           line={[choices[replaySlot].usi, ...choices[replaySlot].line]}
           onClose={() => setReplaySlot(null)}
         />
+      )}
+
+      {/* Post-save: delete workspace? modal */}
+      {showDeleteWsModal && workspaceId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setShowDeleteWsModal(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl p-5 w-full max-w-[380px] mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold mb-2">保存完了</h3>
+            <p className="text-[13px] text-gray-600 mb-4">
+              問題を保存しました{savedProblemId != null ? ` (problem_id: ${savedProblemId})` : ''}。
+              <br />
+              このワークスペースを削除しますか？
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteWsModal(false);
+                  navigate('/workspaces');
+                }}
+                className="text-[13px]"
+              >
+                残す
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await deleteWorkspace(workspaceId);
+                  } catch { /* ignore */ }
+                  setShowDeleteWsModal(false);
+                  navigate('/workspaces');
+                }}
+                className="bg-red-600 text-white border-red-600 hover:bg-red-700 text-[13px] px-4 py-1.5 rounded"
+              >
+                削除する
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
