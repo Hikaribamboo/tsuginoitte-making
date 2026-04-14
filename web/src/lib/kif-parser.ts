@@ -405,15 +405,14 @@ export interface ReadingLineResult {
 export function parseReadingLine(text: string): ReadingLineResult | null {
   const normalizedText = text.replace(/\r\n?/g, '\n');
 
-  // Extract evaluation value from *#評価値=... (only this form)
+  // Extract evaluation value from either "*#評価値=..." or "評価値 ..." forms.
   let evalCp: number | null = null;
-  const evalMatch = normalizedText.match(/\*#評価値=\s*(-?\d+)/);
+  const evalMatch = normalizedText.match(/(?:\*#評価値=|評価値(?:=|\s+))\s*(-?\d+)/);
   if (evalMatch) {
     evalCp = parseInt(evalMatch[1], 10);
   }
 
-
-  // *#読み筋=... があっても無視し、KIF手順リストのみを読み筋とする
+  // 1) KIF手順リスト形式: " 46 ６六角(44) ..."
   const kifLines = normalizedText.split('\n').filter(l => l.match(/^\s*\d+\s+/));
   let moveTexts: string[] | null = null;
   if (kifLines.length > 0) {
@@ -426,6 +425,25 @@ export function parseReadingLine(text: string): ReadingLineResult | null {
       return m ? m[1] : '';
     }).filter(Boolean);
   }
+
+  // 2) 1行読み筋形式: "*検討 ... 評価値 454 読み筋 ▲８五飛(25) △６四角打 ..."
+  if (!moveTexts || moveTexts.length === 0) {
+    const readingStart = normalizedText.search(/(?:\*#)?読み筋(?:=|\s+)/);
+    if (readingStart >= 0) {
+      const readingPart = normalizedText
+        .slice(readingStart)
+        .replace(/^(?:\*#)?読み筋(?:=|\s+)/, '');
+
+      // Match shogi move labels starting with side marker.
+      // Supports examples like "▲８五飛(25)", "△６四角打", "▲同　角(66)".
+      const tokenRe = /[▲△☗☖](?:同[ 　]*(?:歩|香|桂|銀|金|角|飛|玉|王|と|馬|龍|竜)(?:不成|成|打)?(?:\(\d\d\))?|[１２３４５６７８９][一二三四五六七八九](?:歩|香|桂|銀|金|角|飛|玉|王|と|馬|龍|竜)(?:不成|成|打)?(?:\(\d\d\))?)/g;
+      const matches = readingPart.match(tokenRe);
+      if (matches && matches.length > 0) {
+        moveTexts = matches;
+      }
+    }
+  }
+
   if (!moveTexts || moveTexts.length === 0) return null;
 
   const moves: string[] = [];
@@ -436,7 +454,6 @@ export function parseReadingLine(text: string): ReadingLineResult | null {
     const mt = moveTexts[i];
     const trimmed = mt.trim();
     const parsed = parseKifMoveToken(trimmed, prevDest);
-    console.log('[parseReadingLine] label:', trimmed, 'parsed:', parsed, 'prevDest:', prevDest);
     if (!parsed) continue;
     moves.push(parsed.usi);
     labels.push(trimmed);

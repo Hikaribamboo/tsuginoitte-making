@@ -18,12 +18,11 @@ import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
 import type { ChoiceDraft } from '../types/problem';
 import type { Side, HandPieceType, PieceType } from '../types/shogi';
 import { CAN_PROMOTE, pieceKanji } from '../types/shogi';
+import { useNavigationPrompt } from '../hooks/useNavigationPrompt';
 
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 const WINRATE_SCALE = 800;
 const BOARD_SCALE = 0.72;
-const AUTOSAVE_INTERVAL_MS = 10_000;
-const LOCALSTORAGE_KEY = 'paste-problem-draft';
 
 const EMPTY_CHOICE: ChoiceDraft = {
   slotLabel: '',
@@ -50,20 +49,9 @@ interface PasteDraft {
   savedAt: string;
 }
 
-function loadDraft(): PasteDraft | null {
-  try {
-    const raw = localStorage.getItem(LOCALSTORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as PasteDraft;
-  } catch {
-    return null;
-  }
-}
-
-function persistDraft(draft: PasteDraft) {
-  try {
-    localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(draft));
-  } catch { /* ignore quota errors */ }
+function draftSignature(draft: PasteDraft): string {
+  const { savedAt: _savedAt, ...stablePart } = draft;
+  return JSON.stringify(stablePart);
 }
 
 const PasteProblemCreator: React.FC = () => {
@@ -72,14 +60,11 @@ const PasteProblemCreator: React.FC = () => {
   const navigate = useNavigate();
   const workspaceId = searchParams.get('workspace');
 
-  // ---- Restore draft from localStorage (fallback when no workspace) ----
-  const saved = useMemo(() => (workspaceId ? null : loadDraft()), [workspaceId]);
-
   // ---- KIF state ----
-  const [kifText, setKifText] = useState(saved?.kifText ?? '');
+  const [kifText, setKifText] = useState('');
   const [kifError, setKifError] = useState('');
-  const [rootSfen, setRootSfen] = useState(saved?.rootSfen ?? '');
-  const [kifMoves, setKifMoves] = useState<string[]>(saved?.kifMoves ?? []);
+  const [rootSfen, setRootSfen] = useState('');
+  const [kifMoves, setKifMoves] = useState<string[]>([]);
 
   // ---- Branch state ----
   const [kifBranches, setKifBranches] = useState<KifBranch[]>([]);
@@ -88,7 +73,7 @@ const PasteProblemCreator: React.FC = () => {
 
   // ---- Workspace name (for display) ----
   const [workspaceName, setWorkspaceName] = useState<string | null>(null);
-  const [dbSaving, setDbSaving] = useState(false);
+  const [workspaceLoaded, setWorkspaceLoaded] = useState(!workspaceId);
   const [showDeleteWsModal, setShowDeleteWsModal] = useState(false);
   const [savedProblemId, setSavedProblemId] = useState<number | null>(null);
 
@@ -96,7 +81,7 @@ const PasteProblemCreator: React.FC = () => {
 
   // ---- Choice drafts ----
   const [choices, setChoices] = useState<Record<SlotKey, ChoiceDraft>>(
-    saved?.choices ?? {
+    {
       correct: { ...EMPTY_CHOICE, slotLabel: 'correct' },
       incorrect1: { ...EMPTY_CHOICE, slotLabel: 'incorrect1' },
       incorrect2: { ...EMPTY_CHOICE, slotLabel: 'incorrect2' },
@@ -105,7 +90,7 @@ const PasteProblemCreator: React.FC = () => {
 
   // Reading-line inputs / errors per card
   const [readingLineInputs, setReadingLineInputs] = useState<Record<SlotKey, string>>(
-    saved?.readingLineInputs ?? { correct: '', incorrect1: '', incorrect2: '' },
+    { correct: '', incorrect1: '', incorrect2: '' },
   );
   const [readingLineErrors, setReadingLineErrors] = useState<Record<SlotKey, string>>({
     correct: '',
@@ -114,20 +99,26 @@ const PasteProblemCreator: React.FC = () => {
   });
 
   // ---- Form fields ----
-  const [prompt, setPrompt] = useState(saved?.prompt ?? DEFAULT_PROMPT);
-  const [tags, setTags] = useState<string[]>(saved?.tags ?? []);
-  const [displayNo, setDisplayNo] = useState<number | null>(saved?.displayNo ?? null);
-  const [problemRating, setProblemRating] = useState<number>(saved?.problemRating ?? 1200);
-  const [rootEvalCp, setRootEvalCp] = useState<number | null>(saved?.rootEvalCp ?? null);
-  const [rootEvalPercent, setRootEvalPercent] = useState<number | null>(saved?.rootEvalPercent ?? null);
+  const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const [tags, setTags] = useState<string[]>([]);
+  const [displayNo, setDisplayNo] = useState<number | null>(null);
+  const [problemRating, setProblemRating] = useState<number>(1200);
+  const [rootEvalCp, setRootEvalCp] = useState<number | null>(null);
+  const [rootEvalPercent, setRootEvalPercent] = useState<number | null>(null);
 
   // ---- UI state ----
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [message, setMessage] = useState(saved ? '途中保存データを復元しました' : '');
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [message, setMessage] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [replaySlot, setReplaySlot] = useState<SlotKey | null>(null);
-  const [autosaveState, setAutosaveState] = useState<'idle' | 'saved'>('idle');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  useNavigationPrompt(
+    Boolean(workspaceId && hasUnsavedChanges),
+    'DBに途中保存していない変更があります。このままページを移動しますか？',
+  );
 
   // ---- Board interaction state ----
   const [activeSlot, setActiveSlot] = useState<SlotKey | null>(null);
@@ -155,41 +146,22 @@ const PasteProblemCreator: React.FC = () => {
     savedAt: new Date().toISOString(),
   }), [kifText, rootSfen, kifMoves, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent]);
 
-  // ---- Auto-save every 10s ----
   const lastSavedRef = React.useRef<string>('');
-  React.useEffect(() => {
-    const id = window.setInterval(() => {
-      const draft = buildDraft();
-      const sig = JSON.stringify({ ...draft, savedAt: '' });
-      if (sig === lastSavedRef.current) return;
-      persistDraft(draft);
-      lastSavedRef.current = sig;
-      setAutosaveState('saved');
-    }, AUTOSAVE_INTERVAL_MS);
-    return () => window.clearInterval(id);
-  }, [buildDraft]);
 
-  // Manual save
-  const handleSaveDraft = useCallback(() => {
-    const draft = buildDraft();
-    persistDraft(draft);
-    lastSavedRef.current = JSON.stringify({ ...draft, savedAt: '' });
-    setMessage('途中保存しました');
-    setAutosaveState('saved');
-  }, [buildDraft]);
-
-  // Auto-fetch next display_no on mount (only if draft didn't have one)
+  // Auto-fetch next display_no on mount
   React.useEffect(() => {
-    if (saved?.displayNo != null) return;
     getNextDisplayNo()
       .then(setDisplayNo)
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---- Load workspace draft from DB ----
   React.useEffect(() => {
-    if (!workspaceId) return;
+    if (!workspaceId) {
+      setWorkspaceLoaded(true);
+      return;
+    }
+
     let cancelled = false;
     getWorkspace(workspaceId)
       .then((ws) => {
@@ -232,26 +204,78 @@ const PasteProblemCreator: React.FC = () => {
           if (d.problemRating != null) setProblemRating(d.problemRating);
           setRootEvalCp(d.rootEvalCp ?? null);
           setRootEvalPercent(d.rootEvalPercent ?? null);
+          const sig = draftSignature({
+            ...d,
+            choices: d.choices ?? {
+              correct: { ...EMPTY_CHOICE, slotLabel: 'correct' },
+              incorrect1: { ...EMPTY_CHOICE, slotLabel: 'incorrect1' },
+              incorrect2: { ...EMPTY_CHOICE, slotLabel: 'incorrect2' },
+            },
+            readingLineInputs: d.readingLineInputs ?? { correct: '', incorrect1: '', incorrect2: '' },
+            prompt: d.prompt ?? DEFAULT_PROMPT,
+            tags: d.tags ?? [],
+            displayNo: d.displayNo ?? null,
+            problemRating: d.problemRating ?? 1200,
+            rootEvalCp: d.rootEvalCp ?? null,
+            rootEvalPercent: d.rootEvalPercent ?? null,
+            savedAt: d.savedAt ?? new Date().toISOString(),
+            kifText: d.kifText ?? '',
+            rootSfen: d.rootSfen ?? '',
+            kifMoves: d.kifMoves ?? [],
+          });
+          lastSavedRef.current = sig;
+          setHasUnsavedChanges(false);
           setMessage('ワークスペースの下書きを復元しました');
+        } else {
+          const sig = draftSignature(buildDraft());
+          lastSavedRef.current = sig;
+          setHasUnsavedChanges(false);
         }
+        setWorkspaceLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        setWorkspaceLoaded(true);
+      });
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId]);
 
-  // ---- Save draft to DB (workspace) ----
+  React.useEffect(() => {
+    if (!workspaceId || !workspaceLoaded) return;
+    const currentSignature = draftSignature(buildDraft());
+    setHasUnsavedChanges(currentSignature !== lastSavedRef.current);
+  }, [workspaceId, workspaceLoaded, buildDraft]);
+
+  React.useEffect(() => {
+    if (!workspaceId || !hasUnsavedChanges) return;
+
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, [workspaceId, hasUnsavedChanges]);
+
   const handleSaveDraftToDb = useCallback(async () => {
-    if (!workspaceId) return;
-    setDbSaving(true);
+    if (!workspaceId) {
+      setMessage('ワークスペースを開いたときだけ途中保存できます');
+      return;
+    }
+    setDraftSaving(true);
     try {
       const draft = buildDraft();
       await saveWorkspaceDraft(workspaceId, draft as unknown as Record<string, unknown>);
-      setMessage('ワークスペースに途中保存しました');
+      const sig = draftSignature(draft);
+      lastSavedRef.current = sig;
+      setHasUnsavedChanges(false);
+      setMessage('ワークスペースを途中保存しました（DB）');
     } catch (e: any) {
       setMessage(`途中保存エラー: ${e.message}`);
     } finally {
-      setDbSaving(false);
+      setDraftSaving(false);
     }
   }, [workspaceId, buildDraft]);
 
@@ -714,7 +738,6 @@ const PasteProblemCreator: React.FC = () => {
       ];
 
       const { problemId } = await saveProblem(problem, choiceData);
-      localStorage.removeItem(LOCALSTORAGE_KEY);
       lastSavedRef.current = '';
       setSavedProblemId(problemId);
       setMessage(`保存しました (problem_id: ${problemId})`);
@@ -746,9 +769,11 @@ const PasteProblemCreator: React.FC = () => {
               </span>
             )}
           </h2>
-          <span className="text-[12px] text-gray-400">
-            {autosaveState === 'saved' ? '自動保存済み' : ''}
-          </span>
+          {workspaceId && (
+            <span className="text-[12px] text-gray-400">
+              途中保存: {hasUnsavedChanges ? '未保存' : '保存済み'}
+            </span>
+          )}
         </div>
 
         <div className="flex w-full h-[calc(100%-26px)] min-w-0 gap-2 items-start justify-start overflow-auto">
@@ -764,37 +789,36 @@ const PasteProblemCreator: React.FC = () => {
                 onChange={(e) => setKifText(e.target.value)}
                 onPaste={(e) => {
                   const pasted = e.clipboardData.getData('text/plain');
-                  try {
-                    const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
-                    // Always use correct choice's eval for root_eval_cp/percent
-                    const correctEvalCp = choices.correct.eval_cp;
-                    /*...*/
-                    await saveProblem(
-                      {
-                        prompt,
-                        root_sfen: rootSfenForSave,
-                        correct_choice_id: 1,
-                        intro_moves_usi: introMovesUsi,
-                        root_eval_cp: correctEvalCp,
-                        root_eval_percent: choices.correct.eval_percent,
-                        problem_rating: problemRating,
-                        problem_rating_games: 0,
-                        display_no: displayNo,
-                        tags,
-                      },
-                      [
-                        { choice_id: 1, ...pickChoiceFields(choices.correct) },
-                        { choice_id: 2, ...pickChoiceFields(choices.incorrect1) },
-                        { choice_id: 3, ...pickChoiceFields(choices.incorrect2) },
-                      ],
-                    );
-                    setMessage('保存しました');
-                    setSaving(false);
-                    if (displayNo != null) setDisplayNo(displayNo + 1);
-                  } catch (e: any) {
-                    setMessage('保存に失敗しました: ' + (e.message || e.toString()));
-                    setSaving(false);
+                  if (pasted) {
+                    e.preventDefault();
+                    setKifText(pasted);
+                    doParseKif(pasted);
                   }
+                }}
+              />
+              <div className="flex gap-1">
+                <button
+                  className="text-[10px] px-1.5 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
+                  type="button"
+                  onClick={handleParseKif}
+                >
+                  解析
+                </button>
+                <button
+                  className="text-[10px] px-1.5 py-0.5 bg-blue-100 border-blue-300 hover:bg-blue-200"
+                  type="button"
+                  onClick={handlePasteFromClipboard}
+                >
+                  📋 貼り付け
+                </button>
+              </div>
+              {kifError && (
+                <div className="text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
+                  {kifError}
+                </div>
+              )}
+
+              {/* Branch tree diagram */}
               {kifBranches.length > 1 && (
                 <BranchTree
                   branches={kifBranches}
@@ -949,17 +973,14 @@ const PasteProblemCreator: React.FC = () => {
               <TagSelector selected={tags} onChange={setTags} />
 
               <div className="flex flex-wrap gap-1.5 mt-1">
-                <button onClick={handleSaveDraft} type="button" className="text-[11px]">
-                  途中保存
-                </button>
                 {workspaceId && (
                   <button
                     onClick={handleSaveDraftToDb}
-                    disabled={dbSaving}
+                    disabled={draftSaving}
                     type="button"
                     className="bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 text-[11px]"
                   >
-                    {dbSaving ? '保存中...' : '💾 DBに途中保存'}
+                    {draftSaving ? '保存中...' : 'DBに途中保存'}
                   </button>
                 )}
                 <button onClick={() => setShowPreview(true)} type="button" className="text-[11px]">
