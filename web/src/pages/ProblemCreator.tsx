@@ -31,96 +31,16 @@ import type {
   PieceType,
 } from "../types/shogi";
 import { CAN_PROMOTE, pieceKanji } from "../types/shogi";
+import { useNavigationPrompt } from "../hooks/useNavigationPrompt";
 
 type SlotKey = "correct" | "incorrect1" | "incorrect2";
 const WINRATE_SCALE = 800;
 const CHOICE_EVAL_DEPTH = 24;
 const SLOT_ORDER: SlotKey[] = ["correct", "incorrect1", "incorrect2"];
-const AUTOSAVE_DEBOUNCE_MS = 3000;
-const AUTOSYNC_INTERVAL_MS = 3000;
 
 function draftSignature(draft: ProblemCreatorDraft): string {
   const { savedAt: _ignoredSavedAt, ...stablePart } = draft;
   return JSON.stringify(stablePart);
-}
-
-function pickString(local: string, remote: string): string {
-  if (local.trim()) return local;
-  return remote;
-}
-
-function pickNullableNumber(
-  local: number | null,
-  remote: number | null,
-): number | null {
-  if (local !== null) return local;
-  return remote;
-}
-
-function pickArray<T>(local: T[], remote: T[]): T[] {
-  if (local.length > 0) return local;
-  return remote;
-}
-
-function mergeChoicePreferLocal(
-  local: ChoiceDraft,
-  remote: ChoiceDraft,
-): ChoiceDraft {
-  return {
-    slotLabel: local.slotLabel,
-    usi: pickString(local.usi, remote.usi),
-    label: pickString(local.label, remote.label),
-    explanation: pickString(local.explanation, remote.explanation),
-    line: pickArray(local.line, remote.line),
-    eval_cp: pickNullableNumber(local.eval_cp, remote.eval_cp),
-    eval_percent: pickNullableNumber(local.eval_percent, remote.eval_percent),
-  };
-}
-
-/**
- * Merge drafts. `lockedSlot` is the slot whose explanation the local user is
- * currently editing — its explanation is NEVER overwritten by remote.
- */
-function mergeDraftPreferLocal(
-  local: ProblemCreatorDraft,
-  remote: ProblemCreatorDraft,
-  lockedSlot?: SlotKey | null,
-): ProblemCreatorDraft {
-  const mergeChoice = (slot: SlotKey): ChoiceDraft => {
-    const l = local.choices[slot];
-    const r = remote.choices[slot];
-    const merged = mergeChoicePreferLocal(l, r);
-    // If this slot is locked locally, always keep local explanation.
-    if (slot === lockedSlot) {
-      return { ...merged, explanation: l.explanation };
-    }
-    return merged;
-  };
-
-  return {
-    version: 1,
-    favoriteId: local.favoriteId,
-    rootSfen: local.rootSfen,
-    prompt: pickString(local.prompt, remote.prompt),
-    tags: pickArray(local.tags, remote.tags),
-    displayNo: pickNullableNumber(local.displayNo, remote.displayNo),
-    introMoves: pickString(local.introMoves, remote.introMoves),
-    problemRating: local.problemRating,
-    rootEvalCp: pickNullableNumber(local.rootEvalCp, remote.rootEvalCp),
-    rootEvalPercent: pickNullableNumber(
-      local.rootEvalPercent,
-      remote.rootEvalPercent,
-    ),
-    activeSlot: local.activeSlot ?? remote.activeSlot,
-    choices: {
-      correct: mergeChoice("correct"),
-      incorrect1: mergeChoice("incorrect1"),
-      incorrect2: mergeChoice("incorrect2"),
-    },
-    savedAt: new Date().toISOString(),
-    editingSlot: local.editingSlot ?? null,
-    editingAt: local.editingSlot ? new Date().toISOString() : null,
-  };
 }
 
 const EMPTY_CHOICE: ChoiceDraft = {
@@ -228,15 +148,17 @@ const ProblemCreator: React.FC = () => {
     pieceType: PieceType;
   } | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
-  const [autosaveState, setAutosaveState] = useState<
-    "idle" | "saving" | "saved" | "error"
-  >("idle");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const lastSyncedSignatureRef = React.useRef<string>("");
   const lastSyncedAtRef = React.useRef<string>("");
-  const inputFocusedRef = React.useRef(false);
   const [editingSlot, setEditingSlot] = useState<SlotKey | null>(null);
   const [remoteEditingSlot, setRemoteEditingSlot] = useState<SlotKey | null>(
     null,
+  );
+
+  useNavigationPrompt(
+    Boolean(favoriteId && hasUnsavedChanges),
+    "DBに途中保存していない変更があります。このままページを移動しますか？",
   );
 
   const buildDraft = useCallback(
@@ -323,180 +245,23 @@ const ProblemCreator: React.FC = () => {
 
   React.useEffect(() => {
     if (!favoriteId || !rootSfen || !draftRestored) return;
-    const draft = buildDraft();
-    const nextSignature = draftSignature(draft);
-    if (nextSignature === lastSyncedSignatureRef.current) return;
-
-    const timerId = window.setTimeout(() => {
-      void (async () => {
-        try {
-          setAutosaveState("saving");
-          let draftToSave = draft;
-          const snapshot = await fetchProblemDraftForFavorite(favoriteId);
-          if (snapshot) {
-            const remoteDraft = snapshot.draft;
-            if (
-              remoteDraft.favoriteId === favoriteId &&
-              remoteDraft.rootSfen === rootSfen
-            ) {
-              draftToSave = mergeDraftPreferLocal(
-                draft,
-                remoteDraft,
-                editingSlot,
-              );
-            }
-          }
-
-          await saveProblemDraftForFavorite(favoriteId, draftToSave);
-          applyDraft(draftToSave);
-          lastSyncedSignatureRef.current = draftSignature(draftToSave);
-          lastSyncedAtRef.current = draftToSave.savedAt;
-          setAutosaveState("saved");
-        } catch {
-          setAutosaveState("error");
-        }
-      })();
-    }, AUTOSAVE_DEBOUNCE_MS);
-
-    return () => {
-      window.clearTimeout(timerId);
-    };
-  }, [
-    favoriteId,
-    rootSfen,
-    draftRestored,
-    buildDraft,
-    applyDraft,
-    editingSlot,
-  ]);
+    const currentSignature = draftSignature(buildDraft());
+    setHasUnsavedChanges(currentSignature !== lastSyncedSignatureRef.current);
+  }, [favoriteId, rootSfen, draftRestored, buildDraft]);
 
   React.useEffect(() => {
-    if (!favoriteId || !rootSfen || !draftRestored) return;
+    if (!favoriteId || !hasUnsavedChanges) return;
 
-    const intervalId = window.setInterval(() => {
-      void (async () => {
-        const localDraft = buildDraft();
-        const localSignature = draftSignature(localDraft);
-        const localIsDirty = localSignature !== lastSyncedSignatureRef.current;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
 
-        try {
-          const snapshot = await fetchProblemDraftForFavorite(favoriteId);
-          if (!snapshot) return;
-          if (
-            !snapshot.updatedAt ||
-            snapshot.updatedAt <= lastSyncedAtRef.current
-          )
-            return;
-
-          const remoteDraft = snapshot.draft;
-          if (
-            remoteDraft.favoriteId !== favoriteId ||
-            remoteDraft.rootSfen !== rootSfen
-          )
-            return;
-
-          // Check if the remote side has a slot locked for editing.
-          const remoteLockedSlot = remoteDraft.editingSlot ?? null;
-          const remoteEditingAt = remoteDraft.editingAt ?? null;
-          const LOCK_TIMEOUT_MS = 15_000;
-          const remoteEditingExpired =
-            !remoteEditingAt ||
-            Date.now() - new Date(remoteEditingAt).getTime() > LOCK_TIMEOUT_MS;
-          const effectiveRemoteLock =
-            remoteLockedSlot && !remoteEditingExpired ? remoteLockedSlot : null;
-          setRemoteEditingSlot(effectiveRemoteLock);
-
-          if (localIsDirty && inputFocusedRef.current) {
-            // User is actively editing — local wins, protect locked slot.
-            const mergedDraft = mergeDraftPreferLocal(
-              localDraft,
-              remoteDraft,
-              editingSlot,
-            );
-            await saveProblemDraftForFavorite(favoriteId, mergedDraft);
-            applyDraft(mergedDraft);
-            lastSyncedSignatureRef.current = draftSignature(mergedDraft);
-            lastSyncedAtRef.current = mergedDraft.savedAt;
-            setAutosaveState("saved");
-            setMessage("途中保存データを同期してマージしました");
-            return;
-          }
-
-          const remoteSignature = draftSignature(remoteDraft);
-          if (remoteSignature === lastSyncedSignatureRef.current) {
-            lastSyncedAtRef.current = snapshot.updatedAt;
-            return;
-          }
-
-          // Remote wins, but protect locally-locked slot explanation.
-          if (editingSlot) {
-            const safeDraft: ProblemCreatorDraft = {
-              ...remoteDraft,
-              choices: {
-                ...remoteDraft.choices,
-                [editingSlot]: {
-                  ...remoteDraft.choices[editingSlot],
-                  explanation: localDraft.choices[editingSlot].explanation,
-                },
-              },
-              editingSlot: editingSlot,
-              editingAt: new Date().toISOString(),
-            };
-            applyDraft(safeDraft);
-            lastSyncedSignatureRef.current = draftSignature(safeDraft);
-            lastSyncedAtRef.current = snapshot.updatedAt;
-            setMessage("途中保存データを同期しました");
-          } else if (effectiveRemoteLock) {
-            // Remote user is editing a slot — accept remote fully.
-            applyDraft(remoteDraft);
-            lastSyncedSignatureRef.current = remoteSignature;
-            lastSyncedAtRef.current = snapshot.updatedAt;
-            setMessage("途中保存データを同期しました");
-          } else {
-            applyDraft(remoteDraft);
-            lastSyncedSignatureRef.current = remoteSignature;
-            lastSyncedAtRef.current = snapshot.updatedAt;
-            setMessage("途中保存データを同期しました");
-          }
-        } catch {
-          // ignore periodic sync failures
-        }
-      })();
-    }, AUTOSYNC_INTERVAL_MS);
-
+    window.addEventListener("beforeunload", onBeforeUnload);
     return () => {
-      window.clearInterval(intervalId);
+      window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, [
-    favoriteId,
-    rootSfen,
-    draftRestored,
-    applyDraft,
-    buildDraft,
-    editingSlot,
-  ]);
-
-  // Track whether any text input / textarea is focused.
-  React.useEffect(() => {
-    const onFocusIn = (e: FocusEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) {
-        inputFocusedRef.current = true;
-      }
-    };
-    const onFocusOut = (e: FocusEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) {
-        inputFocusedRef.current = false;
-      }
-    };
-    document.addEventListener("focusin", onFocusIn);
-    document.addEventListener("focusout", onFocusOut);
-    return () => {
-      document.removeEventListener("focusin", onFocusIn);
-      document.removeEventListener("focusout", onFocusOut);
-    };
-  }, []);
+  }, [favoriteId, hasUnsavedChanges]);
 
   // ---- Move handling ----
 
@@ -917,6 +682,7 @@ const ProblemCreator: React.FC = () => {
       await saveProblemDraftForFavorite(favoriteId, draft);
       lastSyncedSignatureRef.current = draftSignature(draft);
       lastSyncedAtRef.current = draft.savedAt;
+      setHasUnsavedChanges(false);
       setMessage("途中保存しました（DB）");
     } catch (e: any) {
       setMessage(`途中保存エラー: ${e.message}`);
@@ -1088,14 +854,7 @@ const ProblemCreator: React.FC = () => {
               </span>
               {favoriteId && (
                 <span>
-                  自動保存:{" "}
-                  {autosaveState === "saving"
-                    ? "保存中..."
-                    : autosaveState === "saved"
-                      ? "保存済み"
-                      : autosaveState === "error"
-                        ? "失敗"
-                        : "待機中"}
+                    途中保存: {hasUnsavedChanges ? "未保存" : "保存済み"}
                 </span>
               )}
               {selectedHandPiece && (
