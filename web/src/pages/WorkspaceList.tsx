@@ -59,9 +59,17 @@ const WorkspaceList: React.FC = () => {
     setCreating(true);
     setPasteError('');
     try {
+      const latestWorkspaces = await listWorkspaces();
+      const nextNumber = latestWorkspaces.reduce((maxNo, ws) => {
+        const m = ws.name.match(/^#(\d+)\b/);
+        if (!m) return maxNo;
+        const n = parseInt(m[1], 10);
+        return Number.isNaN(n) ? maxNo : Math.max(maxNo, n);
+      }, 0) + 1;
+
       const now = new Date();
       const pad = (n: number) => String(n).padStart(2, '0');
-      const autoName = `#${workspaces.length + 1} ${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      const autoName = `#${nextNumber} ${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
       const ws = await createWorkspace(autoName);
 
       // Save draft with KIF text and parsed result

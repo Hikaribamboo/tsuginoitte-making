@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase';
 import type { Problem, Choice } from '../types/problem';
 
-/** Get the next display_no (max + 1) */
+/** Get the next display_no (max + 1, minimum 32) */
 export async function getNextDisplayNo(): Promise<number> {
   const { data, error } = await supabase
     .from('next_move_problems')
@@ -11,7 +11,7 @@ export async function getNextDisplayNo(): Promise<number> {
     .single();
   if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows
   const currentMax = data?.display_no ?? 0;
-  return Math.max(currentMax + 1, 35);
+  return Math.max(currentMax + 1, 9);
 }
 
 /** Save a problem and its choices in a single transaction-like flow */

@@ -1,10 +1,15 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Board from '../components/Board';
+import type { ArrowInfo } from '../components/Board';
 import PasteChoiceCard from '../components/PasteChoiceCard';
 import ReadingLineModal from '../components/ReadingLineModal';
 import TagSelector from '../components/TagSelector';
 import BranchTree from '../components/BranchTree';
+import AnalysisPanel from '../components/AnalysisPanel';
+import type { BestMove } from '../components/AnalysisPanel';
+import Toggle from '../components/Toggle';
+import { useBoardStore } from '../hooks/useBoardStore';
 import { INITIAL_SFEN, parseSfen, applyUsiMove, boardToSfen, toUsiSquare } from '../lib/sfen';
 import { usiToLabel, pvToJapanese } from '../lib/usi-to-label';
 import { cpToWinRatePercentFromRootSfen } from '../lib/eval-percent';
@@ -54,6 +59,89 @@ function draftSignature(draft: PasteDraft): string {
   return JSON.stringify(stablePart);
 }
 
+function usiDestinationToBoardCoord(usi: string): { file: number; rank: number } | null {
+  const dropMatch = usi.match(/^[PLNSGBRK]\*([1-9])([a-i])$/i);
+  if (dropMatch) {
+    const file = parseInt(dropMatch[1], 10);
+    const rank = dropMatch[2].toLowerCase().charCodeAt(0) - 'a'.charCodeAt(0) + 1;
+    return { file, rank };
+  }
+
+  const moveMatch = usi.match(/^[1-9][a-i]([1-9])([a-i])\+?$/i);
+  if (moveMatch) {
+    const file = parseInt(moveMatch[1], 10);
+    const rank = moveMatch[2].toLowerCase().charCodeAt(0) - 'a'.charCodeAt(0) + 1;
+    return { file, rank };
+  }
+
+  return null;
+}
+
+function isSfenLikeInput(text: string): boolean {
+  const normalized = text.replace(/\r\n?/g, '\n').trim();
+  if (!normalized || normalized.includes('\n')) return false;
+
+  const oneLine = normalized.replace(/\s+/g, ' ');
+  const withoutPrefix = oneLine.replace(/^position\s+sfen\s+/i, '');
+  const sfen = withoutPrefix.split(/\s+moves\s+/i)[0]?.trim() ?? '';
+  const parts = sfen.split(/\s+/);
+  return parts.length >= 3 && parts[0].includes('/') && /^[bw]$/i.test(parts[1]);
+}
+
+function isKifInput(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return !isSfenLikeInput(trimmed);
+}
+
+function toggleSfenSideToMove(sfen: string): string {
+  const parts = sfen.trim().split(/\s+/);
+  if (parts.length < 2) return sfen;
+  parts[1] = parts[1] === 'w' ? 'b' : 'w';
+  return parts.join(' ');
+}
+
+function extractBaseSfenFromPositionText(text: string): string | null {
+  const normalized = text.replace(/\r\n?/g, '\n').trim().replace(/\s+/g, ' ');
+  if (!normalized) return null;
+
+  let source = normalized;
+  const embeddedPosition = normalized.match(/position\s+sfen\s+(.+)$/i);
+  if (embeddedPosition?.[1]) {
+    source = embeddedPosition[1].trim();
+  }
+  if (/^sfen\s+/i.test(source)) {
+    source = source.replace(/^sfen\s+/i, '').trim();
+  }
+
+  const baseSfen = source.split(/\s+moves\s+/i)[0]?.trim() ?? '';
+  const parts = baseSfen.split(/\s+/);
+  if (parts.length >= 3 && parts[0].includes('/') && /^[bw]$/i.test(parts[1])) {
+    return baseSfen;
+  }
+  return null;
+}
+
+function extractBaseSfenFromBoardDiagramText(text: string): string | null {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const withoutMoves = lines.filter((line) => !/^\s*\d+\s+/.test(line)).join('\n');
+  const parsed = parseKifRecord(withoutMoves);
+  return parsed?.sfen ?? null;
+}
+
+function deriveSourceSfen(kifText: string): string {
+  const fromPositionText = extractBaseSfenFromPositionText(kifText);
+  if (fromPositionText) return fromPositionText;
+
+  const hasBoardDiagram = kifText.includes('先手の持駒') || kifText.includes('後手の持駒');
+  if (hasBoardDiagram) {
+    const fromBoardDiagram = extractBaseSfenFromBoardDiagramText(kifText);
+    if (fromBoardDiagram) return fromBoardDiagram;
+  }
+
+  return INITIAL_SFEN;
+}
+
 const PasteProblemCreator: React.FC = () => {
   // ---- Workspace (DB-backed draft) ----
   const [searchParams] = useSearchParams();
@@ -65,6 +153,7 @@ const PasteProblemCreator: React.FC = () => {
   const [kifError, setKifError] = useState('');
   const [rootSfen, setRootSfen] = useState('');
   const [kifMoves, setKifMoves] = useState<string[]>([]);
+  const [canFlipTurn, setCanFlipTurn] = useState(false);
 
   // ---- Branch state ----
   const [kifBranches, setKifBranches] = useState<KifBranch[]>([]);
@@ -120,6 +209,26 @@ const PasteProblemCreator: React.FC = () => {
     'DBに途中保存していない変更があります。このままページを移動しますか？',
   );
 
+  // ---- Analysis mode (検討モード) ----
+  const store = useBoardStore();
+  const [analysisMode, setAnalysisMode] = useState(false);
+  const [candidateMoves, setCandidateMoves] = useState<BestMove[]>([]);
+  const handleCandidateMoves = useCallback((moves: BestMove[]) => {
+    setCandidateMoves(moves);
+  }, []);
+  const arrows: ArrowInfo[] = candidateMoves.map((m, idx) => ({
+    from: m.from,
+    to: m.to,
+    style: idx === 0 ? 'primary' : idx === 1 ? 'secondary' : ('tertiary' as const),
+    showNextLabel: idx === 1,
+  }));
+
+  // Initialize store when rootSfen changes
+  React.useEffect(() => {
+    if (rootSfen) store.loadFromSfen(rootSfen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootSfen]);
+
   // ---- Board interaction state ----
   const [activeSlot, setActiveSlot] = useState<SlotKey | null>(null);
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number } | null>(null);
@@ -172,6 +281,7 @@ const PasteProblemCreator: React.FC = () => {
           setKifText(d.kifText ?? '');
           setRootSfen(d.rootSfen ?? '');
           setKifMoves(d.kifMoves ?? []);
+          setCanFlipTurn(isKifInput(d.kifText ?? ''));
 
           // Rebuild branch tree from saved KIF text so branch UI is visible after restore
           if (d.kifText?.trim()) {
@@ -292,6 +402,7 @@ const PasteProblemCreator: React.FC = () => {
     const branchResult = parseKifRecordWithBranches(text);
     if (branchResult && branchResult.branches.length > 0) {
       const mainBranch = branchResult.branches[0];
+      setCanFlipTurn(isKifInput(text));
       setKifBranches(branchResult.branches);
       setKifTree(branchResult.tree);
       setActiveBranchId(0);
@@ -310,6 +421,7 @@ const PasteProblemCreator: React.FC = () => {
       setKifError('棋譜を解析できませんでした。KIF形式またはSFEN文字列を確認してください。');
       return;
     }
+    setCanFlipTurn(isKifInput(text));
     setKifBranches([]);
     setKifTree([]);
     setActiveBranchId(0);
@@ -363,7 +475,10 @@ const PasteProblemCreator: React.FC = () => {
         return;
       }
 
-      const result = parseReadingLine(text);
+      const registeredUsi = choices[slot].usi;
+      const result = parseReadingLine(text, {
+        initialPrevDest: registeredUsi ? usiDestinationToBoardCoord(registeredUsi) ?? undefined : undefined,
+      });
       console.log('[handleParseReadingLine] text:', text);
       console.log('[handleParseReadingLine] parseReadingLine result:', result);
       if (!result || result.moves.length === 0) {
@@ -382,8 +497,13 @@ const PasteProblemCreator: React.FC = () => {
       // 1) candidate move is included at the head of PV
       // 2) PV starts from the move after candidate (選択肢usiが既に登録されている場合)
       // 3) PV starts from the move after candidate かつ 選択肢usi未設定の場合 → 先頭手を自動採用
-      const includesChoiceMove = firstMoveSide === rootSide;
-      let choiceUsi = includesChoiceMove ? result.moves[0] : choices[slot].usi;
+      //
+      // 判定方針: 選択肢が登録済みなら先頭手がそのUSIと一致する場合のみ省く。
+      // 未登録の場合は hand side の向きで判定（従来通り）。
+      const includesChoiceMove = registeredUsi
+        ? result.moves[0] === registeredUsi
+        : firstMoveSide === rootSide;
+      let choiceUsi = includesChoiceMove ? result.moves[0] : registeredUsi;
       let continuationMoves: string[];
       if (includesChoiceMove) {
         continuationMoves = result.moves.slice(1, 13);
@@ -435,9 +555,14 @@ const PasteProblemCreator: React.FC = () => {
         setRootEvalCp(result.evalCp);
         setRootEvalPercent(evalPercent);
       }
+
+      const lineLen = continuationMoves.length;
+      const evalStr = result.evalCp !== null ? ` 評価値${result.evalCp}cp` : '';
+      setMessage(`読み筋を登録しました（${lineLen}手${evalStr}）`);
     },
     [rootSfen, parsed, markerSide, choices],
   );
+
 
   // ---- Recalculate % from cp ----
 
@@ -488,7 +613,76 @@ const PasteProblemCreator: React.FC = () => {
 
   const handleCellClick = useCallback(
     (row: number, col: number) => {
-      if (!parsed || !activeSlot || promotionChoice) return;
+      if (promotionChoice) return;
+
+      if (analysisMode) {
+        // --- Analysis mode: move pieces on the store board ---
+        const storeBoard = store.board;
+        const storeSide = store.sideToMove;
+
+        if (selectedHandPiece) {
+          const validDrops = getValidDropSquares(storeBoard, storeSide, selectedHandPiece.type);
+          if (!validDrops.some((s) => s.row === row && s.col === col)) {
+            const piece = storeBoard[row][col];
+            if (piece && piece.side === storeSide) {
+              setSelectedHandPiece(null);
+              setSelectedCell({ row, col });
+            }
+            return;
+          }
+          const usi = `${selectedHandPiece.type}*${toUsiSquare(row, col)}`;
+          store.applyMove(usi);
+          setSelectedHandPiece(null);
+          setSelectedCell(null);
+          return;
+        }
+
+        if (!selectedCell) {
+          const piece = storeBoard[row][col];
+          if (piece && piece.side === storeSide) setSelectedCell({ row, col });
+          return;
+        }
+        if (selectedCell.row === row && selectedCell.col === col) {
+          setSelectedCell(null);
+          return;
+        }
+        const targetPiece = storeBoard[row][col];
+        if (targetPiece && targetPiece.side === storeSide) {
+          setSelectedCell({ row, col });
+          return;
+        }
+
+        const validMoves = getValidDestinations(storeBoard, selectedCell.row, selectedCell.col, storeSide);
+        if (!validMoves.some((s) => s.row === row && s.col === col)) return;
+
+        const fromSq = toUsiSquare(selectedCell.row, selectedCell.col);
+        const toSq = toUsiSquare(row, col);
+        const piece = storeBoard[selectedCell.row][selectedCell.col];
+        setSelectedCell(null);
+
+        if (piece && !piece.promoted && CAN_PROMOTE[piece.type]) {
+          const inPromotionZone =
+            (storeSide === 'sente' && (row <= 2 || selectedCell.row <= 2)) ||
+            (storeSide === 'gote' && (row >= 6 || selectedCell.row >= 6));
+          if (inPromotionZone) {
+            const mustPromote =
+              (piece.type === 'P' && ((storeSide === 'sente' && row === 0) || (storeSide === 'gote' && row === 8))) ||
+              (piece.type === 'L' && ((storeSide === 'sente' && row === 0) || (storeSide === 'gote' && row === 8))) ||
+              (piece.type === 'N' && ((storeSide === 'sente' && row <= 1) || (storeSide === 'gote' && row >= 7)));
+            if (mustPromote) {
+              store.applyMove(`${fromSq}${toSq}+`);
+            } else {
+              setPromotionChoice({ fromSq, toSq, pieceType: piece.type });
+            }
+            return;
+          }
+        }
+        store.applyMove(`${fromSq}${toSq}`);
+        return;
+      }
+
+      // --- Registration mode ---
+      if (!parsed || !activeSlot) return;
       const { board: b, sideToMove: side } = parsed;
 
       if (selectedHandPiece) {
@@ -545,27 +739,33 @@ const PasteProblemCreator: React.FC = () => {
       }
       registerMove(`${fromSq}${toSq}`);
     },
-    [parsed, activeSlot, selectedCell, selectedHandPiece, registerMove, promotionChoice],
+    [analysisMode, store, parsed, activeSlot, selectedCell, selectedHandPiece, registerMove, promotionChoice],
   );
 
   const handlePromotionSelect = useCallback(
     (promote: boolean) => {
       if (!promotionChoice) return;
-      registerMove(`${promotionChoice.fromSq}${promotionChoice.toSq}${promote ? '+' : ''}`);
+      const usi = `${promotionChoice.fromSq}${promotionChoice.toSq}${promote ? '+' : ''}`;
+      if (analysisMode) {
+        store.applyMove(usi);
+      } else {
+        registerMove(usi);
+      }
       setPromotionChoice(null);
     },
-    [promotionChoice, registerMove],
+    [promotionChoice, analysisMode, store, registerMove],
   );
 
   const handleHandPieceClick = useCallback(
     (side: Side, type: HandPieceType) => {
-      if (!parsed || side !== parsed.sideToMove) return;
+      const currentSide = analysisMode ? store.sideToMove : parsed?.sideToMove;
+      if (!currentSide || side !== currentSide) return;
       setSelectedCell(null);
       setSelectedHandPiece((prev) =>
         prev?.side === side && prev?.type === type ? null : { side, type },
       );
     },
-    [parsed],
+    [analysisMode, store, parsed],
   );
 
   // ---- Field handlers ----
@@ -623,7 +823,7 @@ const PasteProblemCreator: React.FC = () => {
       const choiceData = targetSlots.map((slot) => {
         const c = choices[slot];
         // Convert USI reading line to Japanese labels
-        const fullPv = [c.usi, ...c.line];
+        const fullPv = buildReplayLine(c);
         const labels = pvToJapanese(fullPv, rootSfen, fullPv.length);
         return {
           label: c.label,
@@ -672,7 +872,8 @@ const PasteProblemCreator: React.FC = () => {
     const introMove = kifMoves[kifMoves.length - 1];
     const baseMoves = kifMoves.slice(0, -1);
 
-    const state = parseSfen(INITIAL_SFEN);
+    const sourceSfen = deriveSourceSfen(kifText);
+    const state = parseSfen(sourceSfen);
     let { board, senteHand, goteHand, sideToMove } = state;
     for (const usi of baseMoves) {
       const result = applyUsiMove(board, senteHand, goteHand, sideToMove, usi);
@@ -683,10 +884,16 @@ const PasteProblemCreator: React.FC = () => {
     }
 
     return {
-      rootSfenForSave: boardToSfen(board, sideToMove, senteHand, goteHand, baseMoves.length + 1),
+      rootSfenForSave: boardToSfen(
+        board,
+        sideToMove,
+        senteHand,
+        goteHand,
+        state.moveNumber + baseMoves.length,
+      ),
       introMovesUsi: [introMove],
     };
-  }, [kifMoves, rootSfen]);
+  }, [kifText, kifMoves, rootSfen]);
 
   const validate = (): string[] => {
     const errors: string[] = [];
@@ -840,11 +1047,12 @@ const PasteProblemCreator: React.FC = () => {
               >
                 <div style={{ transform: `scale(${BOARD_SCALE})`, transformOrigin: 'top left' }}>
                   <Board
-                    board={parsed.board}
-                    senteHand={parsed.senteHand}
-                    goteHand={parsed.goteHand}
-                    sideToMove={parsed.sideToMove}
+                    board={analysisMode ? store.board : parsed.board}
+                    senteHand={analysisMode ? store.senteHand : parsed.senteHand}
+                    goteHand={analysisMode ? store.goteHand : parsed.goteHand}
+                    sideToMove={analysisMode ? store.sideToMove : parsed.sideToMove}
                     selectedCell={selectedCell}
+                    arrows={analysisMode ? arrows : undefined}
                     onCellClick={handleCellClick}
                     onHandPieceClick={handleHandPieceClick}
                   />
@@ -855,7 +1063,7 @@ const PasteProblemCreator: React.FC = () => {
             {parsed && (
               <div className="flex gap-2 text-[11px] text-gray-500 flex-wrap items-center">
                 <span>
-                  {parsed.sideToMove === 'sente' ? '☗先手' : '☖後手'}
+                  {(analysisMode ? store.sideToMove : parsed.sideToMove) === 'sente' ? '☗先手' : '☖後手'}
                 </span>
                 {kifMoves.length > 0 && <span>{kifMoves.length}手目</span>}
                 {selectedHandPiece && (
@@ -868,6 +1076,53 @@ const PasteProblemCreator: React.FC = () => {
                     {rootEvalCp}cp ({rootEvalPercent}%)
                   </span>
                 )}
+                {canFlipTurn && (
+                  <button
+                    className="text-[10px] px-1.5 py-0.5"
+                    type="button"
+                    onClick={() => {
+                      setRootSfen((prev) => toggleSfenSideToMove(prev));
+                      setSelectedCell(null);
+                      setSelectedHandPiece(null);
+                      setMessage('手番を入れ替えました（KIF補正）');
+                    }}
+                  >
+                    手番入替
+                  </button>
+                )}
+                {analysisMode && store.moveHistory.length > 0 && (
+                  <button
+                    className="text-[10px] px-1.5 py-0.5"
+                    type="button"
+                    onClick={() => {
+                      store.loadFromSfen(rootSfen);
+                      setSelectedCell(null);
+                      setSelectedHandPiece(null);
+                    }}
+                  >
+                    ↩ rootに戻す
+                  </button>
+                )}
+              </div>
+            )}
+            {analysisMode && parsed && (
+              <div className="flex gap-1 mt-0.5">
+                <button
+                  className="text-[10px] px-1.5 py-0.5"
+                  type="button"
+                  onClick={() => { store.undoMove(); setSelectedCell(null); setSelectedHandPiece(null); }}
+                  disabled={store.moveHistory.length === 0}
+                >
+                  ↩ 一手戻す
+                </button>
+                <button
+                  className="text-[10px] px-1.5 py-0.5"
+                  type="button"
+                  onClick={() => { store.redoMove(); setSelectedCell(null); setSelectedHandPiece(null); }}
+                  disabled={!store.canRedo()}
+                >
+                  ↪ 一手進める
+                </button>
               </div>
             )}
             {promotionChoice && parsed && (
@@ -879,7 +1134,7 @@ const PasteProblemCreator: React.FC = () => {
                 >
                   {pieceKanji({
                     type: promotionChoice.pieceType,
-                    side: parsed.sideToMove,
+                    side: analysisMode ? store.sideToMove : parsed.sideToMove,
                     promoted: false,
                   })}
                 </button>
@@ -889,11 +1144,34 @@ const PasteProblemCreator: React.FC = () => {
                 >
                   {pieceKanji({
                     type: promotionChoice.pieceType,
-                    side: parsed.sideToMove,
+                    side: analysisMode ? store.sideToMove : parsed.sideToMove,
                     promoted: true,
                   })}
                 </button>
               </div>
+            )}
+
+            {parsed && (
+              <AnalysisPanel
+                sfen={analysisMode ? store.getSfen() : rootSfen}
+                onCandidateMoves={handleCandidateMoves}
+                headerExtra={
+                  <Toggle
+                    checked={analysisMode}
+                    label="検討モード"
+                    onChange={(v) => {
+                      setAnalysisMode(v);
+                      setSelectedCell(null);
+                      setSelectedHandPiece(null);
+                      if (v) {
+                        setActiveSlot(null);
+                      } else {
+                        store.loadFromSfen(rootSfen);
+                      }
+                    }}
+                  />
+                }
+              />
             )}
 
             <div className="flex flex-col gap-1 mt-1">
@@ -1087,7 +1365,7 @@ const PasteProblemCreator: React.FC = () => {
       {replaySlot && choices[replaySlot].usi && rootSfen && (
         <ReadingLineModal
           rootSfen={rootSfen}
-          line={[choices[replaySlot].usi, ...choices[replaySlot].line]}
+          line={buildReplayLine(choices[replaySlot])}
           onClose={() => setReplaySlot(null)}
         />
       )}
@@ -1150,6 +1428,11 @@ function pickChoiceFields(draft: ChoiceDraft) {
     eval_cp: draft.eval_cp,
     eval_percent: draft.eval_percent,
   };
+}
+
+function buildReplayLine(draft: ChoiceDraft): string[] {
+  if (!draft.usi) return draft.line;
+  return draft.line[0] === draft.usi ? draft.line : [draft.usi, ...draft.line];
 }
 
 export default PasteProblemCreator;
