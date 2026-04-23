@@ -502,11 +502,18 @@ export function parseKifRecordWithBranches(text: string): KifBranchParseResult |
   // Parse each segment into moves
   function parseMoveLines(
     moveLines: string[],
-  ): { moves: string[]; labels: string[]; moveNumbers: number[] } {
+    initialPrevDest: { file: number; rank: number } | null = null,
+  ): {
+    moves: string[];
+    labels: string[];
+    moveNumbers: number[];
+    destinations: { file: number; rank: number }[];
+  } {
     const moves: string[] = [];
     const labels: string[] = [];
     const moveNumbers: number[] = [];
-    let prevDest: { file: number; rank: number } | null = null;
+    const destinations: { file: number; rank: number }[] = [];
+    let prevDest: { file: number; rank: number } | null = initialPrevDest;
 
     for (const line of moveLines) {
       if (line.trimStart().startsWith('*')) continue;
@@ -524,9 +531,10 @@ export function parseKifRecordWithBranches(text: string): KifBranchParseResult |
       moves.push(parsed.usi);
       labels.push(moveText);
       moveNumbers.push(moveNum);
+      destinations.push(parsed.dest);
       prevDest = parsed.dest;
     }
-    return { moves, labels, moveNumbers };
+    return { moves, labels, moveNumbers, destinations };
   }
 
   // Parse main line first
@@ -566,12 +574,15 @@ export function parseKifRecordWithBranches(text: string): KifBranchParseResult |
   // Process variation segments
   for (let i = 1; i < segments.length; i++) {
     const seg = segments[i];
-    const varParsed = parseMoveLines(seg.moveLines);
+    const prefixLength = seg.branchMoveNumber - 1;
+    const initialPrevDest = prefixLength > 0
+      ? mainParsed.destinations[prefixLength - 1] ?? null
+      : null;
+    const varParsed = parseMoveLines(seg.moveLines, initialPrevDest);
     if (varParsed.moves.length === 0) continue;
 
     // The branch diverges at branchMoveNumber, so we take the main line
     // up to (branchMoveNumber - 1) as the shared prefix
-    const prefixLength = seg.branchMoveNumber - 1;
     const sharedPrefix = mainParsed.moves.slice(0, prefixLength);
     const fullMoves = [...sharedPrefix, ...varParsed.moves];
 
@@ -665,6 +676,11 @@ export function parseReadingLine(
   options?: ReadingLineParseOptions,
 ): ReadingLineResult | null {
   const normalizedText = text.replace(/\r\n?/g, '\n');
+  const piecePattern = '(?:成銀|成桂|成香|歩|香|桂|銀|金|角|飛|玉|王|と|馬|龍|竜)';
+  const tokenRe = new RegExp(
+    `[▲△☗☖](?:同[ 　]*${piecePattern}(?:不成|成|打)?(?:\\(\\d\\d\\))?|[１２３４５６７８９1-9][一二三四五六七八九]${piecePattern}(?:不成|成|打)?(?:\\(\\d\\d\\))?)`,
+    'g',
+  );
 
   // Extract evaluation value from either "*#評価値=..." or "評価値 ..." forms.
   let evalCp: number | null = null;
@@ -692,7 +708,6 @@ export function parseReadingLine(
 
       // Match shogi move labels starting with side marker.
       // Supports examples like "▲８五飛(25)", "△６四角打", "▲同　角(66)".
-      const tokenRe = /[▲△☗☖](?:同[ 　]*(?:歩|香|桂|銀|金|角|飛|玉|王|と|馬|龍|竜)(?:不成|成|打)?(?:\(\d\d\))?|[１２３４５６７８９1-9][一二三四五六七八九](?:歩|香|桂|銀|金|角|飛|玉|王|と|馬|龍|竜)(?:不成|成|打)?(?:\(\d\d\))?)/g;
       const matches = readingPart.match(tokenRe);
       if (matches && matches.length > 0) {
         moveTexts = matches;
@@ -700,17 +715,16 @@ export function parseReadingLine(
     }
   }
 
-  if (!moveTexts || moveTexts.length === 0) return null;
-
   // 3) フォールバック: ヘッダーなしで直接手順が貼り付けられた場合
   //    例: "△７六飛(86) ▲５三歩打 ..." や読み筋ヘッダー未検出の形式
   if (!moveTexts || moveTexts.length === 0) {
-    const tokenRe = /[▲△☗☖](?:同[ 　]*(?:歩|香|桂|銀|金|角|飛|玉|王|と|馬|龍|竜)(?:不成|成|打)?(?:\(\d\d\))?|[１２３４５６７８９1-9][一二三四五六七八九](?:歩|香|桂|銀|金|角|飛|玉|王|と|馬|龍|竜)(?:不成|成|打)?(?:\(\d\d\))?)/g;
     const matches = normalizedText.match(tokenRe);
     if (matches && matches.length > 0) {
       moveTexts = matches;
     }
   }
+
+  if (!moveTexts || moveTexts.length === 0) return null;
 
   const moves: string[] = [];
   const labels: string[] = [];

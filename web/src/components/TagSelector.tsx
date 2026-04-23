@@ -32,7 +32,7 @@ const TagSelector: React.FC<TagSelectorProps> = ({ selected, onChange }) => {
               {group.tags.map((tag) => (
                 <button
                   key={tag.value}
-                  className={`px-2 py-0.5 rounded-full text-[11px] border transition-all ${selected.includes(tag.value) ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700' : 'border-gray-300 bg-white'}`}
+                  className={`min-w-[4.75rem] px-2.5 py-0.5 rounded-full text-[11px] border transition-all ${selected.includes(tag.value) ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700' : 'border-gray-300 bg-white'}`}
                   onClick={() => toggle(tag.value)}
                   type="button"
                 >
@@ -69,7 +69,7 @@ const TagSelector: React.FC<TagSelectorProps> = ({ selected, onChange }) => {
                   <button
                     key={tag.value}
                     type="button"
-                    className="px-2 py-0.5 rounded-full text-[11px] border bg-blue-600 text-white border-blue-600"
+                    className="min-w-[4.75rem] px-2.5 py-0.5 rounded-full text-[11px] border bg-blue-600 text-white border-blue-600"
                     onClick={() => toggle(tag.value)}
                   >
                     {tag.label} ×

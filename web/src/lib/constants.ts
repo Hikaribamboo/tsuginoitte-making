@@ -80,6 +80,14 @@ export const TAG_CATEGORIES: TagCategory[] = [
       { value: 'henachoko_jikyusen', label: 'へなちょこ持久戦' },
     ],
   },
+  {
+    category: '対局段階',
+    tags: [
+      { value: 'opening', label: '序盤' },
+      { value: 'middlegame', label: '中盤' },
+      { value: 'endgame', label: '終盤' },
+    ],
+  },
 ] ;
 
 export const AVAILABLE_TAGS = TAG_CATEGORIES.flatMap((g) => g.tags);
