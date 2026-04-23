@@ -38,6 +38,15 @@ const WINRATE_SCALE = 800;
 const CHOICE_EVAL_DEPTH = 24;
 const SLOT_ORDER: SlotKey[] = ["correct", "incorrect1", "incorrect2"];
 
+function shuffledSlots(): SlotKey[] {
+  const slots = [...SLOT_ORDER];
+  for (let i = slots.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [slots[i], slots[j]] = [slots[j], slots[i]];
+  }
+  return slots;
+}
+
 function draftSignature(draft: ProblemCreatorDraft): string {
   const { savedAt: _ignoredSavedAt, ...stablePart } = draft;
   return JSON.stringify(stablePart);
@@ -712,8 +721,14 @@ const ProblemCreator: React.FC = () => {
     setMessage("");
 
     try {
-      // Assign choice_ids: correct=1, incorrect1=2, incorrect2=3
-      const correctChoiceId = 1;
+      // Randomize display order so the correct choice is not fixed at index 0.
+      const randomizedOrder = shuffledSlots();
+      const choiceIdBySlot: Record<SlotKey, number> = {
+        correct: randomizedOrder.indexOf("correct") + 1,
+        incorrect1: randomizedOrder.indexOf("incorrect1") + 1,
+        incorrect2: randomizedOrder.indexOf("incorrect2") + 1,
+      };
+      const correctChoiceId = choiceIdBySlot.correct;
 
       // intro_moves_usi must be exactly one move: the move immediately before choices.
       const introTokens = introMoves.trim()
@@ -742,9 +757,18 @@ const ProblemCreator: React.FC = () => {
       };
 
       const choiceData = [
-        { choice_id: 1, ...pickChoiceFields(choices.correct) },
-        { choice_id: 2, ...pickChoiceFields(choices.incorrect1) },
-        { choice_id: 3, ...pickChoiceFields(choices.incorrect2) },
+        {
+          choice_id: choiceIdBySlot.correct,
+          ...pickChoiceFields(choices.correct),
+        },
+        {
+          choice_id: choiceIdBySlot.incorrect1,
+          ...pickChoiceFields(choices.incorrect1),
+        },
+        {
+          choice_id: choiceIdBySlot.incorrect2,
+          ...pickChoiceFields(choices.incorrect2),
+        },
       ];
 
       const { problemId } = await saveProblem(problem, choiceData);

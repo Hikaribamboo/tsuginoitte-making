@@ -28,6 +28,16 @@ import { useNavigationPrompt } from '../hooks/useNavigationPrompt';
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 const WINRATE_SCALE = 800;
 const BOARD_SCALE = 0.72;
+const SLOT_ORDER: SlotKey[] = ['correct', 'incorrect1', 'incorrect2'];
+
+function shuffledSlots(): SlotKey[] {
+  const slots = [...SLOT_ORDER];
+  for (let i = slots.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [slots[i], slots[j]] = [slots[j], slots[i]];
+  }
+  return slots;
+}
 
 const EMPTY_CHOICE: ChoiceDraft = {
   slotLabel: '',
@@ -476,8 +486,12 @@ const PasteProblemCreator: React.FC = () => {
       }
 
       const registeredUsi = choices[slot].usi;
+      const introMoveUsi = kifMoves.length > 0 ? kifMoves[kifMoves.length - 1] : '';
+      const initialPrevDest = registeredUsi
+        ? usiDestinationToBoardCoord(registeredUsi) ?? undefined
+        : (introMoveUsi ? usiDestinationToBoardCoord(introMoveUsi) ?? undefined : undefined);
       const result = parseReadingLine(text, {
-        initialPrevDest: registeredUsi ? usiDestinationToBoardCoord(registeredUsi) ?? undefined : undefined,
+        initialPrevDest,
       });
       console.log('[handleParseReadingLine] text:', text);
       console.log('[handleParseReadingLine] parseReadingLine result:', result);
@@ -560,7 +574,7 @@ const PasteProblemCreator: React.FC = () => {
       const evalStr = result.evalCp !== null ? ` 評価値${result.evalCp}cp` : '';
       setMessage(`読み筋を登録しました（${lineLen}手${evalStr}）`);
     },
-    [rootSfen, parsed, markerSide, choices],
+    [rootSfen, parsed, markerSide, choices, kifMoves],
   );
 
 
@@ -920,6 +934,13 @@ const PasteProblemCreator: React.FC = () => {
     setSaving(true);
     setMessage('');
     try {
+      const randomizedOrder = shuffledSlots();
+      const choiceIdBySlot: Record<SlotKey, number> = {
+        correct: randomizedOrder.indexOf('correct') + 1,
+        incorrect1: randomizedOrder.indexOf('incorrect1') + 1,
+        incorrect2: randomizedOrder.indexOf('incorrect2') + 1,
+      };
+
       const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
       // Always use correct choice's eval for root_eval_cp/percent
       const correctEvalCp = choices.correct.eval_cp;
@@ -927,7 +948,7 @@ const PasteProblemCreator: React.FC = () => {
       const problem = {
         prompt: prompt.trim() || DEFAULT_PROMPT,
         root_sfen: rootSfenForSave,
-        correct_choice_id: 1,
+        correct_choice_id: choiceIdBySlot.correct,
         intro_moves_usi: introMovesUsi,
         source_run_id: null,
         root_eval_cp: correctEvalCp,
@@ -939,9 +960,18 @@ const PasteProblemCreator: React.FC = () => {
       };
 
       const choiceData = [
-        { choice_id: 1, ...pickChoiceFields(choices.correct) },
-        { choice_id: 2, ...pickChoiceFields(choices.incorrect1) },
-        { choice_id: 3, ...pickChoiceFields(choices.incorrect2) },
+        {
+          choice_id: choiceIdBySlot.correct,
+          ...pickChoiceFields(choices.correct),
+        },
+        {
+          choice_id: choiceIdBySlot.incorrect1,
+          ...pickChoiceFields(choices.incorrect1),
+        },
+        {
+          choice_id: choiceIdBySlot.incorrect2,
+          ...pickChoiceFields(choices.incorrect2),
+        },
       ];
 
       const { problemId } = await saveProblem(problem, choiceData);
