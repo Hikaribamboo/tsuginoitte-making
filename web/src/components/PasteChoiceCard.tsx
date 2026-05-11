@@ -14,6 +14,9 @@ interface PasteChoiceCardProps {
   onEvalPercentChange: (value: number | null) => void;
   onRecalculatePercent: () => void;
   onExplanationChange: (text: string) => void;
+  onExplanationFocus: () => void;
+  onExplanationBlur: () => void;
+  explanationRef?: React.Ref<HTMLTextAreaElement>;
   onClear: () => void;
   onShowReplay: () => void;
 }
@@ -37,6 +40,9 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
   onEvalPercentChange,
   onRecalculatePercent,
   onExplanationChange,
+  onExplanationFocus,
+  onExplanationBlur,
+  explanationRef,
   onClear,
   onShowReplay,
 }) => {
@@ -150,6 +156,9 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
             placeholder="解説を入力..."
             value={draft.explanation}
             onChange={(e) => onExplanationChange(e.target.value)}
+            onFocus={onExplanationFocus}
+            onBlur={onExplanationBlur}
+            ref={explanationRef}
             rows={2}
           />
         </div>

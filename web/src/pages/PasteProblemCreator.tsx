@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import Board from '../components/Board';
 import type { ArrowInfo } from '../components/Board';
 import PasteChoiceCard from '../components/PasteChoiceCard';
+import KeyboardModal from '../components/KeyboardModal';
 import ReadingLineModal from '../components/ReadingLineModal';
 import TagSelector from '../components/TagSelector';
 import AnalysisPanel from '../components/AnalysisPanel';
@@ -213,6 +214,13 @@ const PasteProblemCreator: React.FC = () => {
   const [showPreview, setShowPreview] = useState(false);
   const [replaySlot, setReplaySlot] = useState<SlotKey | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [keyboardSlot, setKeyboardSlot] = useState<SlotKey | null>(null);
+
+  const explanationInputRefs = React.useRef<Record<SlotKey, HTMLTextAreaElement | null>>({
+    correct: null,
+    incorrect1: null,
+    incorrect2: null,
+  });
 
   useNavigationPrompt(
     Boolean(workspaceId && hasUnsavedChanges),
@@ -816,6 +824,59 @@ const PasteProblemCreator: React.FC = () => {
       [slot]: { ...prev[slot], explanation: text },
     }));
   };
+  const handleExplanationFocus = (slot: SlotKey) => {
+    setKeyboardSlot(slot);
+  };
+  const handleExplanationBlur = (slot: SlotKey) => {
+    void slot;
+  };
+  const handleKeyboardInsert = useCallback((text: string) => {
+    if (!keyboardSlot) return;
+
+    const textarea = explanationInputRefs.current[keyboardSlot];
+    if (!textarea) return;
+
+    const currentValue = choices[keyboardSlot].explanation;
+    const start = textarea.selectionStart ?? currentValue.length;
+    const end = textarea.selectionEnd ?? currentValue.length;
+    const nextValue = `${currentValue.slice(0, start)}${text}${currentValue.slice(end)}`;
+
+    handleExplanationChange(keyboardSlot, nextValue);
+
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      const nextCaret = start + text.length;
+      textarea.setSelectionRange(nextCaret, nextCaret);
+    });
+  }, [choices, keyboardSlot]);
+  const handleKeyboardDelete = useCallback(() => {
+    if (!keyboardSlot) return;
+
+    const textarea = explanationInputRefs.current[keyboardSlot];
+    if (!textarea) return;
+
+    const currentValue = choices[keyboardSlot].explanation;
+    const start = textarea.selectionStart ?? currentValue.length;
+    const end = textarea.selectionEnd ?? currentValue.length;
+
+    let nextValue = currentValue;
+    let nextCaret = start;
+
+    if (start !== end) {
+      nextValue = `${currentValue.slice(0, start)}${currentValue.slice(end)}`;
+      nextCaret = start;
+    } else if (start > 0) {
+      nextValue = `${currentValue.slice(0, start - 1)}${currentValue.slice(end)}`;
+      nextCaret = start - 1;
+    }
+
+    handleExplanationChange(keyboardSlot, nextValue);
+
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(nextCaret, nextCaret);
+    });
+  }, [choices, keyboardSlot]);
   const handleClearSlot = (slot: SlotKey) => {
     setChoices((prev) => ({
       ...prev,
@@ -1429,6 +1490,11 @@ const PasteProblemCreator: React.FC = () => {
                   onEvalPercentChange={(value) => handleEvalPercentChange(slot, value)}
                   onRecalculatePercent={() => handleRecalculatePercent(slot)}
                   onExplanationChange={(text) => handleExplanationChange(slot, text)}
+                  onExplanationFocus={() => handleExplanationFocus(slot)}
+                  onExplanationBlur={() => handleExplanationBlur(slot)}
+                  explanationRef={(element) => {
+                    explanationInputRefs.current[slot] = element;
+                  }}
                   onClear={() => handleClearSlot(slot)}
                   onShowReplay={() => setReplaySlot(slot)}
                 />
@@ -1549,6 +1615,15 @@ const PasteProblemCreator: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Explanation keyboard modal */}
+      <KeyboardModal
+        open={keyboardSlot !== null}
+        title="解説入力キーボード"
+        onClose={() => setKeyboardSlot(null)}
+        onInsert={handleKeyboardInsert}
+        onDelete={handleKeyboardDelete}
+      />
 
       {/* Reading-line replay modal */}
       {replaySlot && choices[replaySlot].usi && rootSfen && (
