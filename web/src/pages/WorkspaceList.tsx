@@ -7,7 +7,12 @@ import {
   saveWorkspaceDraft,
   type Workspace,
 } from '../api/workspaces';
-import { parseKifRecordWithBranches, parseKifRecord } from '../lib/kif-parser';
+import {
+  parseKifRecordWithBranches,
+  parseKifRecord,
+  extractBranchProblems,
+  type KifBranchParseResult,
+} from '../lib/kif-parser';
 import TagSelector from '../components/TagSelector';
 
 const WorkspaceList: React.FC = () => {
@@ -16,11 +21,14 @@ const WorkspaceList: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [savingBranches, setSavingBranches] = useState(false);
 
   // Inline KIF paste state
   const [pasteText, setPasteText] = useState('');
   const [pasteError, setPasteError] = useState('');
   const [pasteTags, setPasteTags] = useState<string[]>([]);
+  const [parsedBranchResult, setParsedBranchResult] = useState<KifBranchParseResult | null>(null);
+  const [parsedBranchCount, setParsedBranchCount] = useState(0);
 
   const fetchWorkspaces = useCallback(async () => {
     try {
@@ -38,6 +46,40 @@ const WorkspaceList: React.FC = () => {
     fetchWorkspaces();
   }, [fetchWorkspaces]);
 
+
+  const getNextWorkspaceNumber = (items: Workspace[]) => items.reduce((maxNo, ws) => {
+    const m = ws.name.match(/^#(\d+)\b/);
+    if (!m) return maxNo;
+    const n = parseInt(m[1], 10);
+    return Number.isNaN(n) ? maxNo : Math.max(maxNo, n);
+  }, 0) + 1;
+
+  const buildAutoWorkspaceName = (nextNumber: number, suffix?: string) => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const base = `#${nextNumber} ${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    return suffix ? `${base} ${suffix}` : base;
+  };
+
+  const buildDefaultChoices = (correct?: { usi: string; label: string }) => ({
+    correct: {
+      slotLabel: 'correct',
+      usi: correct?.usi ?? '',
+      label: correct?.label ?? '',
+      explanation: '',
+      line: [],
+      eval_cp: null,
+      eval_percent: null,
+    },
+    incorrect1: { slotLabel: 'incorrect1', usi: '', label: '', explanation: '', line: [], eval_cp: null, eval_percent: null },
+    incorrect2: { slotLabel: 'incorrect2', usi: '', label: '', explanation: '', line: [], eval_cp: null, eval_percent: null },
+  });
+
+  const resetParsedBranchState = () => {
+    setParsedBranchResult(null);
+    setParsedBranchCount(0);
+  };
+
   const handlePasteAndSave = async () => {
     const text = pasteText.trim();
     if (!text) {
@@ -47,7 +89,7 @@ const WorkspaceList: React.FC = () => {
 
     // Parse to get basic info for the draft
     const branchResult = parseKifRecordWithBranches(text);
-    const simpleResult = branchResult?.branches?.length ? null : parseKifRecord(text);
+    const simpleResult = !branchResult ? parseKifRecord(text) : null;
     const moves = branchResult?.branches?.[0]?.moves ?? simpleResult?.moves ?? [];
     const sfen = branchResult?.branches?.[0]?.sfen ?? simpleResult?.sfen ?? '';
 
@@ -60,28 +102,15 @@ const WorkspaceList: React.FC = () => {
     setPasteError('');
     try {
       const latestWorkspaces = await listWorkspaces();
-      const nextNumber = latestWorkspaces.reduce((maxNo, ws) => {
-        const m = ws.name.match(/^#(\d+)\b/);
-        if (!m) return maxNo;
-        const n = parseInt(m[1], 10);
-        return Number.isNaN(n) ? maxNo : Math.max(maxNo, n);
-      }, 0) + 1;
-
-      const now = new Date();
-      const pad = (n: number) => String(n).padStart(2, '0');
-      const autoName = `#${nextNumber} ${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-      const ws = await createWorkspace(autoName);
+      const nextNumber = getNextWorkspaceNumber(latestWorkspaces);
+      const ws = await createWorkspace(buildAutoWorkspaceName(nextNumber));
 
       // Save draft with KIF text and parsed result
       await saveWorkspaceDraft(ws.id, {
         kifText: text,
         rootSfen: sfen,
         kifMoves: moves,
-        choices: {
-          correct: { slotLabel: 'correct', usi: '', label: '', explanation: '', line: [], eval_cp: null, eval_percent: null },
-          incorrect1: { slotLabel: 'incorrect1', usi: '', label: '', explanation: '', line: [], eval_cp: null, eval_percent: null },
-          incorrect2: { slotLabel: 'incorrect2', usi: '', label: '', explanation: '', line: [], eval_cp: null, eval_percent: null },
-        },
+        choices: buildDefaultChoices(),
         readingLineInputs: { correct: '', incorrect1: '', incorrect2: '' },
         prompt: '',
         tags: pasteTags,
@@ -94,11 +123,114 @@ const WorkspaceList: React.FC = () => {
 
       setPasteText('');
       setPasteTags([]);
+      resetParsedBranchState();
       await fetchWorkspaces();
     } catch (e: any) {
       setPasteError(e.message);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      setPasteText(text);
+      validateAndShowParsedKif(text);
+    } catch {
+      setPasteError('クリップボードの読み取りに失敗しました');
+    }
+  };
+
+  const validateAndShowParsedKif = (text: string) => {
+    const normalized = text.trim();
+    if (!normalized) {
+      setPasteError('');
+      resetParsedBranchState();
+      return;
+    }
+
+    const branchResult = parseKifRecordWithBranches(normalized);
+    const simpleResult = !branchResult ? parseKifRecord(normalized) : null;
+    const sfen = branchResult?.branches?.[0]?.sfen ?? simpleResult?.sfen ?? '';
+
+    if (sfen) {
+      const variationCount = branchResult ? Math.max(branchResult.branches.length - 1, 0) : 0;
+      const moveCount = branchResult?.branches?.[0]?.moves?.length ?? simpleResult?.moves?.length ?? 0;
+      setParsedBranchResult(branchResult);
+      setParsedBranchCount(variationCount);
+      setPasteError(
+        variationCount > 0
+          ? `✓ 棋譜を読み込みました（${moveCount}手、変化${variationCount}個）`
+          : `✓ 棋譜を読み込みました（${moveCount}手）`,
+      );
+    } else {
+      setPasteError('❌ 棋譜を解析できませんでした。KIF形式またはSFEN文字列を確認してください。');
+      resetParsedBranchState();
+    }
+  };
+
+  const handlePasteAndSaveAllBranches = async () => {
+    const text = pasteText.trim();
+    if (!text) {
+      setPasteError('棋譜を貼り付けてください');
+      return;
+    }
+
+    const branchResult = parsedBranchResult ?? parseKifRecordWithBranches(text);
+    if (!branchResult || branchResult.branches.length < 2) {
+      setPasteError('分岐（変化）が見つかりませんでした。変化付きのKIF棋譜を貼り付けてください。');
+      return;
+    }
+
+    const branchProblems = extractBranchProblems(branchResult);
+    if (branchProblems.length === 0) {
+      setPasteError('問題として作成できる分岐がありません。各分岐に2手以上の手順が必要です。');
+      return;
+    }
+
+    setSavingBranches(true);
+    setPasteError('');
+    try {
+      const latestWorkspaces = await listWorkspaces();
+      let nextNumber = getNextWorkspaceNumber(latestWorkspaces);
+
+      for (const bp of branchProblems) {
+        const ws = await createWorkspace(buildAutoWorkspaceName(nextNumber, bp.branchName));
+        nextNumber += 1;
+
+        await saveWorkspaceDraft(ws.id, {
+          kifText: text,
+          rootSfen: bp.rootSfen,
+          // rootSfen is already the problem position, so keep kifMoves empty.
+          // This prevents PasteProblemCreator from shifting the root one move earlier on save.
+          kifMoves: [],
+          choices: buildDefaultChoices({ usi: bp.correctMove, label: bp.correctMoveLabel }),
+          readingLineInputs: { correct: '', incorrect1: '', incorrect2: '' },
+          prompt: '',
+          tags: pasteTags,
+          displayNo: null,
+          problemRating: 1200,
+          rootEvalCp: null,
+          rootEvalPercent: null,
+          savedAt: new Date().toISOString(),
+          sourceBranch: {
+            branchId: bp.branchId,
+            branchName: bp.branchName,
+            introMovesUsi: bp.introMovesUsi,
+          },
+        });
+      }
+
+      setPasteText('');
+      setPasteTags([]);
+      resetParsedBranchState();
+      setPasteError(`✓ ${branchProblems.length}個の分岐をワークスペースに保存しました`);
+      await fetchWorkspaces();
+    } catch (e: any) {
+      setPasteError(e.message ?? '分岐の一括保存に失敗しました');
+    } finally {
+      setSavingBranches(false);
     }
   };
 
@@ -133,34 +265,64 @@ const WorkspaceList: React.FC = () => {
       {/* Inline KIF paste area */}
       <div className="border border-blue-200 bg-blue-50/40 rounded-lg p-3 mb-3">
         <textarea
-          className="text-[11px] font-mono leading-tight w-full rounded border-gray-300"
+          className="text-[11px] font-mono leading-tight w-full rounded border border-gray-300 p-2"
           rows={6}
           placeholder="KIF棋譜 / SFEN を貼り付け"
           value={pasteText}
-          onChange={(e) => setPasteText(e.target.value)}
+          onChange={(e) => {
+            setPasteText(e.target.value);
+            resetParsedBranchState();
+            setPasteError('');
+          }}
           onPaste={(e) => {
             const pasted = e.clipboardData.getData('text/plain');
             if (pasted) {
               e.preventDefault();
               setPasteText(pasted);
+              validateAndShowParsedKif(pasted);
             }
           }}
         />
         {pasteError && (
-          <div className="text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded mt-1">
+          <div
+            className={
+              pasteError.startsWith('✓')
+                ? 'text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded mt-1'
+                : 'text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded mt-1'
+            }
+          >
             {pasteError}
           </div>
         )}
+        <div className="flex gap-1 mt-1">
+          <button
+            type="button"
+            onClick={handlePasteFromClipboard}
+            className="text-[11px] px-2 py-0.5 bg-blue-100 border border-blue-300 hover:bg-blue-200 rounded"
+          >
+            📋 貼り付け
+          </button>
+        </div>
         {hasPasteContent && (
           <>
             <div className="mt-2">
               <TagSelector selected={pasteTags} onChange={setPasteTags} />
             </div>
-            <div className="flex gap-2 mt-2">
+            <div className="flex gap-2 mt-2 flex-wrap">
+              {parsedBranchCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handlePasteAndSaveAllBranches}
+                  disabled={creating || savingBranches}
+                  className="bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 text-[12px] px-3 py-1 rounded disabled:opacity-50"
+                >
+                  {savingBranches ? '保存中...' : `🌳 分岐（${parsedBranchCount}個） 全てを保存する`}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handlePasteAndSave}
-                disabled={creating}
+                disabled={creating || savingBranches}
                 className="bg-blue-600 text-white border-blue-600 hover:bg-blue-700 text-[12px] px-3 py-1 rounded disabled:opacity-50"
               >
                 {creating ? '保存中...' : '保存'}
@@ -171,6 +333,7 @@ const WorkspaceList: React.FC = () => {
                   setPasteText('');
                   setPasteError('');
                   setPasteTags([]);
+                  resetParsedBranchState();
                 }}
                 className="text-[12px] px-3 py-1"
               >

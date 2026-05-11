@@ -19,15 +19,6 @@ const BranchTree: React.FC<BranchTreeProps> = ({
 
   return (
     <div className="border border-gray-200 rounded bg-gray-50 p-2">
-      <div className="text-[10px] font-semibold text-gray-500 mb-1">分岐ツリー</div>
-      <div className="overflow-x-auto">
-        <TreeNodeList
-          nodes={tree}
-          activeBranchId={activeBranchId}
-          onSelectBranch={onSelectBranch}
-          depth={0}
-        />
-      </div>
       <div className="flex flex-wrap gap-1 mt-1.5 pt-1.5 border-t border-gray-200">
         {branches.map((b) => (
           <button

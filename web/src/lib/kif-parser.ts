@@ -434,6 +434,8 @@ export interface KifTreeNode {
 export interface KifBranchParseResult {
   branches: KifBranch[];
   tree: KifTreeNode[];
+  initialSfen: string;
+  initialMoveNumber: number;
 }
 
 /**
@@ -454,7 +456,20 @@ export function parseKifRecordWithBranches(text: string): KifBranchParseResult |
       moveLabels: [],
       sfen: parsedSfenText.sfen,
     };
-    return { branches: [branch], tree: [] };
+    // Extract base SFEN from the original text
+    const singleLine = trimmed.replace(/\r\n?/g, '\n').trim().replace(/\s+/g, ' ');
+    let source = singleLine;
+    const embeddedPosition = singleLine.match(/position\s+sfen\s+(.+)$/i);
+    if (embeddedPosition?.[1]) {
+      source = embeddedPosition[1].trim();
+    }
+    if (/^sfen\s+/i.test(source)) {
+      source = source.replace(/^sfen\s+/i, '').trim();
+    }
+    const moveSplit = source.split(/\s+moves\s+/i);
+    const initialSfen = moveSplit[0]?.trim() ?? INITIAL_SFEN;
+    const initialMoveNumber = parseSfen(initialSfen).moveNumber;
+    return { branches: [branch], tree: [], initialSfen, initialMoveNumber };
   }
 
   if (isLikelySfen(trimmed)) {
@@ -466,7 +481,7 @@ export function parseKifRecordWithBranches(text: string): KifBranchParseResult |
       moveLabels: [],
       sfen: trimmed,
     };
-    return { branches: [branch], tree: [] };
+    return { branches: [branch], tree: [], initialSfen: trimmed, initialMoveNumber: 1 };
   }
 
   const basePosition = parseBoardDiagramPosition(trimmed);
@@ -551,6 +566,8 @@ export function parseKifRecordWithBranches(text: string): KifBranchParseResult |
         sfen: basePosition.sfen,
       }],
       tree: [],
+      initialSfen,
+      initialMoveNumber,
     };
   }
 
@@ -602,7 +619,7 @@ export function parseKifRecordWithBranches(text: string): KifBranchParseResult |
   // Build tree for diagram
   const tree = buildKifTree(branches);
 
-  return { branches, tree };
+  return { branches, tree, initialSfen, initialMoveNumber };
 }
 
 /** Build a tree structure from branches for rendering */
@@ -747,4 +764,57 @@ export function parseReadingLine(
 
   if (moves.length === 0) return null;
   return { evalCp, moves, labels };
+}
+
+// ---- Branch problem extraction ----
+
+export interface BranchProblemData {
+  branchId: number;
+  branchName: string;
+  rootSfen: string;          // 最後から2番目の局面のSFEN
+  correctMove: string;       // 最後の手（USI）
+  correctMoveLabel: string;  // 最後の手（日本語）
+  introMovesUsi: string[];   // 根拠から最後の手を除くまでの全手
+}
+
+/**
+ * 各分岐から問題作成用のデータを抽出する
+ * 最後から2番目の局面をルートSFENとし、最後の手を正解手とする
+ */
+export function extractBranchProblems(
+  branchResult: KifBranchParseResult,
+): BranchProblemData[] {
+  const problems: BranchProblemData[] = [];
+
+  const targetBranches = branchResult.branches.length > 1
+    ? branchResult.branches.filter((branch) => branch.id !== 0)
+    : branchResult.branches;
+
+  for (const branch of targetBranches) {
+    // 分岐に手が2手以上ないと問題が作成できない
+    if (branch.moves.length < 2) continue;
+
+    // 最後から2番目までの手で、ルートSFENを計算
+    const movesUntilLastMove = branch.moves.slice(0, -1);
+    const lastMove = branch.moves[branch.moves.length - 1];
+    const lastMoveLabel = branch.moveLabels[branch.moveLabels.length - 1] ?? lastMove;
+
+    // initialSfen と initialMoveNumber から、最後から2番目の局面のSFENを計算
+    const rootSfen = computeSfenFromMoves(
+      branchResult.initialSfen,
+      branchResult.initialMoveNumber,
+      movesUntilLastMove,
+    );
+
+    problems.push({
+      branchId: branch.id,
+      branchName: branch.name,
+      rootSfen,
+      correctMove: lastMove,
+      correctMoveLabel: lastMoveLabel,
+      introMovesUsi: movesUntilLastMove,
+    });
+  }
+
+  return problems;
 }

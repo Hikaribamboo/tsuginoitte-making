@@ -5,7 +5,6 @@ import type { ArrowInfo } from '../components/Board';
 import PasteChoiceCard from '../components/PasteChoiceCard';
 import ReadingLineModal from '../components/ReadingLineModal';
 import TagSelector from '../components/TagSelector';
-import BranchTree from '../components/BranchTree';
 import AnalysisPanel from '../components/AnalysisPanel';
 import type { BestMove } from '../components/AnalysisPanel';
 import Toggle from '../components/Toggle';
@@ -13,9 +12,9 @@ import { useBoardStore } from '../hooks/useBoardStore';
 import { INITIAL_SFEN, parseSfen, applyUsiMove, boardToSfen, toUsiSquare } from '../lib/sfen';
 import { usiToLabel, pvToJapanese } from '../lib/usi-to-label';
 import { cpToWinRatePercentFromRootSfen } from '../lib/eval-percent';
-import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches } from '../lib/kif-parser';
+import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches, extractBranchProblems } from '../lib/kif-parser';
 import type { KifBranch, KifTreeNode } from '../lib/kif-parser';
-import { saveProblem, getNextDisplayNo } from '../api/problems';
+import { saveProblem, getNextDisplayNo, saveMultipleProblems } from '../api/problems';
 import { getWorkspace, saveWorkspaceDraft, deleteWorkspace } from '../api/workspaces';
 import { generateExplanations } from '../api/engine';
 import { DEFAULT_PROMPT } from '../lib/constants';
@@ -209,6 +208,7 @@ const PasteProblemCreator: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
+  const [savingBranches, setSavingBranches] = useState(false);
   const [message, setMessage] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const [replaySlot, setReplaySlot] = useState<SlotKey | null>(null);
@@ -922,6 +922,101 @@ const PasteProblemCreator: React.FC = () => {
     return errors;
   };
 
+  // ---- Save Branches ----
+
+  const handleSaveBranches = async () => {
+    // Validate that KIF has been parsed with branches
+    if (kifBranches.length < 2) {
+      setMessage('分岐がありません。KIF棋譜を貼り付けて解析してください。');
+      return;
+    }
+
+    setSavingBranches(true);
+    setMessage('');
+    try {
+      // Parse branches and extract problem data
+      const branchResult = parseKifRecordWithBranches(kifText);
+      if (!branchResult || branchResult.branches.length < 2) {
+        setMessage('分岐の解析に失敗しました。');
+        setSavingBranches(false);
+        return;
+      }
+
+      const branchProblems = extractBranchProblems(branchResult);
+      if (branchProblems.length === 0) {
+        setMessage('問題として作成可能な分岐がありません（各分岐は2手以上必要です）。');
+        setSavingBranches(false);
+        return;
+      }
+
+      // Convert to save format with incorrect moves generated from legal moves
+      const problemsToSave = branchProblems.map((bp) => {
+        const rootParsed = parseSfen(bp.rootSfen);
+        let incorrectMove1 = '';
+        let incorrectMove1Label = '';
+        let incorrectMove2 = '';
+        let incorrectMove2Label = '';
+
+        // Collect legal moves (excluding the correct move)
+        const incorrectMoves: Array<{ usi: string; label: string }> = [];
+        
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            const piece = rootParsed.board[r][c];
+            if (piece && piece.side === rootParsed.sideToMove) {
+              const validDests = getValidDestinations(rootParsed.board, r, c, rootParsed.sideToMove);
+              for (const dest of validDests) {
+                const usi = `${toUsiSquare(r, c)}${toUsiSquare(dest.row, dest.col)}`;
+                if (usi !== bp.correctMove) {
+                  const label = usiToLabel(usi, rootParsed.board, rootParsed.sideToMove);
+                  incorrectMoves.push({ usi, label });
+                }
+              }
+            }
+          }
+        }
+
+        // Select up to 2 incorrect moves
+        if (incorrectMoves.length > 0) {
+          incorrectMove1 = incorrectMoves[0].usi;
+          incorrectMove1Label = incorrectMoves[0].label;
+        }
+        if (incorrectMoves.length > 1) {
+          incorrectMove2 = incorrectMoves[1].usi;
+          incorrectMove2Label = incorrectMoves[1].label;
+        }
+
+        return {
+          prompt: prompt.trim() || DEFAULT_PROMPT,
+          rootSfen: bp.rootSfen,
+          correctMove: bp.correctMove,
+          correctMoveLabel: bp.correctMoveLabel,
+          introMovesUsi: bp.introMovesUsi,
+          problemRating: problemRating,
+          tags: tags.length > 0 ? tags : null,
+          incorrectMove1,
+          incorrectMove1Label,
+          incorrectMove2,
+          incorrectMove2Label,
+        };
+      });
+
+      // Save all problems
+      const results = await saveMultipleProblems(problemsToSave);
+      setMessage(`${results.length}個の問題を保存しました（分岐: ${branchProblems.length}個）`);
+
+      // Show delete-workspace modal if opened from workspace
+      if (workspaceId) {
+        setShowDeleteWsModal(true);
+      }
+    } catch (e: any) {
+      setMessage(`分岐の一括保存エラー: ${e.message}`);
+      console.error('[handleSaveBranches] Error:', e);
+    } finally {
+      setSavingBranches(false);
+    }
+  };
+
   // ---- Save ----
 
   const handleSave = async () => {
@@ -1055,14 +1150,16 @@ const PasteProblemCreator: React.FC = () => {
                 </div>
               )}
 
-              {/* Branch tree diagram */}
+              {/* Save all branches button */}
               {kifBranches.length > 1 && (
-                <BranchTree
-                  branches={kifBranches}
-                  tree={kifTree}
-                  activeBranchId={activeBranchId}
-                  onSelectBranch={handleSelectBranch}
-                />
+                <button
+                  onClick={handleSaveBranches}
+                  disabled={savingBranches}
+                  className="text-[10px] px-1.5 py-0.5 bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 w-full"
+                  type="button"
+                >
+                  {savingBranches ? '保存中...' : `🌳 分岐（${Math.max(kifBranches.length - 1, 0)}個） 全てを保存する`}
+                </button>
               )}
             </div>
 
