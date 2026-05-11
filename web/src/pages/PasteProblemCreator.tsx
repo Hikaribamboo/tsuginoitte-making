@@ -1232,62 +1232,9 @@ const PasteProblemCreator: React.FC = () => {
         </div>
 
         <div className="flex w-full h-[calc(100%-26px)] min-w-0 gap-2 items-start justify-start overflow-auto">
-          {/* ---- Left: Board + KIF paste ---- */}
+          {/* ---- Left: Board ---- */}
           <div className="flex-shrink-0 w-[320px] md:w-[350px] flex flex-col gap-1">
-            {/* KIF paste area */}
-            <div className="flex flex-col gap-0.5">
-              <textarea
-                className="text-[10px] font-mono leading-tight w-full"
-                rows={rootSfen ? 2 : 3}
-                placeholder={'KIF棋譜 / SFEN を貼り付け'}
-                value={kifText}
-                onChange={(e) => setKifText(e.target.value)}
-                onPaste={(e) => {
-                  const pasted = e.clipboardData.getData('text/plain');
-                  if (pasted) {
-                    e.preventDefault();
-                    setKifText(pasted);
-                    doParseKif(pasted);
-                  }
-                }}
-              />
-              <div className="flex gap-1">
-                <button
-                  className="text-[10px] px-1.5 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
-                  type="button"
-                  onClick={handleParseKif}
-                >
-                  解析
-                </button>
-                <button
-                  className="text-[10px] px-1.5 py-0.5 bg-blue-100 border-blue-300 hover:bg-blue-200"
-                  type="button"
-                  onClick={handlePasteFromClipboard}
-                >
-                  📋 貼り付け
-                </button>
-              </div>
-              {kifError && (
-                <div className="text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded">
-                  {kifError}
-                </div>
-              )}
-
-              {/* Save all branches button */}
-              {kifBranches.length > 1 && (
-                <button
-                  onClick={handleSaveBranches}
-                  disabled={savingBranches}
-                  className="text-[10px] px-1.5 py-0.5 bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 w-full"
-                  type="button"
-                >
-                  {savingBranches ? '保存中...' : `🌳 分岐（${Math.max(kifBranches.length - 1, 0)}個） 全てを保存する`}
-                </button>
-              )}
-            </div>
-
-            {/* Board (scaled) */}
-            {parsed && (
+            {parsed ? (
               <div
                 className="flex-shrink-0 overflow-hidden"
                 style={{
@@ -1297,25 +1244,27 @@ const PasteProblemCreator: React.FC = () => {
               >
                 <div style={{ transform: `scale(${BOARD_SCALE})`, transformOrigin: 'top left' }}>
                   <Board
-                    board={analysisMode ? store.board : parsed.board}
-                    senteHand={analysisMode ? store.senteHand : parsed.senteHand}
-                    goteHand={analysisMode ? store.goteHand : parsed.goteHand}
-                    sideToMove={analysisMode ? store.sideToMove : parsed.sideToMove}
+                    board={parsed.board}
+                    senteHand={parsed.senteHand}
+                    goteHand={parsed.goteHand}
+                    sideToMove={parsed.sideToMove}
                     selectedCell={selectedCell}
-                    arrows={analysisMode ? arrows : undefined}
                     onCellClick={handleCellClick}
                     onHandPieceClick={handleHandPieceClick}
                   />
                 </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] text-gray-400">
+                局面がありません
               </div>
             )}
 
             {parsed && (
               <div className="flex gap-2 text-[11px] text-gray-500 flex-wrap items-center">
                 <span>
-                  {(analysisMode ? store.sideToMove : parsed.sideToMove) === 'sente' ? '☗先手' : '☖後手'}
+                  {parsed.sideToMove === 'sente' ? '☗先手' : '☖後手'}
                 </span>
-                {kifMoves.length > 0 && <span>{kifMoves.length}手目</span>}
                 {selectedHandPiece && (
                   <span className="text-blue-600 font-semibold">
                     打: {selectedHandPiece.type}
@@ -1326,102 +1275,32 @@ const PasteProblemCreator: React.FC = () => {
                     {rootEvalCp}cp ({rootEvalPercent}%)
                   </span>
                 )}
-                {canFlipTurn && (
-                  <button
-                    className="text-[10px] px-1.5 py-0.5"
-                    type="button"
-                    onClick={() => {
-                      setRootSfen((prev) => toggleSfenSideToMove(prev));
-                      setSelectedCell(null);
-                      setSelectedHandPiece(null);
-                      setMessage('手番を入れ替えました（KIF補正）');
-                    }}
-                  >
-                    手番入替
-                  </button>
-                )}
-                {analysisMode && store.moveHistory.length > 0 && (
-                  <button
-                    className="text-[10px] px-1.5 py-0.5"
-                    type="button"
-                    onClick={() => {
-                      store.loadFromSfen(rootSfen);
-                      setSelectedCell(null);
-                      setSelectedHandPiece(null);
-                    }}
-                  >
-                    ↩ rootに戻す
-                  </button>
+                {promotionChoice && (
+                  <div className="flex items-center gap-2 px-2 py-1 bg-amber-50 border-2 border-amber-400 rounded-md text-[12px] font-semibold">
+                    <span>成?</span>
+                    <button
+                      className="w-10 h-10 text-xl font-bold flex items-center justify-center border-2 border-gray-300 rounded bg-white cursor-pointer hover:border-blue-600 hover:bg-blue-100"
+                      onClick={() => handlePromotionSelect(false)}
+                    >
+                      {pieceKanji({
+                        type: promotionChoice.pieceType,
+                        side: parsed.sideToMove,
+                        promoted: false,
+                      })}
+                    </button>
+                    <button
+                      className="w-10 h-10 text-xl font-bold flex items-center justify-center border-2 border-gray-300 rounded bg-white cursor-pointer hover:border-blue-600 hover:bg-blue-100 text-red-700"
+                      onClick={() => handlePromotionSelect(true)}
+                    >
+                      {pieceKanji({
+                        type: promotionChoice.pieceType,
+                        side: parsed.sideToMove,
+                        promoted: true,
+                      })}
+                    </button>
+                  </div>
                 )}
               </div>
-            )}
-            {analysisMode && parsed && (
-              <div className="flex gap-1 mt-0.5">
-                <button
-                  className="text-[10px] px-1.5 py-0.5"
-                  type="button"
-                  onClick={() => { store.undoMove(); setSelectedCell(null); setSelectedHandPiece(null); }}
-                  disabled={store.moveHistory.length === 0}
-                >
-                  ↩ 一手戻す
-                </button>
-                <button
-                  className="text-[10px] px-1.5 py-0.5"
-                  type="button"
-                  onClick={() => { store.redoMove(); setSelectedCell(null); setSelectedHandPiece(null); }}
-                  disabled={!store.canRedo()}
-                >
-                  ↪ 一手進める
-                </button>
-              </div>
-            )}
-            {promotionChoice && parsed && (
-              <div className="flex items-center gap-2 px-2 py-1 bg-amber-50 border-2 border-amber-400 rounded-md text-[12px] font-semibold">
-                <span>成?</span>
-                <button
-                  className="w-10 h-10 text-xl font-bold flex items-center justify-center border-2 border-gray-300 rounded bg-white cursor-pointer hover:border-blue-600 hover:bg-blue-100"
-                  onClick={() => handlePromotionSelect(false)}
-                >
-                  {pieceKanji({
-                    type: promotionChoice.pieceType,
-                    side: analysisMode ? store.sideToMove : parsed.sideToMove,
-                    promoted: false,
-                  })}
-                </button>
-                <button
-                  className="w-10 h-10 text-xl font-bold flex items-center justify-center border-2 border-gray-300 rounded bg-white cursor-pointer hover:border-blue-600 hover:bg-blue-100 text-red-700"
-                  onClick={() => handlePromotionSelect(true)}
-                >
-                  {pieceKanji({
-                    type: promotionChoice.pieceType,
-                    side: analysisMode ? store.sideToMove : parsed.sideToMove,
-                    promoted: true,
-                  })}
-                </button>
-              </div>
-            )}
-
-            {parsed && (
-              <AnalysisPanel
-                sfen={analysisMode ? store.getSfen() : rootSfen}
-                onCandidateMoves={handleCandidateMoves}
-                headerExtra={
-                  <Toggle
-                    checked={analysisMode}
-                    label="検討モード"
-                    onChange={(v) => {
-                      setAnalysisMode(v);
-                      setSelectedCell(null);
-                      setSelectedHandPiece(null);
-                      if (v) {
-                        setActiveSlot(null);
-                      } else {
-                        store.loadFromSfen(rootSfen);
-                      }
-                    }}
-                  />
-                }
-              />
             )}
 
             <div className="flex flex-col gap-1 mt-1">
@@ -1518,14 +1397,6 @@ const PasteProblemCreator: React.FC = () => {
                 )}
                 <button onClick={() => setShowPreview(true)} type="button" className="text-[11px]">
                   プレビュー
-                </button>
-                <button
-                  onClick={handleGenerateExplanations}
-                  disabled={generating}
-                  type="button"
-                  className="bg-purple-600 text-white border-purple-600 hover:bg-purple-700 text-[11px]"
-                >
-                  {generating ? '生成中...' : '🤖 解説生成'}
                 </button>
                 <button
                   onClick={handleSave}
