@@ -461,6 +461,20 @@ const PasteProblemCreator: React.FC = () => {
     }
   }, [doParseKif]);
 
+  const copyTextToClipboard = useCallback(async (text: string, label: string) => {
+    if (!text) {
+      setMessage(`${label}がありません`);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setMessage(`${label}をコピーしました`);
+    } catch {
+      setMessage(`${label}のコピーに失敗しました`);
+    }
+  }, []);
+
   // ---- Reading-line parsing ----
 
   const markerSide = useCallback((label: string): Side | null => {
@@ -877,10 +891,11 @@ const PasteProblemCreator: React.FC = () => {
   const buildSaveRootAndIntro = useCallback((): {
     rootSfenForSave: string;
     introMovesUsi: string[];
+    introMovesLabels: string[];
   } => {
     // intro = move immediately before the choice position
     if (kifMoves.length === 0) {
-      return { rootSfenForSave: rootSfen, introMovesUsi: [] };
+      return { rootSfenForSave: rootSfen, introMovesUsi: [], introMovesLabels: [] };
     }
 
     const introMove = kifMoves[kifMoves.length - 1];
@@ -897,6 +912,8 @@ const PasteProblemCreator: React.FC = () => {
       sideToMove = sideToMove === 'sente' ? 'gote' : 'sente';
     }
 
+    const introMoveLabel = usiToLabel(introMove, board, sideToMove);
+
     return {
       rootSfenForSave: boardToSfen(
         board,
@@ -906,8 +923,19 @@ const PasteProblemCreator: React.FC = () => {
         state.moveNumber + baseMoves.length,
       ),
       introMovesUsi: [introMove],
+      introMovesLabels: [introMoveLabel],
     };
   }, [kifText, kifMoves, rootSfen]);
+
+  const saveRootAndIntro = useMemo(() => buildSaveRootAndIntro(), [buildSaveRootAndIntro]);
+  const introMovesUsiText = useMemo(
+    () => JSON.stringify(saveRootAndIntro.introMovesUsi),
+    [saveRootAndIntro.introMovesUsi],
+  );
+  const introMovesLabelText = useMemo(
+    () => JSON.stringify(saveRootAndIntro.introMovesLabels),
+    [saveRootAndIntro.introMovesLabels],
+  );
 
   const validate = (): string[] => {
     const errors: string[] = [];
@@ -1106,6 +1134,40 @@ const PasteProblemCreator: React.FC = () => {
               途中保存: {hasUnsavedChanges ? '未保存' : '保存済み'}
             </span>
           )}
+        </div>
+
+        <div className="mb-2 rounded-lg border border-gray-200 bg-white/70 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            <div className="flex items-center gap-1.5">
+              <span className="shrink-0 font-semibold text-gray-500">
+                root_sfen
+              </span>
+              <button
+                type="button"
+                className="text-[10px] px-2 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
+                onClick={() => copyTextToClipboard(saveRootAndIntro.rootSfenForSave, 'root_sfen')}
+              >
+                コピー
+              </button>
+            </div>
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <span className="shrink-0 font-semibold text-gray-500">
+                intro_moves_usi
+              </span>
+              <input
+                readOnly
+                value={introMovesLabelText}
+                className="min-w-0 flex-1 font-mono text-[11px]"
+              />
+              <button
+                type="button"
+                className="text-[10px] px-2 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
+                onClick={() => copyTextToClipboard(introMovesLabelText, 'intro_moves_usi')}
+              >
+                コピー
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="flex w-full h-[calc(100%-26px)] min-w-0 gap-2 items-start justify-start overflow-auto">
