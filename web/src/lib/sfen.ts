@@ -29,7 +29,7 @@ export function parseSfen(sfen: string): SfenState {
   const boardStr = parts[0] ?? '';
   const sideChar = parts[1] ?? 'b';
   const handStr = parts[2] ?? '-';
-  const moveNum = parseInt(parts[3] ?? '1', 10);
+  const moveNum = Math.max(1, parseInt(parts[3] ?? '1', 10));
 
   // Parse board
   const board = createEmptyBoard();

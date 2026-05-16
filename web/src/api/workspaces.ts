@@ -8,12 +8,12 @@ export interface Workspace {
   draft: Record<string, unknown> | null;
 }
 
-/** List all workspaces ordered by most recently updated */
+/** List all workspaces ordered from oldest to newest */
 export async function listWorkspaces(): Promise<Workspace[]> {
   const { data, error } = await supabase
     .from('workspaces')
     .select('*')
-    .order('updated_at', { ascending: false });
+    .order('created_at', { ascending: true });
   if (error) throw error;
   return data ?? [];
 }

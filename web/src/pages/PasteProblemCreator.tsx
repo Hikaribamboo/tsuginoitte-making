@@ -1139,7 +1139,8 @@ const PasteProblemCreator: React.FC = () => {
         root_eval_percent: correctEvalPercent,
         problem_rating: problemRating,
         problem_rating_games: 0,
-        display_no: displayNo,
+        // Let the server allocate a unique display_no to avoid conflicts
+        display_no: null,
         tags: tags.length > 0 ? tags : null,
       };
 
@@ -1404,6 +1405,14 @@ const PasteProblemCreator: React.FC = () => {
                   className="bg-blue-600 text-white border-blue-600 hover:bg-blue-700 text-[11px]"
                 >
                   {saving ? '保存中...' : 'Supabaseに保存'}
+                </button>
+                <button
+                  onClick={handleGenerateExplanations}
+                  disabled={generating}
+                  type="button"
+                  className="bg-purple-600 text-white border-purple-600 hover:bg-purple-700 text-[11px]"
+                >
+                  {generating ? '生成中...' : 'AI解説'}
                 </button>
               </div>
             </div>

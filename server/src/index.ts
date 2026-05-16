@@ -61,6 +61,7 @@ app.post('/api/evaluate', async (req, res) => {
     }
 
     const result = await engine.evaluate(sfen, moves, {
+
       depth,
       nodes,
       stable,
@@ -74,44 +75,9 @@ app.post('/api/evaluate', async (req, res) => {
   } catch (err: any) {
     console.error('Evaluate error:', err);
     res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/analyze', (req, res) => {
-  const sfen = req.query.sfen as string;
-  const multipv = parseInt((req.query.multipv as string) ?? '5', 10);
-
-  if (!sfen) {
-    res.status(400).json({ error: 'sfen is required' });
     return;
   }
 
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-
-  const handler = (info: AnalysisLine) => {
-    res.write(`data: ${JSON.stringify(info)}\n\n`);
-  };
-
-  engine.analysisEmitter.on('info', handler);
-
-  try {
-    engine.startAnalysis(sfen, [], multipv);
-  } catch (err: any) {
-    res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
-    engine.analysisEmitter.removeListener('info', handler);
-    res.end();
-    return;
-  }
-
-  req.on('close', async () => {
-    engine.analysisEmitter.removeListener('info', handler);
-    await engine.stopAnalysis();
-  });
 });
 
 app.post('/api/analyze/stop', async (_req, res) => {
@@ -247,6 +213,25 @@ const FEW_SHOT_EXAMPLES = [
   { label: '▲４九金', eval_cp: 723, eval_percent: 71, line_labels: '△３六歩打 ▲９六角打 △３七桂打 ▲９六同飛', explanation: '悪くはないが、なんの為に将棋を指しているのか分からない。' },
   { label: '▲７四香', eval_cp: 1616, eval_percent: 88, line_labels: '△７四同飛 ▲８三龍 △７四香打 ▲２五歩', explanation: '飛車を逃げると44桂打ちが激痛 詰めろなので香車を取る一択だが、冷静に同銀と取られて下手よし。' },
   { label: '▲７二歩打', eval_cp: 1022, eval_percent: 78, line_labels: '△８一玉 ▲７三桂打 △６二金 ▲７二角打', explanation: '次善手だが、駒を大量に渡してしまうので実践的には危うい。' },
+  { label: '△２二玉', eval_cp: 304, eval_percent: 41, line_labels: '▲３五銀 ▲４四銀成 ▲３四銀成', explanation: '▲５四角打に備えてあらかじめ玉を逃げている。歩を突かれ，陣形を乱される。' },
+  { label: '△５三歩打', eval_cp: 170, eval_percent: 45, line_labels: '▲６七金 ▲４四銀成 ▲１五歩打', explanation: '将来的な▲５四角打を警戒した手。玉頭に迫る歩を取り返す時に４三の銀を動かせないのを打開する。' },
+  { label: '△５三金', eval_cp: 252, eval_percent: 42, line_labels: '▲３五銀 ▲３四銀成 ▲６七金', explanation: '５四の地点に効かせる手で悪くないが，せっかく固い玉が少し薄くなり残念。' },
+  { label: '△７二歩打', eval_cp: 83, eval_percent: 47, line_labels: '▲８九玉 ▲２二銀成 ▲３五銀', explanation: 'これは後に８三や６三などに金を逃げた時に▲７二角打を喰らわないようにしている。' },
+  { label: '△７四金', eval_cp: 175, eval_percent: 45, line_labels: '▲７三金 ▲６六飛成 ▲８七金', explanation: '相手に歩がないのがポイント。飛車先を通しつつ，歩成を促す。飛車にと金が当たるが，△８四飛がぴったりで，銀を守るために▲８七金には△８三飛で次に△８六歩打を狙った手が抜群に厳しい。' },
+  { label: '△６一飛', eval_cp: 65, eval_percent: 48, line_labels: '▲６二金 ▲７二金 ▲５五銀', explanation: '相手の攻めを急かして角を手に入れる。飛車銀両取りをかけられるが無視。陣形は飛車に強い形。拠点と持ち駒を使って一気に攻め込む。' },
+  { label: '△７六歩打', eval_cp: 78, eval_percent: 48, line_labels: '▲８五金 ▲７四銀 ▲６八銀', explanation: '桂馬が跳ねると自分の金に当たってしまい一見良くない攻めに見える。しかし，手順に自分の桂馬を跳ねることができ，７六の拠点を永久に残し続けることができる。自玉が広いからできる攻め。' },
+  { label: '△６二角', eval_cp: 163, eval_percent: 45, line_labels: '▲２五歩打 ▲４四角成 ▲２四銀', explanation: '少しの差で△６二角が最善手。角を自分から交換すると相手の金が玉に自然に近づいてしまい相手の駒のバランスが良くなるという意味合いがある。' },
+  { label: '△５二金', eval_cp: 142, eval_percent: 46, line_labels: '▲５四銀 ▲６三飛成 ▲７四金', explanation: '守っているように見えて遊んでいる４二の金を連結させた手。これ以外の手は攻め潰される。' },
+  { label: '▲８六歩打', eval_cp: 121, eval_percent: 54, line_labels: '▲７六飛 ▲８二飛成 ▲９五飛', explanation: '後の８八歩に対し９七桂、８五桂と飛ぶ為の土台になっている。８八歩がなければ先手も満足な展開。' },
+  { label: '▲８七金', eval_cp: 1068, eval_percent: 79, line_labels: '▲７五飛 ▲７四飛 ▲７九飛打', explanation: '８７金が好手。玉がいる為７８飛成はできず、７９角打も２９の飛車が効いており同飛と取られてしまう。なので７５か７４に逃げるしかないが、７５飛には金で追われ、７４飛には同馬同金で勝勢。後の飛車打ちや７９飛が痛く先手が一方的に攻める展開になる。' },
+  { label: '▲５四歩打', eval_cp: 512, eval_percent: 65, line_labels: '▲６四歩 ▲６三歩成 ▲５四飛', explanation: 'ダンスの歩。△同金には▲５四歩→△５二金→▲６三歩成でなんと金がつかまっている。なので相手は△同金と取るしかない。' },
+  { label: '▲２二角成', eval_cp: 1586, eval_percent: 88, line_labels: '▲３一金打 ▲３二金成 ▲４一金', explanation: '△同玉は▲６六角打で王手飛車，△同金は▲３一金打ちで割打ちの銀＋王手飛車の筋があるのでほぼ勝ち。' },
+  { label: '▲４七角打', eval_cp: -2, eval_percent: 50, line_labels: '▲４六歩 ▲３五歩 ▲４六銀', explanation: '後手からの△６五歩を防ぎつつ、△４七銀打も防いでいる。相手の桂頭を睨んでおり、将来的に桂頭攻めも期待できる。更に自分の桂頭も守っている一石四鳥の美しい手。' },
+  { label: '△３三桂', eval_cp: 0, eval_percent: 50, line_labels: '▲２三角打 ▲２一角 ▲３四角', explanation: '▲２三角打には２一飛で後手勝勢。▲２三歩打には△２一歩打で我慢すればどの変化も互角です。なので△３五歩に期待して桂馬を跳ねましょう。跳ねるときっといい事があります。' },
+  { label: '△８七角成', eval_cp: -254, eval_percent: 58, line_labels: '▲８八同玉 ▲５四金 ▲４五歩打', explanation: 'すべて交換した後に王手飛車をかけられるわかりやすい好手。相手の陣形が打ち込みに弱い形なので迷いなく交換できる。相手が△３六飛としたところに目をつけられるか。' },
+  { label: '△３七歩成', eval_cp: 130, eval_percent: 46, line_labels: '▲３五銀 ▲４八飛 ▲５五角', explanation: '▲３五銀を打ち飛車が逃げた後に桂馬をとるねらいがある。しかし，桂馬をとると▲５五角と打って銀香両取りがかかるため相手は桂馬をとれない。' },
+  { label: '▲６四角', eval_cp: 1581, eval_percent: 88, line_labels: '▲６四飛 ▲６三飛 ▲５四銀', explanation: '銀を取った手が飛車に当たるので相手は無視できない。最後に▲６四飛とした手が銀取りと飛車なりの両狙いがあり，狭かったこちらの飛車が大活躍する。' },
+  { label: '▲５三歩打', eval_cp: 853, eval_percent: 74, line_labels: '▲５二金 ▲５一金 ▲６四角成', explanation: 'と金や銀で突っ込むと精算されて相手の方がスッキリしてしまう。ここは攻め急ぐのをじっと我慢して歩を垂らすのが好手。' },
 ];
 
 // Additional style reference explanations for tone/vocabulary learning
@@ -367,51 +352,59 @@ app.post('/api/generate-explanations', async (req, res) => {
 
   const styleExamplesText = STYLE_EXAMPLES.map((ex, i) => `${i + 1}. ${ex}`).join('\n');
 
-  const prompt = `あなたは将棋の解説者です。次の一手問題の各選択肢に対して、簡潔な解説文を生成してください。
+  const prompt = `あなたは将棋の一手問題の解説者です。以下のルールに従って各選択肢の解説を生成してください。
 
-以下の点を守ってください：
-- 読み筋の具体的な手順に言及しながら、なぜその手が良い/悪いのかを説明する
-- 1〜3文程度の簡潔な解説にする
-- 評価値や勝率も参考にして、その手の優劣を伝える
-- 正解手は「なぜ良いか」、不正解手は「なぜダメか」を中心に書く
-- 将棋ファンに向けた自然な口語調で書く
-- 文体は常体（だ・である調）に統一し、「です」「ます」「でしょう」「のようです」などの敬体は使わない
-- 文末は「〜である」「〜となる」「〜が有効」「〜が厳しい」などで簡潔に締める
-- 符号を解説に入れるときは「△２九飛成」「▲３一角打」のように、先手は▲、後手は△、全角数字＋漢数字＋駒名の形式にすること
-- 文頭で「▲５六歩は」「△２九飛成は」のように、選択肢の手を主語にしないこと（局面の狙い・形勢判断から書き始める）
-- 「一方的に攻められる」のような強い断定は多用せず、同程度の意味なら「攻めの主導権を握られる」を優先すること
-- 断定の強さは評価値差で調整すること（各候補の評価値を比較して判断）:
-  - 差が小さい（目安 0〜150cp）: 「やや」「少し」「互角に近い」など穏やかな表現
-  - 中差（目安 151〜400cp）: 「指しにくい」「主導権を握られる」など中程度の表現
-  - 大差（目安 401〜900cp）: 「悪手寄り」「形勢を損ねる」など強めの表現
-  - 極大差（目安 901cp以上）: 「敗勢」「決定的」など明確な表現
+## 解説の基本ルール
 
-## 入出力の例
+【全選択肢共通】
+- 読み筋の具体的な手順を示しながら、その手の評価を説明する
+- 1～3文程度のコンパクトな解説にする
+- 将棋ファンに向けた自然な口語調で書く（常体：だ・である調、敬体は使わない）
+- 文頭で「▲５六歩は」「△２九飛成は」のように選択肢の手を主語とせず、局面の狙いや形勢判断から書き始める
+- 駒の符号は「▲３一角打」「△２二玉」のように先手は▲、後手は△、数字は全角、駒名は漢字の形式で書く
+- 断定の強さは評価値差で調整する（差が小さい≒穏やかな表現、差が大きい≒強い表現）
+- 語彙や言い回しは、下の実例に出てくる表現を優先して使うこと。新しい比喩や珍しい言い回しは増やさず、既存データにある自然な語彙を選ぶこと
+- 例えば「いなす」のような、実例にない言い回しはできるだけ避けること
 
-${examplesText}
+【正解手（[正解手]のマーク付き）の場合】
+→ なぜこの手が「良い」のか、その手の「長所」「狙い」「効果」を中心に説明する
+→ ポジティブな観点から記述する
+→ 評価値が高い（+）なら、その優位性を説明する
 
-## 解説のスタイル参考
+【不正解手の場合】
+→ なぜこの手が「ダメ」なのか、その手の「短所」「問題点」「弱点」を中心に説明する
+→ 相手にされた攻撃や主導権喪失などの具体的な悪さを示す
+→ 評価値が低い（-）なら、その劣位性を説明する
 
-以下は解説のトーンや語彙、表現の参考例です。このような口調・語彙で書いてください。
+## スタイル参考（実例から学ぶ）
 
 ${styleExamplesText}
 
-## 今回の問題
+## 学習用の解説例
+
+${examplesText}
+
+## 対象局面
 
 局面 (SFEN): ${sfen}
 手番: ${sideLabel}
 
-選択肢:
+選択肢一覧:
 ${choicesList}
 
-上記の各選択肢に対して以下のJSON形式で解説を返してください。他の文章は不要です。
-[{"index": 0, "explanation": "..."}, {"index": 1, "explanation": "..."}, ...]`;
+## 出力形式
+
+JSON配列形式で返すこと。他の文字や説明は一切不要：
+[
+  {"index": 0, "explanation": "解説"},
+  {"index": 1, "explanation": "解説"},
+  {"index": 2, "explanation": "解説"}
+]`;
 
   try {
     const client = new OpenAI({ apiKey });
     const completion = await client.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 1024,
+      model: 'o1-2024-12-17',
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -429,7 +422,14 @@ ${choicesList}
       explanation: string;
     }>;
 
-    res.json({ explanations });
+    const prefixedExplanations = explanations.map((item) => ({
+      ...item,
+      explanation: item.explanation.startsWith('【AI解説 (試験的) 】')
+        ? item.explanation
+        : `【AI解説 (試験的) 】${item.explanation}`,
+    }));
+
+    res.json({ explanations: prefixedExplanations });
   } catch (err: any) {
     console.error('OpenAI API error:', err);
     res.status(500).json({ error: err.message });

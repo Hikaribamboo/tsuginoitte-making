@@ -13,7 +13,7 @@ type Position = { x: number; y: number };
 const KEY_ROWS = [
   ['▲','1', '2', '3', '4', '5', '6', '7', '8', '9'],
   [ '△','ー', '二', '三', '四', '五', '六', '七', '八', '九'],
-  ['飛', '角', '金', '銀', '桂', '香', '歩','龍', '馬', '成銀', '成桂', '成香', 'と', '成', '打'],
+  ['飛', '角', '金', '銀', '桂', '香', '歩','龍', '馬', '成銀', '成桂', '成香', 'と', '成', '打', '同'],
 ];
 
 const KeyboardModal: React.FC<KeyboardModalProps> = ({ open, title, onClose, onInsert, onDelete }) => {

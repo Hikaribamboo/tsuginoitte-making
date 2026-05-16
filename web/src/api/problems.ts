@@ -42,33 +42,58 @@ export async function getNextDisplayNo(): Promise<number> {
   }
 
   const currentMax = data?.display_no ?? 0;
-  return Math.max(currentMax + 1, 9);
+  return Math.max(currentMax + 1, 49);
 }
 
 export async function saveProblem(
   problem: SaveProblemInput,
   choices: SaveChoiceInput[],
 ): Promise<SaveProblemResult> {
-  const { data: problemData, error: problemError } = await supabase
-    .from('next_move_problems')
-    .insert({
-      prompt: problem.prompt,
-      root_sfen: problem.root_sfen,
-      correct_choice_id: problem.correct_choice_id,
-      intro_moves_usi: problem.intro_moves_usi,
-      source_run_id: problem.source_run_id,
-      root_eval_cp: problem.root_eval_cp,
-      root_eval_percent: problem.root_eval_percent,
-      problem_rating: problem.problem_rating,
-      problem_rating_games: problem.problem_rating_games,
-      display_no: problem.display_no,
-      tags: problem.tags,
-    })
-    .select('id')
-    .single();
+  // Attempt insert with retry on duplicate display_no (concurrent inserts may race)
+  const MAX_RETRIES = 5;
+  let lastError: any = null;
+  let problemData: any = null;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const displayNoToUse = problem.display_no ?? await getNextDisplayNo();
+    const { data, error } = await supabase
+      .from('next_move_problems')
+      .insert({
+        prompt: problem.prompt,
+        root_sfen: problem.root_sfen,
+        correct_choice_id: problem.correct_choice_id,
+        intro_moves_usi: problem.intro_moves_usi,
+        source_run_id: problem.source_run_id,
+        root_eval_cp: problem.root_eval_cp,
+        root_eval_percent: problem.root_eval_percent,
+        problem_rating: problem.problem_rating,
+        problem_rating_games: problem.problem_rating_games,
+        display_no: displayNoToUse,
+        tags: problem.tags,
+      })
+      .select('id')
+      .single();
 
-  if (problemError) {
-    throw problemError;
+    if (!error) {
+      problemData = data;
+      break;
+    }
+
+    lastError = error;
+
+    // If duplicate display_no, retry with a fresh next value
+    const msg = String(error?.message || (error as any)?.details || '');
+    if (msg.includes('duplicate key') || msg.includes('unique constraint')) {
+      // clear provided display_no so next iteration will fetch a new one
+      problem.display_no = null;
+      continue;
+    }
+
+    // Other errors -> abort
+    throw error;
+  }
+
+  if (!problemData) {
+    throw lastError || new Error('failed to insert problem');
   }
 
   const problemId = problemData.id as number;
@@ -111,7 +136,6 @@ export async function saveMultipleProblems(
   }>,
 ): Promise<SaveProblemResult[]> {
   const results: SaveProblemResult[] = [];
-  let nextDisplayNo = await getNextDisplayNo();
 
   for (const problemData of problems) {
     const problem: SaveProblemInput = {
@@ -124,7 +148,8 @@ export async function saveMultipleProblems(
       root_eval_percent: null,
       problem_rating: problemData.problemRating,
       problem_rating_games: 0,
-      display_no: nextDisplayNo,
+      // leave display_no null so saveProblem will allocate a safe value
+      display_no: null,
       tags: problemData.tags,
     };
 
@@ -160,7 +185,6 @@ export async function saveMultipleProblems(
 
     const result = await saveProblem(problem, choices);
     results.push(result);
-    nextDisplayNo += 1;
   }
 
   return results;
