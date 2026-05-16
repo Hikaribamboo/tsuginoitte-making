@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Board from '../components/Board';
 import type { ArrowInfo } from '../components/Board';
 import PasteChoiceCard from '../components/PasteChoiceCard';
+import PasteIntroMoveCard from '../components/PasteIntroMoveCard';
 import KeyboardModal from '../components/KeyboardModal';
 import ReadingLineModal from '../components/ReadingLineModal';
 import TagSelector from '../components/TagSelector';
@@ -26,6 +27,7 @@ import { CAN_PROMOTE, pieceKanji } from '../types/shogi';
 import { useNavigationPrompt } from '../hooks/useNavigationPrompt';
 
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
+type BoardCell = { row: number; col: number };
 const WINRATE_SCALE = 800;
 const BOARD_SCALE = 0.72;
 const SLOT_ORDER: SlotKey[] = ['correct', 'incorrect1', 'incorrect2'];
@@ -53,6 +55,7 @@ interface PasteDraft {
   kifText: string;
   rootSfen: string;
   kifMoves: string[];
+  introMoveUsi: string;
   choices: Record<SlotKey, ChoiceDraft>;
   readingLineInputs: Record<SlotKey, string>;
   prompt: string;
@@ -163,6 +166,8 @@ const PasteProblemCreator: React.FC = () => {
   const [kifError, setKifError] = useState('');
   const [rootSfen, setRootSfen] = useState('');
   const [kifMoves, setKifMoves] = useState<string[]>([]);
+  const [introMoveUsi, setIntroMoveUsi] = useState('');
+  const [introMoveActive, setIntroMoveActive] = useState(false);
   const [canFlipTurn, setCanFlipTurn] = useState(false);
 
   // ---- Branch state ----
@@ -175,8 +180,6 @@ const PasteProblemCreator: React.FC = () => {
   const [workspaceLoaded, setWorkspaceLoaded] = useState(!workspaceId);
   const [showDeleteWsModal, setShowDeleteWsModal] = useState(false);
   const [savedProblemId, setSavedProblemId] = useState<number | null>(null);
-
-  const parsed = useMemo(() => (rootSfen ? parseSfen(rootSfen) : null), [rootSfen]);
 
   // ---- Choice drafts ----
   const [choices, setChoices] = useState<Record<SlotKey, ChoiceDraft>>(
@@ -250,6 +253,8 @@ const PasteProblemCreator: React.FC = () => {
   // ---- Board interaction state ----
   const [activeSlot, setActiveSlot] = useState<SlotKey | null>(null);
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number } | null>(null);
+  const [introDestination, setIntroDestination] = useState<BoardCell | null>(null);
+  const introDestinationRef = useRef<BoardCell | null>(null);
   const [selectedHandPiece, setSelectedHandPiece] = useState<{ side: Side; type: HandPieceType } | null>(null);
   const [promotionChoice, setPromotionChoice] = useState<{
     fromSq: string;
@@ -257,11 +262,23 @@ const PasteProblemCreator: React.FC = () => {
     pieceType: PieceType;
   } | null>(null);
 
+  const displaySfen = rootSfen;
+  const searchSfen = rootSfen;
+  const displayParsed = useMemo(() => (displaySfen ? parseSfen(displaySfen) : null), [displaySfen]);
+  const searchParsed = useMemo(() => (searchSfen ? parseSfen(searchSfen) : null), [searchSfen]);
+  const parsed = displayParsed;
+
+  const setIntroDestinationBoth = useCallback((cell: BoardCell | null) => {
+    introDestinationRef.current = cell;
+    setIntroDestination(cell);
+  }, []);
+
   // ---- Build draft snapshot ----
   const buildDraft = useCallback((): PasteDraft => ({
     kifText,
     rootSfen,
     kifMoves,
+    introMoveUsi,
     choices,
     readingLineInputs,
     prompt,
@@ -271,7 +288,7 @@ const PasteProblemCreator: React.FC = () => {
     rootEvalCp,
     rootEvalPercent,
     savedAt: new Date().toISOString(),
-  }), [kifText, rootSfen, kifMoves, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent]);
+  }), [kifText, rootSfen, kifMoves, introMoveUsi, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent]);
 
   const lastSavedRef = React.useRef<string>('');
 
@@ -299,6 +316,7 @@ const PasteProblemCreator: React.FC = () => {
           setKifText(d.kifText ?? '');
           setRootSfen(d.rootSfen ?? '');
           setKifMoves(d.kifMoves ?? []);
+          setIntroMoveUsi(d.introMoveUsi ?? '');
           setCanFlipTurn(isKifInput(d.kifText ?? ''));
 
           // Rebuild branch tree from saved KIF text so branch UI is visible after restore
@@ -350,6 +368,7 @@ const PasteProblemCreator: React.FC = () => {
             kifText: d.kifText ?? '',
             rootSfen: d.rootSfen ?? '',
             kifMoves: d.kifMoves ?? [],
+            introMoveUsi: d.introMoveUsi ?? '',
           });
           lastSavedRef.current = sig;
           setHasUnsavedChanges(false);
@@ -626,6 +645,50 @@ const PasteProblemCreator: React.FC = () => {
 
   // ---- Move registration via board ----
 
+  const clearBoardSelection = useCallback(() => {
+    setSelectedCell(null);
+    setIntroDestinationBoth(null);
+    setSelectedHandPiece(null);
+    setPromotionChoice(null);
+  }, [setIntroDestinationBoth]);
+
+  const handleActivateChoiceSlot = useCallback((slot: SlotKey) => {
+    setActiveSlot((prev) => (prev === slot ? null : slot));
+    setIntroMoveActive(false);
+    clearBoardSelection();
+  }, [clearBoardSelection]);
+
+  const handleActivateIntroMove = useCallback(() => {
+    console.log('[intro-debug] intro card clicked handler entered', {
+      introMoveActiveBefore: introMoveActive,
+      introDestinationBefore: introDestination,
+      introMoveUsi,
+      rootSfen,
+    });
+    console.log('[intro-move] activate');
+    setActiveSlot(null);
+    setIntroMoveActive(true);
+    console.log('[intro-debug] setIntroMoveActive(true) called');
+    setIntroDestinationBoth(null);
+    clearBoardSelection();
+  }, [clearBoardSelection, introDestination, introMoveActive, introMoveUsi, rootSfen, setIntroDestinationBoth]);
+
+  const handleClearIntroMove = useCallback(() => {
+    console.log('[intro-move] clear');
+    setIntroMoveUsi('');
+    setIntroMoveActive(false);
+    setIntroDestinationBoth(null);
+    clearBoardSelection();
+  }, [clearBoardSelection, setIntroDestinationBoth]);
+
+  const registerIntroMove = useCallback((usi: string) => {
+    console.log('[intro-move] register', { usi });
+    setIntroMoveUsi(usi);
+    setIntroMoveActive(false);
+    setIntroDestinationBoth(null);
+    clearBoardSelection();
+  }, [clearBoardSelection, setIntroDestinationBoth]);
+
   const registerMove = useCallback(
     (usi: string) => {
       if (!activeSlot || !parsed) return;
@@ -641,15 +704,190 @@ const PasteProblemCreator: React.FC = () => {
           line: [],
         },
       }));
-      setSelectedCell(null);
-      setSelectedHandPiece(null);
+      setIntroMoveActive(false);
+      clearBoardSelection();
     },
-    [activeSlot, parsed],
+    [activeSlot, parsed, clearBoardSelection],
   );
 
   const handleCellClick = useCallback(
     (row: number, col: number) => {
+      console.log('[intro-debug] board click handler entered', {
+        row,
+        col,
+        introMoveActive,
+        introDestinationState: introDestination,
+        introDestinationRef: introDestinationRef.current,
+        introMoveUsi,
+        rootSfen,
+      });
       if (promotionChoice) return;
+
+      if (introMoveActive) {
+        const currentIntroDestination = introDestinationRef.current;
+        console.log('[intro-debug] introMoveActive branch entered', {
+          row,
+          col,
+          introMoveActive,
+          introDestinationState: introDestination,
+          introDestinationRef: introDestinationRef.current,
+          introMoveUsi,
+          rootSfen,
+        });
+        if (!displayParsed || !searchParsed) return;
+
+        const clickedSquareUsi = toUsiSquare(row, col);
+        const clickedDisplayPiece = displayParsed.board[row][col];
+        const clickedSearchPiece = searchParsed.board[row][col];
+        console.log('[intro-move] board click', {
+          row,
+          col,
+          clickedSquareUsi,
+          rootSfen,
+          displaySfen,
+          searchSfen,
+          selectedCell,
+          introDestination,
+          introDestinationRef: introDestinationRef.current,
+          selectedHandPiece,
+          clickedDisplayPiece,
+          clickedSearchPiece,
+          sideToMove: searchParsed.sideToMove,
+        });
+
+        if (!currentIntroDestination) {
+          if (!clickedDisplayPiece) {
+            console.log('[intro-move] first click has no destination piece, waiting');
+            return;
+          }
+          console.log('[intro-debug] before set intro destination', {
+            destination: { row, col },
+            introDestinationBefore: introDestination,
+          });
+          console.log('[intro-move] first click treated as destination', { row, col, clickedSquareUsi });
+          setIntroDestinationBoth({ row, col });
+          console.log('[intro-debug] after set intro destination called', {
+            destination: { row, col },
+          });
+          return;
+        }
+
+        if (currentIntroDestination.row === row && currentIntroDestination.col === col) {
+          console.log('[intro-move] same square clicked twice, clearing selection');
+          setIntroDestinationBoth(null);
+          return;
+        }
+
+        console.log('[intro-debug] intro branch destination source', {
+          introDestinationState: introDestination,
+          introDestinationRef: introDestinationRef.current,
+        });
+
+        const destination = currentIntroDestination;
+        const currentSide = searchParsed.sideToMove;
+        const destinationUsi = toUsiSquare(destination.row, destination.col);
+        const sourceUsi = clickedSquareUsi;
+        const sourcePieceDisplay = displayParsed.board[row][col];
+        const sourcePieceSearch = searchParsed.board[row][col];
+        const destinationPieceDisplay = displayParsed.board[destination.row][destination.col];
+        const destinationPieceSearch = searchParsed.board[destination.row][destination.col];
+        const candidateIntroUsi = `${sourceUsi}${destinationUsi}`;
+
+        console.log('[intro-move] trying source square', {
+          sourceRow: row,
+          sourceCol: col,
+          sourceSquareUsi: clickedSquareUsi,
+          destination,
+          destinationUsi,
+          candidateIntroUsi,
+          sourcePieceDisplay,
+          sourcePieceSearch,
+          destinationPieceDisplay,
+          destinationPieceSearch,
+          currentSide,
+        });
+
+        const destinationPiece = destinationPieceSearch ?? destinationPieceDisplay;
+        if (!destinationPiece) {
+          console.log('[intro-move] destination has no piece, keep destination');
+          return;
+        }
+
+        console.log('[intro-debug] second click source branch entered', {
+          source: { row, col },
+          destination: introDestination,
+          introMoveUsi,
+          rootSfen,
+        });
+
+        console.log('[intro-move] candidate validation', {
+          candidateIntroUsi,
+          destinationUsi,
+          beforeRootSfen: rootSfen,
+        });
+
+        const beforeRoot = displayParsed;
+        const beforeTurn = beforeRoot.sideToMove;
+        const beforeMoveNumber = beforeRoot.moveNumber;
+        const afterTurn = beforeTurn === 'sente' ? 'gote' : 'sente';
+        const afterMoveNumber = Math.max(1, beforeMoveNumber - 1);
+
+        const rewoundBoard = beforeRoot.board.map((line) => [...line]);
+        const movedPiece = rewoundBoard[destination.row][destination.col];
+        if (!movedPiece) {
+          console.log('[intro-move] destination piece missing at rewind time, keep destination');
+          return;
+        }
+
+        rewoundBoard[row][col] = movedPiece;
+        rewoundBoard[destination.row][destination.col] = null;
+
+        const rewoundRootSfen = boardToSfen(
+          rewoundBoard,
+          afterTurn,
+          beforeRoot.senteHand,
+          beforeRoot.goteHand,
+          afterMoveNumber,
+        );
+
+        console.log('[intro-debug] before rewind rootSfen', {
+          beforeRootSfen: rootSfen,
+          source: { row, col },
+          destination,
+          candidateIntroUsi,
+        });
+
+        console.log('[intro-move] rewind result', {
+          beforeTurn,
+          afterTurn,
+          beforeMoveNumber,
+          afterMoveNumber,
+          beforeRootSfen: rootSfen,
+          rewoundRootSfen,
+          destinationCell: destination,
+          destinationUsi,
+          destinationPiece: movedPiece,
+          sourceCell: { row, col },
+          sourceUsi,
+          sourcePiece: sourcePieceSearch ?? sourcePieceDisplay,
+          candidateIntroUsi,
+        });
+
+        console.log('[intro-debug] before setIntroMoveUsi', {
+          candidateIntroUsi,
+        });
+        console.log('[intro-move] setIntroMoveUsi 直前', { candidateIntroUsi });
+        setIntroMoveUsi(candidateIntroUsi);
+        console.log('[intro-debug] before setRootSfen', {
+          rewoundRootSfen,
+        });
+        console.log('[intro-move] setRootSfen 直前', { rewoundRootSfen });
+        setRootSfen(rewoundRootSfen);
+        setIntroMoveActive(false);
+        setIntroDestinationBoth(null);
+        clearBoardSelection();
+        return;
+      }
 
       if (analysisMode) {
         // --- Analysis mode: move pieces on the store board ---
@@ -775,7 +1013,7 @@ const PasteProblemCreator: React.FC = () => {
       }
       registerMove(`${fromSq}${toSq}`);
     },
-    [analysisMode, store, parsed, activeSlot, selectedCell, selectedHandPiece, registerMove, promotionChoice],
+    [analysisMode, store, parsed, activeSlot, selectedCell, selectedHandPiece, registerMove, promotionChoice, introMoveActive, registerIntroMove],
   );
 
   const handlePromotionSelect = useCallback(
@@ -784,24 +1022,38 @@ const PasteProblemCreator: React.FC = () => {
       const usi = `${promotionChoice.fromSq}${promotionChoice.toSq}${promote ? '+' : ''}`;
       if (analysisMode) {
         store.applyMove(usi);
+      } else if (introMoveActive) {
+        registerIntroMove(usi);
       } else {
         registerMove(usi);
       }
       setPromotionChoice(null);
     },
-    [promotionChoice, analysisMode, store, registerMove],
+    [promotionChoice, analysisMode, store, registerMove, introMoveActive, registerIntroMove],
   );
 
   const handleHandPieceClick = useCallback(
     (side: Side, type: HandPieceType) => {
       const currentSide = analysisMode ? store.sideToMove : parsed?.sideToMove;
       if (!currentSide || side !== currentSide) return;
+
+      if (introMoveActive && introDestination && parsed) {
+        console.log('[intro-move] hand piece commit', {
+          type,
+          destination: introDestination,
+        });
+        registerIntroMove(`${type}*${toUsiSquare(introDestination.row, introDestination.col)}`);
+        return;
+      }
+
+      if (introMoveActive) return;
+
       setSelectedCell(null);
       setSelectedHandPiece((prev) =>
         prev?.side === side && prev?.type === type ? null : { side, type },
       );
     },
-    [analysisMode, store, parsed],
+    [analysisMode, store, parsed, introMoveActive, introDestination, registerIntroMove],
   );
 
   // ---- Field handlers ----
@@ -954,12 +1206,38 @@ const PasteProblemCreator: React.FC = () => {
     introMovesUsi: string[];
     introMovesLabels: string[];
   } => {
-    // intro = move immediately before the choice position
-    if (kifMoves.length === 0) {
-      return { rootSfenForSave: rootSfen, introMovesUsi: [], introMovesLabels: [] };
+    const effectiveIntroMove = introMoveUsi.trim() || (kifMoves.length > 0 ? kifMoves[kifMoves.length - 1] : '');
+    console.log('[intro-move] buildSaveRootAndIntro', {
+      rootSfen,
+      kifText,
+      kifMoves,
+      introMoveUsi,
+      effectiveIntroMove,
+    });
+
+    if (introMoveUsi.trim()) {
+      const introMoveLabel = parsed ? usiToLabel(introMoveUsi, parsed.board, parsed.sideToMove) : introMoveUsi;
+      return {
+        rootSfenForSave: rootSfen,
+        introMovesUsi: [introMoveUsi],
+        introMovesLabels: [introMoveLabel],
+      };
     }
 
-    const introMove = kifMoves[kifMoves.length - 1];
+    if (kifMoves.length === 0) {
+      if (!effectiveIntroMove) {
+        return { rootSfenForSave: rootSfen, introMovesUsi: [], introMovesLabels: [] };
+      }
+
+      const introMoveLabel = parsed ? usiToLabel(effectiveIntroMove, parsed.board, parsed.sideToMove) : effectiveIntroMove;
+      return {
+        rootSfenForSave: rootSfen,
+        introMovesUsi: [effectiveIntroMove],
+        introMovesLabels: [introMoveLabel],
+      };
+    }
+
+    const introMove = effectiveIntroMove;
     const baseMoves = kifMoves.slice(0, -1);
 
     const sourceSfen = deriveSourceSfen(kifText);
@@ -974,6 +1252,18 @@ const PasteProblemCreator: React.FC = () => {
     }
 
     const introMoveLabel = usiToLabel(introMove, board, sideToMove);
+    console.log('[intro-move] save-time base position', {
+      sourceSfen,
+      derivedRootSfen: boardToSfen(
+        board,
+        sideToMove,
+        senteHand,
+        goteHand,
+        state.moveNumber + baseMoves.length,
+      ),
+      introMove,
+      introMoveLabel,
+    });
 
     return {
       rootSfenForSave: boardToSfen(
@@ -983,10 +1273,10 @@ const PasteProblemCreator: React.FC = () => {
         goteHand,
         state.moveNumber + baseMoves.length,
       ),
-      introMovesUsi: [introMove],
-      introMovesLabels: [introMoveLabel],
+      introMovesUsi: introMove ? [introMove] : [],
+      introMovesLabels: introMove ? [introMoveLabel] : [],
     };
-  }, [kifText, kifMoves, rootSfen]);
+  }, [kifText, kifMoves, rootSfen, introMoveUsi, parsed]);
 
   const saveRootAndIntro = useMemo(() => buildSaveRootAndIntro(), [buildSaveRootAndIntro]);
   const introMovesUsiText = useMemo(
@@ -1179,6 +1469,16 @@ const PasteProblemCreator: React.FC = () => {
   // Render
   // ========================================
 
+  const introMoveCardRenderLog = (() => {
+    console.log('[intro-debug] render before PasteIntroMoveCard', {
+      introMoveActive,
+      introDestination,
+      introMoveUsi,
+      rootSfen,
+    });
+    return null;
+  })();
+
   return (
     <>
       <div className="w-full h-[calc(100vh-84px)] overflow-auto">
@@ -1249,7 +1549,7 @@ const PasteProblemCreator: React.FC = () => {
                     senteHand={parsed.senteHand}
                     goteHand={parsed.goteHand}
                     sideToMove={parsed.sideToMove}
-                    selectedCell={selectedCell}
+                    selectedCell={introMoveActive ? introDestination : selectedCell}
                     onCellClick={handleCellClick}
                     onHandPieceClick={handleHandPieceClick}
                   />
@@ -1348,6 +1648,14 @@ const PasteProblemCreator: React.FC = () => {
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(180px,240px)] gap-2 items-start min-w-0 max-w-full">
             {/* Choice cards */}
             <div className="flex flex-col gap-1.5 items-start min-w-0">
+              {introMoveCardRenderLog}
+              <PasteIntroMoveCard
+                draftUsi={introMoveUsi}
+                draftLabel={introMoveUsi && parsed ? usiToLabel(introMoveUsi, parsed.board, parsed.sideToMove) : ''}
+                isActive={introMoveActive}
+                onActivate={handleActivateIntroMove}
+                onClear={handleClearIntroMove}
+              />
               {(['correct', 'incorrect1', 'incorrect2'] as SlotKey[]).map((slot) => (
                 <PasteChoiceCard
                   key={slot}
@@ -1356,12 +1664,7 @@ const PasteProblemCreator: React.FC = () => {
                   isActive={activeSlot === slot}
                   readingLineInput={readingLineInputs[slot]}
                   readingLineError={readingLineErrors[slot]}
-                  onActivate={() => {
-                    const nextSlot = activeSlot === slot ? null : slot;
-                    setActiveSlot(nextSlot);
-                    setSelectedCell(null);
-                    setSelectedHandPiece(null);
-                  }}
+                  onActivate={() => handleActivateChoiceSlot(slot)}
                   onReadingLineChange={(text) =>
                     setReadingLineInputs((prev) => ({ ...prev, [slot]: text }))
                   }
