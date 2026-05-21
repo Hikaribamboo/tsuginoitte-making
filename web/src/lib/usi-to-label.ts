@@ -1,3 +1,4 @@
+// src/lib/usi-to-label.ts
 import type { Board, Piece, PieceType, Side } from '../types/shogi';
 import { PIECE_KANJI, PROMOTED_KANJI } from '../types/shogi';
 import { parseUsiSquare, parseSfen, applyUsiMove } from './sfen';

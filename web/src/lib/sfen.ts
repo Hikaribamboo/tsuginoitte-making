@@ -1,3 +1,4 @@
+// src/lib/sfen.ts
 import type {
   Board,
   BoardCell,

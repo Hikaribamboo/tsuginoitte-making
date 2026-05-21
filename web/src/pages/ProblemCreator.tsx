@@ -1,3 +1,4 @@
+// src/pages/ProblemCreator.tsx
 import React, { useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Board from "../components/Board";

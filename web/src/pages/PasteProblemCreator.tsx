@@ -1,3 +1,4 @@
+// src/pages/PasteProblemCreator.tsx
 import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Board from '../components/Board';
