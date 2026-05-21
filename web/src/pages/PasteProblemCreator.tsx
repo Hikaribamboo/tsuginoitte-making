@@ -17,12 +17,12 @@ import { usiToLabel, pvToJapanese } from '../lib/usi-to-label';
 import { cpToWinRatePercentFromRootSfen } from '../lib/eval-percent';
 import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches, extractBranchProblems } from '../lib/kif-parser';
 import type { KifBranch, KifTreeNode } from '../lib/kif-parser';
-import { saveProblem, getNextDisplayNo, saveMultipleProblems } from '../api/problems';
+import { getNextDisplayNoByMode, saveLearningProblem, saveMultipleProblems } from '../api/problems';
 import { getWorkspace, saveWorkspaceDraft, deleteWorkspace } from '../api/workspaces';
 import { generateExplanations } from '../api/engine';
 import { DEFAULT_PROMPT } from '../lib/constants';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
-import type { ChoiceDraft } from '../types/problem';
+import type { ChoiceDraft, LearningMode } from '../types/problem';
 import type { Side, HandPieceType, PieceType } from '../types/shogi';
 import { CAN_PROMOTE, pieceKanji } from '../types/shogi';
 import { useNavigationPrompt } from '../hooks/useNavigationPrompt';
@@ -66,6 +66,7 @@ interface PasteDraft {
   rootEvalCp: number | null;
   rootEvalPercent: number | null;
   savedAt: string;
+  mode?: LearningMode;
 }
 
 function draftSignature(draft: PasteDraft): string {
@@ -209,6 +210,8 @@ const PasteProblemCreator: React.FC = () => {
   const [rootEvalCp, setRootEvalCp] = useState<number | null>(null);
   const [rootEvalPercent, setRootEvalPercent] = useState<number | null>(null);
 
+    const [mode, setMode] = useState<LearningMode>('next_move');
+
   // ---- UI state ----
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -289,16 +292,17 @@ const PasteProblemCreator: React.FC = () => {
     rootEvalCp,
     rootEvalPercent,
     savedAt: new Date().toISOString(),
-  }), [kifText, rootSfen, kifMoves, introMoveUsi, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent]);
+      mode,
+    }), [kifText, rootSfen, kifMoves, introMoveUsi, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent, mode]);
 
   const lastSavedRef = React.useRef<string>('');
 
   // Auto-fetch next display_no on mount
   React.useEffect(() => {
-    getNextDisplayNo()
+      getNextDisplayNoByMode(mode)
       .then(setDisplayNo)
       .catch(() => {});
-  }, []);
+    }, [mode]);
 
   // ---- Load workspace draft from DB ----
   React.useEffect(() => {
@@ -351,6 +355,7 @@ const PasteProblemCreator: React.FC = () => {
           if (d.problemRating != null) setProblemRating(d.problemRating);
           setRootEvalCp(d.rootEvalCp ?? null);
           setRootEvalPercent(d.rootEvalPercent ?? null);
+            setMode(d.mode ?? 'next_move');
           const sig = draftSignature({
             ...d,
             choices: d.choices ?? {
@@ -1421,11 +1426,11 @@ const PasteProblemCreator: React.FC = () => {
       const correctEvalCp = choices.correct.eval_cp;
       const correctEvalPercent = choices.correct.eval_percent;
       const problem = {
+          mode,
         prompt: prompt.trim() || DEFAULT_PROMPT,
         root_sfen: rootSfenForSave,
         correct_choice_id: choiceIdBySlot.correct,
         intro_moves_usi: introMovesUsi,
-        source_run_id: null,
         root_eval_cp: correctEvalCp,
         root_eval_percent: correctEvalPercent,
         problem_rating: problemRating,
@@ -1450,7 +1455,7 @@ const PasteProblemCreator: React.FC = () => {
         },
       ];
 
-      const { problemId } = await saveProblem(problem, choiceData);
+        const { problemId } = await saveLearningProblem(problem, choiceData);
       lastSavedRef.current = '';
       setSavedProblemId(problemId);
       setMessage(`保存しました (problem_id: ${problemId})`);
@@ -1627,6 +1632,18 @@ const PasteProblemCreator: React.FC = () => {
                   className="h-7 text-[12px]"
                 />
               </div>
+
+                <div className="flex flex-col gap-0.5">
+                  <label className="text-[11px] font-semibold text-gray-500">Mode</label>
+                  <select
+                    value={mode}
+                    onChange={(e) => setMode(e.target.value as LearningMode)}
+                    className="h-7 text-[12px]"
+                  >
+                    <option value="next_move">Next Move</option>
+                    <option value="joseki">Joseki</option>
+                  </select>
+                </div>
 
               <div className="flex flex-col gap-0.5">
                 <label className="text-[11px] font-semibold text-gray-500">レート</label>

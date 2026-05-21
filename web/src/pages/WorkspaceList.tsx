@@ -27,6 +27,7 @@ const WorkspaceList: React.FC = () => {
   const [pasteText, setPasteText] = useState('');
   const [pasteError, setPasteError] = useState('');
   const [pasteTags, setPasteTags] = useState<string[]>([]);
+  const [pasteSaveMode, setPasteSaveMode] = useState<'next_move' | 'joseki'>('next_move');
   const [parsedBranchResult, setParsedBranchResult] = useState<KifBranchParseResult | null>(null);
   const [parsedBranchCount, setParsedBranchCount] = useState(0);
 
@@ -114,6 +115,8 @@ const WorkspaceList: React.FC = () => {
         readingLineInputs: { correct: '', incorrect1: '', incorrect2: '' },
         prompt: '',
         tags: pasteTags,
+        // 保存モード: 'next_move' = 次の一手, 'joseki' = 定跡
+        mode: pasteSaveMode,
         displayNo: null,
         problemRating: 1200,
         rootEvalCp: null,
@@ -209,6 +212,7 @@ const WorkspaceList: React.FC = () => {
           readingLineInputs: { correct: '', incorrect1: '', incorrect2: '' },
           prompt: '',
           tags: pasteTags,
+          mode: pasteSaveMode,
           displayNo: null,
           problemRating: 1200,
           rootEvalCp: null,
@@ -308,6 +312,32 @@ const WorkspaceList: React.FC = () => {
             <div className="mt-2">
               <TagSelector selected={pasteTags} onChange={setPasteTags} />
             </div>
+            <div className="mt-2 flex items-center gap-3 text-[13px]">
+              <div className="flex items-center gap-1">
+                <input
+                  id="saveMode-next"
+                  type="radio"
+                  name="saveMode"
+                  value="next_move"
+                  checked={pasteSaveMode === 'next_move'}
+                  onChange={() => setPasteSaveMode('next_move')}
+                  className="mr-1"
+                />
+                <label htmlFor="saveMode-next">次の一手</label>
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  id="saveMode-joseki"
+                  type="radio"
+                  name="saveMode"
+                  value="joseki"
+                  checked={pasteSaveMode === 'joseki'}
+                  onChange={() => setPasteSaveMode('joseki')}
+                  className="mr-1"
+                />
+                <label htmlFor="saveMode-joseki">定跡</label>
+              </div>
+            </div>
             <div className="flex gap-2 mt-2 flex-wrap">
               {parsedBranchCount > 0 && (
                 <button
@@ -388,6 +418,11 @@ const WorkspaceList: React.FC = () => {
                     {rootSfen && (
                       <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0 rounded text-[10px]">
                         下書きあり
+                      </span>
+                    )}
+                    {d?.mode && (
+                      <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0 rounded text-[10px]">
+                        {d.mode === 'joseki' ? '定跡' : '次の一手'}
                       </span>
                     )}
                   </div>

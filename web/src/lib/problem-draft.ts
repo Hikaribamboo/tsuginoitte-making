@@ -1,4 +1,5 @@
 import type { ChoiceDraft } from '../types/problem';
+import type { LearningMode } from '../types/problem';
 
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 
@@ -20,6 +21,8 @@ export interface ProblemCreatorDraft {
   editingSlot?: SlotKey | null;
   /** ISO timestamp of when editingSlot was set. */
   editingAt?: string | null;
+  /** Learning mode: "next_move" or "joseki". Defaults to "next_move" if not set. */
+  mode?: LearningMode;
 }
 
 export function isProblemCreatorDraft(value: unknown): value is ProblemCreatorDraft {

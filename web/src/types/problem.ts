@@ -1,3 +1,7 @@
+// ---- Learning Mode ----
+
+export type LearningMode = "next_move" | "joseki";
+
 // ---- Problem & Choice types matching Supabase schema ----
 
 export interface Problem {
@@ -7,13 +11,17 @@ export interface Problem {
   root_sfen: string;
   correct_choice_id: number;
   intro_moves_usi: string[];
-  source_run_id: string | null;
   root_eval_cp: number | null;
   root_eval_percent: number | null;
   problem_rating: number | null;
   problem_rating_games: number | null;
   display_no: number | null;
   tags: string[] | null;
+}
+
+export interface LearningProblemInput extends Problem {
+  mode: LearningMode;
+  status?: "draft" | "active";
 }
 
 export interface Choice {

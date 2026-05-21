@@ -13,7 +13,7 @@ import { parseSfen, toUsiSquare } from "../lib/sfen";
 import { usiToLabel, pvToJapanese } from "../lib/usi-to-label";
 import { cpToWinRatePercentFromRootSfen } from "../lib/eval-percent";
 import { evaluatePosition, generateExplanations } from "../api/engine";
-import { saveProblem, getNextDisplayNo } from "../api/problems";
+import { getNextDisplayNoByMode, saveLearningProblem } from "../api/problems";
 import {
   deleteFavorite,
   fetchProblemDraftForFavorite,
@@ -22,7 +22,7 @@ import {
 } from "../api/favorites";
 import { DEFAULT_PROMPT } from "../lib/constants";
 import { getValidDestinations, getValidDropSquares } from "../lib/legal-moves";
-import type { ChoiceDraft } from "../types/problem";
+import type { ChoiceDraft, LearningMode } from "../types/problem";
 import type { ProblemCreatorDraft } from "../lib/problem-draft";
 import type {
   Board as BoardType,
@@ -144,6 +144,7 @@ const ProblemCreator: React.FC = () => {
   const [problemRating, setProblemRating] = useState<number>(1200);
   const [rootEvalCp, setRootEvalCp] = useState<number | null>(null);
   const [rootEvalPercent, setRootEvalPercent] = useState<number | null>(null);
+  const [mode, setMode] = useState<LearningMode>("next_move");
 
   // UI state
   const [evaluatingSlot, setEvaluatingSlot] = useState<SlotKey | null>(null);
@@ -188,6 +189,7 @@ const ProblemCreator: React.FC = () => {
       savedAt: new Date().toISOString(),
       editingSlot: editingSlot ?? null,
       editingAt: editingSlot ? new Date().toISOString() : null,
+      mode,
     }),
     [
       favoriteId,
@@ -202,6 +204,7 @@ const ProblemCreator: React.FC = () => {
       activeSlot,
       choices,
       editingSlot,
+      mode,
     ],
   );
 
@@ -215,14 +218,15 @@ const ProblemCreator: React.FC = () => {
     setRootEvalPercent(draft.rootEvalPercent);
     setActiveSlot(draft.activeSlot);
     setChoices(draft.choices);
+    setMode(draft.mode ?? "next_move");
   }, []);
 
-  // Auto-fetch next display_no on mount
+  // Auto-fetch next display_no on mount and when mode changes
   React.useEffect(() => {
-    getNextDisplayNo()
+    getNextDisplayNoByMode(mode)
       .then(setDisplayNo)
       .catch(() => {});
-  }, []);
+  }, [mode]);
 
   React.useEffect(() => {
     if (draftRestored) return;
@@ -744,11 +748,11 @@ const ProblemCreator: React.FC = () => {
       const correctEvalCp = choices.correct.eval_cp;
       const correctEvalPercent = choices.correct.eval_percent;
       const problem = {
+        mode,
         prompt: prompt.trim() || DEFAULT_PROMPT,
         root_sfen: rootSfen,
         correct_choice_id: correctChoiceId,
         intro_moves_usi: introMovesUsi,
-        source_run_id: null,
         root_eval_cp: correctEvalCp,
         root_eval_percent: correctEvalPercent,
         problem_rating: problemRating,
@@ -772,7 +776,7 @@ const ProblemCreator: React.FC = () => {
         },
       ];
 
-      const { problemId } = await saveProblem(problem, choiceData);
+      const { problemId } = await saveLearningProblem(problem, choiceData);
 
       if (favoriteId) {
         await clearProblemDraftForFavorite(favoriteId);
@@ -1046,6 +1050,20 @@ const ProblemCreator: React.FC = () => {
                   }
                   className="h-8"
                 />
+              </div>
+
+              <div className="flex flex-col gap-0.5">
+                <label className="text-xs font-semibold text-gray-500">
+                  Mode
+                </label>
+                <select
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value as LearningMode)}
+                  className="h-8"
+                >
+                  <option value="next_move">Next Move</option>
+                  <option value="joseki">Joseki</option>
+                </select>
               </div>
 
               <div className="flex flex-col gap-0.5">
