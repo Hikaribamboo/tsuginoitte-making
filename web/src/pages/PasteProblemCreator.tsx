@@ -1,4 +1,3 @@
-// src/pages/PasteProblemCreator.tsx
 import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Board from '../components/Board';
@@ -14,15 +13,15 @@ import Toggle from '../components/Toggle';
 import { useBoardStore } from '../hooks/useBoardStore';
 import { INITIAL_SFEN, parseSfen, applyUsiMove, boardToSfen, toUsiSquare } from '../lib/sfen';
 import { usiToLabel, pvToJapanese } from '../lib/usi-to-label';
-import { cpToWinRatePercentFromRootSfen } from '../lib/eval-percent';
+import { cpToWinRatePercent } from '../lib/eval-percent';
 import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches, extractBranchProblems } from '../lib/kif-parser';
 import type { KifBranch, KifTreeNode } from '../lib/kif-parser';
-import { getNextDisplayNoByMode, saveLearningProblem, saveMultipleProblems } from '../api/problems';
+import { saveProblem, getNextDisplayNo, saveMultipleProblems, saveLearningProblem } from '../api/problems';
 import { getWorkspace, saveWorkspaceDraft, deleteWorkspace } from '../api/workspaces';
 import { generateExplanations } from '../api/engine';
 import { DEFAULT_PROMPT } from '../lib/constants';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
-import type { ChoiceDraft, LearningMode } from '../types/problem';
+import type { ChoiceDraft } from '../types/problem';
 import type { Side, HandPieceType, PieceType } from '../types/shogi';
 import { CAN_PROMOTE, pieceKanji } from '../types/shogi';
 import { useNavigationPrompt } from '../hooks/useNavigationPrompt';
@@ -66,7 +65,6 @@ interface PasteDraft {
   rootEvalCp: number | null;
   rootEvalPercent: number | null;
   savedAt: string;
-  mode?: LearningMode;
 }
 
 function draftSignature(draft: PasteDraft): string {
@@ -181,6 +179,7 @@ const PasteProblemCreator: React.FC = () => {
   const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(!workspaceId);
   const [showDeleteWsModal, setShowDeleteWsModal] = useState(false);
+  const [showDeleteWorkspaceConfirm, setShowDeleteWorkspaceConfirm] = useState(false);
   const [savedProblemId, setSavedProblemId] = useState<number | null>(null);
 
   // ---- Choice drafts ----
@@ -210,12 +209,11 @@ const PasteProblemCreator: React.FC = () => {
   const [rootEvalCp, setRootEvalCp] = useState<number | null>(null);
   const [rootEvalPercent, setRootEvalPercent] = useState<number | null>(null);
 
-    const [mode, setMode] = useState<LearningMode>('next_move');
-
   // ---- UI state ----
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
+  const [registeringJoseki, setRegisteringJoseki] = useState(false);
   const [savingBranches, setSavingBranches] = useState(false);
   const [message, setMessage] = useState('');
   const [showPreview, setShowPreview] = useState(false);
@@ -248,12 +246,6 @@ const PasteProblemCreator: React.FC = () => {
     showNextLabel: idx === 1,
   }));
 
-  // Initialize store when rootSfen changes
-  React.useEffect(() => {
-    if (rootSfen) store.loadFromSfen(rootSfen);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootSfen]);
-
   // ---- Board interaction state ----
   const [activeSlot, setActiveSlot] = useState<SlotKey | null>(null);
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number } | null>(null);
@@ -266,8 +258,25 @@ const PasteProblemCreator: React.FC = () => {
     pieceType: PieceType;
   } | null>(null);
 
-  const displaySfen = rootSfen;
   const searchSfen = rootSfen;
+  const displaySfen = useMemo(() => {
+    if (!rootSfen) return rootSfen;
+    if (!introMoveUsi) return rootSfen;
+    try {
+      const base = parseSfen(rootSfen);
+      const res = applyUsiMove(base.board, base.senteHand, base.goteHand, base.sideToMove, introMoveUsi);
+      const newSide = base.sideToMove === 'sente' ? 'gote' : 'sente';
+      const newMoveNumber = base.moveNumber + 1;
+      return boardToSfen(res.board, newSide, res.senteHand, res.goteHand, newMoveNumber);
+    } catch (e) {
+      return rootSfen;
+    }
+  }, [rootSfen, introMoveUsi]);
+  // Initialize store when displaySfen changes (displaySfen = rootSfen with intro applied)
+  React.useEffect(() => {
+    if (displaySfen) store.loadFromSfen(displaySfen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displaySfen]);
   const displayParsed = useMemo(() => (displaySfen ? parseSfen(displaySfen) : null), [displaySfen]);
   const searchParsed = useMemo(() => (searchSfen ? parseSfen(searchSfen) : null), [searchSfen]);
   const parsed = displayParsed;
@@ -292,17 +301,16 @@ const PasteProblemCreator: React.FC = () => {
     rootEvalCp,
     rootEvalPercent,
     savedAt: new Date().toISOString(),
-      mode,
-    }), [kifText, rootSfen, kifMoves, introMoveUsi, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent, mode]);
+  }), [kifText, rootSfen, kifMoves, introMoveUsi, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent]);
 
   const lastSavedRef = React.useRef<string>('');
 
   // Auto-fetch next display_no on mount
   React.useEffect(() => {
-      getNextDisplayNoByMode(mode)
+    getNextDisplayNo()
       .then(setDisplayNo)
       .catch(() => {});
-    }, [mode]);
+  }, []);
 
   // ---- Load workspace draft from DB ----
   React.useEffect(() => {
@@ -355,7 +363,6 @@ const PasteProblemCreator: React.FC = () => {
           if (d.problemRating != null) setProblemRating(d.problemRating);
           setRootEvalCp(d.rootEvalCp ?? null);
           setRootEvalPercent(d.rootEvalPercent ?? null);
-            setMode(d.mode ?? 'next_move');
           const sig = draftSignature({
             ...d,
             choices: d.choices ?? {
@@ -412,10 +419,10 @@ const PasteProblemCreator: React.FC = () => {
     };
   }, [workspaceId, hasUnsavedChanges]);
 
-  const handleSaveDraftToDb = useCallback(async () => {
+  const persistWorkspaceDraft = useCallback(async () => {
     if (!workspaceId) {
       setMessage('ワークスペースを開いたときだけ途中保存できます');
-      return;
+      return false;
     }
     setDraftSaving(true);
     try {
@@ -424,13 +431,40 @@ const PasteProblemCreator: React.FC = () => {
       const sig = draftSignature(draft);
       lastSavedRef.current = sig;
       setHasUnsavedChanges(false);
-      setMessage('ワークスペースを途中保存しました（DB）');
+      return true;
     } catch (e: any) {
       setMessage(`途中保存エラー: ${e.message}`);
+      return false;
     } finally {
       setDraftSaving(false);
     }
   }, [workspaceId, buildDraft]);
+
+  const handleSaveDraftToDb = useCallback(async () => {
+    const saved = await persistWorkspaceDraft();
+    if (saved) {
+      setMessage('ワークスペースを途中保存しました（DB）');
+    }
+  }, [persistWorkspaceDraft]);
+
+  const handleKeepWorkspaceAfterSave = useCallback(async () => {
+    const saved = await persistWorkspaceDraft();
+    if (!saved) return;
+    setShowDeleteWsModal(false);
+    navigate('/workspaces');
+  }, [navigate, persistWorkspaceDraft]);
+
+  const handleDeleteCurrentWorkspace = useCallback(async () => {
+    if (!workspaceId) return;
+    try {
+      await deleteWorkspace(workspaceId);
+      setShowDeleteWorkspaceConfirm(false);
+      setMessage('ワークスペースを削除しました');
+      navigate('/workspaces');
+    } catch (e: any) {
+      setMessage(`ワークスペース削除エラー: ${e.message}`);
+    }
+  }, [navigate, workspaceId]);
 
   // ---- KIF parsing ----
 
@@ -590,9 +624,9 @@ const PasteProblemCreator: React.FC = () => {
       let evalPercent: number | null = null;
       if (result.evalCp !== null) {
         try {
-          evalPercent = cpToWinRatePercentFromRootSfen({
+          evalPercent = cpToWinRatePercent({
             cp: result.evalCp,
-            rootSfen,
+            userColor: parsed?.sideToMove ?? 'sente',
             scale: WINRATE_SCALE,
           });
         } catch {
@@ -630,11 +664,11 @@ const PasteProblemCreator: React.FC = () => {
   const handleRecalculatePercent = useCallback(
     (slot: SlotKey) => {
       const cp = choices[slot].eval_cp;
-      if (cp === null || !rootSfen) return;
+        if (cp === null) return;
       try {
-        const percent = cpToWinRatePercentFromRootSfen({
+          const percent = cpToWinRatePercent({
           cp,
-          rootSfen,
+            userColor: parsed?.sideToMove ?? 'sente',
           scale: WINRATE_SCALE,
         });
         setChoices((prev) => ({
@@ -646,7 +680,7 @@ const PasteProblemCreator: React.FC = () => {
         /* ignore */
       }
     },
-    [choices, rootSfen],
+    [choices, parsed],
   );
 
   // ---- Move registration via board ----
@@ -687,9 +721,13 @@ const PasteProblemCreator: React.FC = () => {
     clearBoardSelection();
   }, [clearBoardSelection, setIntroDestinationBoth]);
 
-  const registerIntroMove = useCallback((usi: string) => {
-    console.log('[intro-move] register', { usi });
+  const registerIntroMove = useCallback((usi: string, newRootSfen?: string) => {
+    console.log('[intro-move] register', { usi, newRootSfen });
     setIntroMoveUsi(usi);
+    if (newRootSfen) {
+      console.log('[intro-move] updating rootSfen to rewound position', { newRootSfen });
+      setRootSfen(newRootSfen);
+    }
     setIntroMoveActive(false);
     setIntroDestinationBoth(null);
     clearBoardSelection();
@@ -879,19 +917,11 @@ const PasteProblemCreator: React.FC = () => {
           candidateIntroUsi,
         });
 
-        console.log('[intro-debug] before setIntroMoveUsi', {
+        console.log('[intro-debug] registering intro move and rewinding rootSfen', {
           candidateIntroUsi,
-        });
-        console.log('[intro-move] setIntroMoveUsi 直前', { candidateIntroUsi });
-        setIntroMoveUsi(candidateIntroUsi);
-        console.log('[intro-debug] before setRootSfen', {
           rewoundRootSfen,
         });
-        console.log('[intro-move] setRootSfen 直前', { rewoundRootSfen });
-        setRootSfen(rewoundRootSfen);
-        setIntroMoveActive(false);
-        setIntroDestinationBoth(null);
-        clearBoardSelection();
+        registerIntroMove(candidateIntroUsi, rewoundRootSfen);
         return;
       }
 
@@ -1426,11 +1456,11 @@ const PasteProblemCreator: React.FC = () => {
       const correctEvalCp = choices.correct.eval_cp;
       const correctEvalPercent = choices.correct.eval_percent;
       const problem = {
-          mode,
         prompt: prompt.trim() || DEFAULT_PROMPT,
         root_sfen: rootSfenForSave,
         correct_choice_id: choiceIdBySlot.correct,
         intro_moves_usi: introMovesUsi,
+        source_run_id: null,
         root_eval_cp: correctEvalCp,
         root_eval_percent: correctEvalPercent,
         problem_rating: problemRating,
@@ -1455,7 +1485,7 @@ const PasteProblemCreator: React.FC = () => {
         },
       ];
 
-        const { problemId } = await saveLearningProblem(problem, choiceData);
+      const { problemId } = await saveProblem(problem, choiceData);
       lastSavedRef.current = '';
       setSavedProblemId(problemId);
       setMessage(`保存しました (problem_id: ${problemId})`);
@@ -1468,6 +1498,63 @@ const PasteProblemCreator: React.FC = () => {
       setMessage(`保存エラー: ${e.message}`);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRegisterJoseki = async () => {
+    // Register only to problems table as joseki
+    // Reuse same save data construction as handleSave
+    setRegisteringJoseki(true);
+    setMessage('');
+    try {
+      const randomizedOrder = shuffledSlots();
+      const choiceIdBySlot: Record<SlotKey, number> = {
+        correct: randomizedOrder.indexOf('correct') + 1,
+        incorrect1: randomizedOrder.indexOf('incorrect1') + 1,
+        incorrect2: randomizedOrder.indexOf('incorrect2') + 1,
+      };
+
+      const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
+      const correctEvalCp = choices.correct.eval_cp;
+      const correctEvalPercent = choices.correct.eval_percent;
+
+      const problem = {
+        prompt: prompt.trim() || DEFAULT_PROMPT,
+        root_sfen: rootSfenForSave,
+        correct_choice_id: choiceIdBySlot.correct,
+        intro_moves_usi: introMovesUsi,
+        source_run_id: null,
+        root_eval_cp: correctEvalCp,
+        root_eval_percent: correctEvalPercent,
+        problem_rating: problemRating,
+        problem_rating_games: 0,
+        display_no: null,
+        tags: tags.length > 0 ? tags : null,
+        mode: 'joseki' as const,
+      };
+
+      const choiceData = [
+        {
+          choice_id: choiceIdBySlot.correct,
+          ...pickChoiceFields(choices.correct),
+        },
+        {
+          choice_id: choiceIdBySlot.incorrect1,
+          ...pickChoiceFields(choices.incorrect1),
+        },
+        {
+          choice_id: choiceIdBySlot.incorrect2,
+          ...pickChoiceFields(choices.incorrect2),
+        },
+      ];
+
+      const { problemId } = await saveLearningProblem(problem as any, choiceData as any);
+      setSavedProblemId(problemId);
+      setMessage(`定跡として登録しました (problem_id: ${problemId})`);
+    } catch (e: any) {
+      setMessage(`定跡登録エラー: ${e.message}`);
+    } finally {
+      setRegisteringJoseki(false);
     }
   };
 
@@ -1633,18 +1720,6 @@ const PasteProblemCreator: React.FC = () => {
                 />
               </div>
 
-                <div className="flex flex-col gap-0.5">
-                  <label className="text-[11px] font-semibold text-gray-500">Mode</label>
-                  <select
-                    value={mode}
-                    onChange={(e) => setMode(e.target.value as LearningMode)}
-                    className="h-7 text-[12px]"
-                  >
-                    <option value="next_move">Next Move</option>
-                    <option value="joseki">Joseki</option>
-                  </select>
-                </div>
-
               <div className="flex flex-col gap-0.5">
                 <label className="text-[11px] font-semibold text-gray-500">レート</label>
                 <select
@@ -1717,6 +1792,15 @@ const PasteProblemCreator: React.FC = () => {
                     {draftSaving ? '保存中...' : 'DBに途中保存'}
                   </button>
                 )}
+                {workspaceId && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteWorkspaceConfirm(true)}
+                    className="bg-red-50 text-red-700 border-red-300 hover:bg-red-100 text-[11px]"
+                  >
+                    ワークスペース削除
+                  </button>
+                )}
                 <button onClick={() => setShowPreview(true)} type="button" className="text-[11px]">
                   プレビュー
                 </button>
@@ -1726,6 +1810,13 @@ const PasteProblemCreator: React.FC = () => {
                   className="bg-blue-600 text-white border-blue-600 hover:bg-blue-700 text-[11px]"
                 >
                   {saving ? '保存中...' : 'Supabaseに保存'}
+                </button>
+                <button
+                  onClick={handleRegisterJoseki}
+                  disabled={registeringJoseki}
+                  className="bg-yellow-600 text-white border-yellow-600 hover:bg-yellow-700 text-[11px]"
+                >
+                  {registeringJoseki ? '登録中...' : '定跡として登録'}
                 </button>
                 <button
                   onClick={handleGenerateExplanations}
@@ -1817,6 +1908,44 @@ const PasteProblemCreator: React.FC = () => {
         </div>
       )}
 
+      {/* Manual: delete current workspace? modal */}
+      {showDeleteWorkspaceConfirm && workspaceId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setShowDeleteWorkspaceConfirm(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl p-5 w-full max-w-[380px] mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold mb-2">ワークスペースを削除</h3>
+            <p className="text-[13px] text-gray-600 mb-4">
+              「{workspaceName ?? 'このワークスペース'}」を削除しますか？
+              <br />
+              削除すると途中保存データも消えます。
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteWorkspaceConfirm(false)}
+                className="text-[13px]"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleDeleteCurrentWorkspace();
+                }}
+                className="bg-red-600 text-white border-red-600 hover:bg-red-700 text-[13px] px-4 py-1.5 rounded"
+              >
+                削除する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Explanation keyboard modal */}
       <KeyboardModal
         open={keyboardSlot !== null}
@@ -1855,8 +1984,7 @@ const PasteProblemCreator: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  setShowDeleteWsModal(false);
-                  navigate('/workspaces');
+                  void handleKeepWorkspaceAfterSave();
                 }}
                 className="text-[13px]"
               >

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   listWorkspaces,
@@ -22,6 +22,7 @@ const WorkspaceList: React.FC = () => {
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [savingBranches, setSavingBranches] = useState(false);
+  const [sortKey, setSortKey] = useState<'newest' | 'oldest' | 'rating-asc' | 'rating-desc' | 'name-asc' | 'name-desc'>('newest');
 
   // Inline KIF paste state
   const [pasteText, setPasteText] = useState('');
@@ -46,6 +47,35 @@ const WorkspaceList: React.FC = () => {
   useEffect(() => {
     fetchWorkspaces();
   }, [fetchWorkspaces]);
+
+  const sortedWorkspaces = useMemo(() => {
+    const arr = [...workspaces];
+    const getRating = (ws: Workspace) => {
+      try {
+        const d: any = ws.draft ?? {};
+        return typeof d.problemRating === 'number' ? d.problemRating : (d?.problemRating ? Number(d.problemRating) : 0);
+      } catch {
+        return 0;
+      }
+    };
+
+    switch (sortKey) {
+      case 'newest':
+        return arr.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+      case 'oldest':
+        return arr.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+      case 'rating-asc':
+        return arr.sort((a, b) => getRating(a) - getRating(b));
+      case 'rating-desc':
+        return arr.sort((a, b) => getRating(b) - getRating(a));
+      case 'name-asc':
+        return arr.sort((a, b) => a.name.localeCompare(b.name));
+      case 'name-desc':
+        return arr.sort((a, b) => b.name.localeCompare(a.name));
+      default:
+        return arr;
+    }
+  }, [workspaces, sortKey]);
 
 
   const getNextWorkspaceNumber = (items: Workspace[]) => items.reduce((maxNo, ws) => {
@@ -374,21 +404,39 @@ const WorkspaceList: React.FC = () => {
         )}
       </div>
 
-      {error && (
-        <div className="bg-red-50 border border-red-300 text-red-700 text-[12px] px-3 py-2 rounded mb-3">
-          {error}
+      <div className="flex items-center justify-between mb-2">
+        {error && (
+          <div className="bg-red-50 border border-red-300 text-red-700 text-[12px] px-3 py-2 rounded mb-3">
+            {error}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <label className="text-[12px] text-gray-600">並び替え:</label>
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as any)}
+            className="text-[12px] border px-2 py-1 rounded"
+          >
+            <option value="newest">新しい順</option>
+            <option value="oldest">古い順</option>
+            <option value="rating-desc">レート大きい順</option>
+            <option value="rating-asc">レート小さい順</option>
+            <option value="name-asc">名前 A→Z</option>
+            <option value="name-desc">名前 Z→A</option>
+          </select>
         </div>
-      )}
+      </div>
 
       {loading ? (
         <div className="text-[13px] text-gray-500 py-8 text-center">読み込み中...</div>
-      ) : workspaces.length === 0 ? (
+      ) : sortedWorkspaces.length === 0 ? (
         <div className="text-[13px] text-gray-500 py-8 text-center border border-dashed border-gray-300 rounded-lg">
           ワークスペースがありません。上の棋譜欄に貼り付けて保存してください。
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {workspaces.map((ws) => {
+          {sortedWorkspaces.map((ws) => {
             const hasDraft = ws.draft !== null;
             const d = hasDraft ? (ws.draft as any) : null;
             const displayNo = d?.displayNo;

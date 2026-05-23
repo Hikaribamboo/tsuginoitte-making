@@ -251,9 +251,7 @@ async function saveProblemToProblemsTable(
   const problemRating = problem.problem_rating ?? 1500;
   const problemRatingGames = problem.problem_rating_games ?? 0;
   const status =
-    problem.display_no == null
-      ? 'draft'
-      : 'active';
+    'active'
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const displayNoToUse = problem.display_no ?? await getNextDisplayNoByMode('joseki');
