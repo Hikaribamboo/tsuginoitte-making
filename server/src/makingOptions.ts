@@ -1,7 +1,7 @@
 import path from 'path';
 import { readdir } from 'fs/promises';
 
-const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..', '..');
+const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
 
 export type MakingPathOptions = {
   enginePaths: string[];
@@ -47,11 +47,7 @@ export async function listMakingPathOptions(): Promise<MakingPathOptions> {
     listFilesRecursive(
       enginesDir,
       (filePath) =>
-        !filePath.endsWith('.txt') &&
-        !filePath.endsWith('.md') &&
-        !filePath.endsWith('.json') &&
-        !filePath.endsWith('.yaml') &&
-        !filePath.endsWith('.yml'),
+        isEngineCandidate(filePath),
     ),
     Promise.all([
       listFilesRecursive(autoMakeDir, (filePath) => filePath.endsWith('.db')),
@@ -63,4 +59,18 @@ export async function listMakingPathOptions(): Promise<MakingPathOptions> {
     enginePaths: Array.from(new Set(enginePaths)).sort(),
     bookPaths: Array.from(new Set(bookPaths)).sort(),
   };
+}
+
+function isEngineCandidate(filePath: string): boolean {
+  const base = path.basename(filePath);
+  if (!base || base.startsWith('.')) return false;
+
+  const lower = base.toLowerCase();
+  if (lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.json') || lower.endsWith('.yaml') || lower.endsWith('.yml')) {
+    return false;
+  }
+  if (lower.endsWith('.dll') || lower.endsWith('.a') || lower.endsWith('.so') || lower.endsWith('.dylib')) {
+    return false;
+  }
+  return true;
 }

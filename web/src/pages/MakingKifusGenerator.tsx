@@ -10,23 +10,15 @@ import {
 import { parseKifRecord } from '../lib/kif-parser';
 
 type KifusGenerateFormState = {
-  generateRunName: string;
   gamesPerBasePosition: string;
   maxMoves: string;
-  blackNodes: string;
-  whiteNodes: string;
-  blackMovetimeMs: string;
-  whiteMovetimeMs: string;
+  totalGames: string;
 };
 
 const DEFAULT_FORM: KifusGenerateFormState = {
-  generateRunName: 'studio-kifs',
   gamesPerBasePosition: '3',
   maxMoves: '180',
-  blackNodes: '1200',
-  whiteNodes: '1200',
-  blackMovetimeMs: '120',
-  whiteMovetimeMs: '120',
+  totalGames: '30',
 };
 
 const MakingKifusGenerator: React.FC = () => {
@@ -96,13 +88,10 @@ const MakingKifusGenerator: React.FC = () => {
         settings: {
           runGenerateKifus: true,
           runBatchGenerate: false,
-          generateRunName: form.generateRunName.trim(),
+          generateRunName: 'studio-kifs',
           gamesPerBasePosition: parseRequiredInt(form.gamesPerBasePosition, 'gamesPerBasePosition', 1),
           maxMoves: parseRequiredInt(form.maxMoves, 'maxMoves', 1),
-          blackNodes: parseRequiredInt(form.blackNodes, 'blackNodes', 1),
-          whiteNodes: parseRequiredInt(form.whiteNodes, 'whiteNodes', 1),
-          blackMovetimeMs: parseRequiredInt(form.blackMovetimeMs, 'blackMovetimeMs', 1),
-          whiteMovetimeMs: parseRequiredInt(form.whiteMovetimeMs, 'whiteMovetimeMs', 1),
+          totalGames: parseRequiredInt(form.totalGames, 'totalGames', 1),
         },
       });
       setJobs((prev) => [job, ...prev.filter((item) => item.id !== job.id)]);
@@ -221,13 +210,9 @@ const MakingKifusGenerator: React.FC = () => {
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="mb-3 text-base font-semibold text-slate-900">kifs生成設定</h3>
             <div className="grid gap-2 md:grid-cols-2">
-              <FieldInput label="runName" value={form.generateRunName} onChange={(next) => update('generateRunName', next)} />
               <FieldInput label="gamesPerBasePosition" value={form.gamesPerBasePosition} onChange={(next) => update('gamesPerBasePosition', next)} />
               <FieldInput label="maxMoves" value={form.maxMoves} onChange={(next) => update('maxMoves', next)} />
-              <FieldInput label="blackNodes" value={form.blackNodes} onChange={(next) => update('blackNodes', next)} />
-              <FieldInput label="whiteNodes" value={form.whiteNodes} onChange={(next) => update('whiteNodes', next)} />
-              <FieldInput label="blackMovetimeMs" value={form.blackMovetimeMs} onChange={(next) => update('blackMovetimeMs', next)} />
-              <FieldInput label="whiteMovetimeMs" value={form.whiteMovetimeMs} onChange={(next) => update('whiteMovetimeMs', next)} />
+              <FieldInput label="totalGames" value={form.totalGames} onChange={(next) => update('totalGames', next)} />
             </div>
           </div>
 
@@ -278,6 +263,20 @@ const MakingKifusGenerator: React.FC = () => {
                       <div className="text-sm font-semibold text-slate-900">{item.count.toLocaleString('ja-JP')}</div>
                     </div>
                   ))}
+                </div>
+                <div>
+                  <div className="mb-1 text-sm text-slate-700">tag集計</div>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {summary.tags.slice(0, 24).map((item) => (
+                      <div key={item.tag} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <div className="text-xs text-slate-500">{item.tag}</div>
+                        <div className="text-sm font-semibold text-slate-900">{item.count.toLocaleString('ja-JP')}</div>
+                      </div>
+                    ))}
+                    {summary.tags.length === 0 ? (
+                      <div className="text-xs text-slate-500">tagデータなし</div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             )}

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import path from 'path';
 import { readFile } from 'fs/promises';
+import { existsSync } from 'fs';
 
 type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 type JobKind = 'book' | 'kifs';
@@ -37,6 +38,7 @@ type KifsJobInput = {
     runBatchGenerate?: boolean;
     generateRunName?: string;
     gamesPerBasePosition?: number;
+    totalGames?: number;
     maxMoves?: number;
     blackNodes?: number;
     whiteNodes?: number;
@@ -46,6 +48,9 @@ type KifsJobInput = {
     maxProblemsPerGame?: number;
     maxScanResultsPerGame?: number;
     scanDepth?: number;
+    finalizeDepth?: number;
+    suspiciousMinDiff?: number;
+    suspiciousMaxDiff?: number;
   };
 };
 
@@ -75,7 +80,7 @@ export type JobSnapshot = Omit<JobRecord, 'child'>;
 
 const jobs = new Map<string, JobRecord>();
 const LOG_LIMIT = 800;
-const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..', '..');
+const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
 const DRAFT_MAKING_DIR = path.join(REPO_ROOT, 'tsuginoitte-draft-making');
 const AUTO_MAKE_DIR = path.join(REPO_ROOT, 'auto-make-tsumeshogi');
 
@@ -162,6 +167,7 @@ function parseKifsJobSettings(input: KifsJobInput['settings']) {
     runBatchGenerate: input?.runBatchGenerate !== false,
     generateRunName: input?.generateRunName?.trim() || null,
     gamesPerBasePosition: numberOrNull(input?.gamesPerBasePosition, 1, 10000),
+    totalGames: numberOrNull(input?.totalGames, 1, 1000000),
     maxMoves: numberOrNull(input?.maxMoves, 1, 2000),
     blackNodes: numberOrNull(input?.blackNodes, 1, 1000000000),
     whiteNodes: numberOrNull(input?.whiteNodes, 1, 1000000000),
@@ -171,6 +177,9 @@ function parseKifsJobSettings(input: KifsJobInput['settings']) {
     maxProblemsPerGame: numberOrNull(input?.maxProblemsPerGame, 1, 50),
     maxScanResultsPerGame: numberOrNull(input?.maxScanResultsPerGame, 1, 200),
     scanDepth: numberOrNull(input?.scanDepth, 1, 50),
+    finalizeDepth: numberOrNull(input?.finalizeDepth, 1, 80),
+    suspiciousMinDiff: numberOrNull(input?.suspiciousMinDiff, 1, 10000),
+    suspiciousMaxDiff: numberOrNull(input?.suspiciousMaxDiff, 1, 10000),
   };
 }
 
@@ -239,7 +248,8 @@ async function runCommand(
 }
 
 async function runBookJob(job: JobRecord, settings: ReturnType<typeof parseBookJobSettings>): Promise<JobResult> {
-  const pythonBin = process.env.PYTHON_BIN ?? 'python3';
+  const projectVenvPython = path.join(DRAFT_MAKING_DIR, '.venv', 'bin', 'python');
+  const pythonBin = process.env.PYTHON_BIN ?? (existsSync(projectVenvPython) ? projectVenvPython : 'python3');
 
   if (!settings.bookPath) {
     throw new Error('bookPath is required');
@@ -332,6 +342,7 @@ async function runKifsJob(job: JobRecord, settings: ReturnType<typeof parseKifsJ
   if (settings.gamesPerBasePosition != null) {
     baseEnv.AMTS_SP_GAMES_PER_BASE_POSITION = String(settings.gamesPerBasePosition);
   }
+  if (settings.totalGames != null) baseEnv.AMTS_SP_TOTAL_GAMES = String(settings.totalGames);
   if (settings.maxMoves != null) baseEnv.AMTS_SP_MAX_MOVES = String(settings.maxMoves);
   if (settings.blackNodes != null) baseEnv.AMTS_SP_BLACK_NODES = String(settings.blackNodes);
   if (settings.whiteNodes != null) baseEnv.AMTS_SP_WHITE_NODES = String(settings.whiteNodes);
@@ -345,6 +356,13 @@ async function runKifsJob(job: JobRecord, settings: ReturnType<typeof parseKifsJ
     baseEnv.AMTS_MAX_SCAN_RESULTS_PER_GAME = String(settings.maxScanResultsPerGame);
   }
   if (settings.scanDepth != null) baseEnv.AMTS_SCAN_DEPTH = String(settings.scanDepth);
+  if (settings.finalizeDepth != null) baseEnv.AMTS_FINALIZE_DEPTH = String(settings.finalizeDepth);
+  if (settings.suspiciousMinDiff != null) {
+    baseEnv.AMTS_SUSPICIOUS_MIN_DIFF = String(settings.suspiciousMinDiff);
+  }
+  if (settings.suspiciousMaxDiff != null) {
+    baseEnv.AMTS_SUSPICIOUS_MAX_DIFF = String(settings.suspiciousMaxDiff);
+  }
 
   if (settings.runGenerateKifus) {
     setStep(job, 'kifs 生成中 (generate:kifus)');

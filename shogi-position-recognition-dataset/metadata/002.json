@@ -1,0 +1,16 @@
+{
+  "id": "002",
+  "source": "screenshot",
+  "theme": "default",
+  "orientation": "normal",
+  "sideToMove": "b",
+  "hasHands": false,
+  "cropRect": {
+    "x": 50,
+    "y": 17,
+    "width": 247,
+    "height": 247
+  },
+  "boardCorners": null,
+  "note": "002と同じcropRectを適用"
+}

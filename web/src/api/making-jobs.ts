@@ -54,6 +54,7 @@ export interface StartKifsJobInput {
     runBatchGenerate?: boolean;
     generateRunName?: string;
     gamesPerBasePosition?: number;
+    totalGames?: number;
     maxMoves?: number;
     blackNodes?: number;
     whiteNodes?: number;
@@ -63,6 +64,9 @@ export interface StartKifsJobInput {
     maxProblemsPerGame?: number;
     maxScanResultsPerGame?: number;
     scanDepth?: number;
+    finalizeDepth?: number;
+    suspiciousMinDiff?: number;
+    suspiciousMaxDiff?: number;
   };
 }
 

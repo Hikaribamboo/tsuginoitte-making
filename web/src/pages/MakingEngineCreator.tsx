@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import {
   cancelMakingJob,
@@ -47,16 +47,10 @@ type BookFormState = {
   enginePath: string;
   count: string;
   depth: string;
-  namePrefix: string;
   scanMode: 'sequential' | 'random';
-  incorrectSource: 'book' | 'legal';
   incorrectSelection: 'top' | 'bottom' | 'random' | 'mixed';
   minDiff: string;
   maxDiff: string;
-  maxLineMoves: string;
-  minLineMoves: string;
-  randomSeed: string;
-  limitScan: string;
 };
 
 type KifsFormState = {
@@ -64,6 +58,9 @@ type KifsFormState = {
   maxProblemsPerGame: string;
   maxScanResultsPerGame: string;
   scanDepth: string;
+  finalizeDepth: string;
+  suspiciousMinDiff: string;
+  suspiciousMaxDiff: string;
 };
 
 type ReviewProblemRow = {
@@ -94,23 +91,20 @@ const DEFAULT_BOOK_FORM: BookFormState = {
   enginePath: '',
   count: '10',
   depth: '22',
-  namePrefix: 'Book_問題',
   scanMode: 'random',
-  incorrectSource: 'book',
   incorrectSelection: 'mixed',
   minDiff: '100',
-  maxDiff: '',
-  maxLineMoves: '12',
-  minLineMoves: '4',
-  randomSeed: '',
-  limitScan: '',
+  maxDiff: '600',
 };
 
 const DEFAULT_KIFS_FORM: KifsFormState = {
-  batchSize: '30',
+  batchSize: '10',
   maxProblemsPerGame: '3',
   maxScanResultsPerGame: '12',
   scanDepth: '12',
+  finalizeDepth: '22',
+  suspiciousMinDiff: '500',
+  suspiciousMaxDiff: '1600',
 };
 
 const MakingEngineCreator: React.FC = () => {
@@ -243,39 +237,22 @@ const MakingEngineCreator: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-semibold text-slate-900">エンジン作問GUI</h2>
-            <div className="text-sm text-slate-600">kifs / books から問題を作成し、完了後に下書き一覧へ追加します。</div>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            <Link to="/workspaces" className="rounded-md border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50">
-              下書き一覧
-            </Link>
-            <Link to="/production" className="rounded-md border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50">
-              本番問題
-            </Link>
-          </div>
-        </div>
-
-        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
-          <button
-            type="button"
-            className={`rounded-md px-3 py-1.5 text-sm font-medium ${source === 'books' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
-            onClick={() => setSearchParams({ source: 'books' })}
-          >
-            booksから作問
-          </button>
-          <button
-            type="button"
-            className={`rounded-md px-3 py-1.5 text-sm font-medium ${source === 'kifs' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
-            onClick={() => setSearchParams({ source: 'kifs' })}
-          >
-            kifsから作問
-          </button>
-        </div>
-      </section>
+      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+        <button
+          type="button"
+          className={`rounded-md px-3 py-1.5 text-sm font-medium ${source === 'books' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+          onClick={() => setSearchParams({ source: 'books' })}
+        >
+          booksから作問
+        </button>
+        <button
+          type="button"
+          className={`rounded-md px-3 py-1.5 text-sm font-medium ${source === 'kifs' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+          onClick={() => setSearchParams({ source: 'kifs' })}
+        >
+          kifsから作問
+        </button>
+      </div>
 
       {error ? (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
@@ -429,12 +406,6 @@ function BookSettingsForm({
       />
 
       <FieldSelect
-        label="bookType"
-        value={value.bookType}
-        options={['petashock', 'qhapaq']}
-        onChange={(next) => update('bookType', next as BookFormState['bookType'])}
-      />
-      <FieldSelect
         label="scanMode"
         value={value.scanMode}
         options={['sequential', 'random']}
@@ -443,27 +414,17 @@ function BookSettingsForm({
 
       <FieldInput label="count" value={value.count} onChange={(next) => update('count', next)} />
       <FieldInput label="depth" value={value.depth} onChange={(next) => update('depth', next)} />
-      <FieldInput label="namePrefix" value={value.namePrefix} onChange={(next) => update('namePrefix', next)} />
       <FieldInput label="minDiff" value={value.minDiff} onChange={(next) => update('minDiff', next)} />
       <FieldInput label="maxDiff (optional)" value={value.maxDiff} onChange={(next) => update('maxDiff', next)} />
-      <FieldInput label="maxLineMoves" value={value.maxLineMoves} onChange={(next) => update('maxLineMoves', next)} />
-      <FieldInput label="minLineMoves" value={value.minLineMoves} onChange={(next) => update('minLineMoves', next)} />
-      <FieldInput label="randomSeed (optional)" value={value.randomSeed} onChange={(next) => update('randomSeed', next)} />
-      <FieldInput label="limitScan (optional)" value={value.limitScan} onChange={(next) => update('limitScan', next)} />
-
-      <FieldSelect
-        label="incorrectSource"
-        value={value.incorrectSource}
-        options={['book', 'legal']}
-        onChange={(next) => update('incorrectSource', next as BookFormState['incorrectSource'])}
-      />
       <FieldSelect
         label="incorrectSelection"
         value={value.incorrectSelection}
         options={['top', 'bottom', 'random', 'mixed']}
         onChange={(next) => update('incorrectSelection', next as BookFormState['incorrectSelection'])}
       />
-
+      <div className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        scanMode: book内の局面の走査方法（順番 or ランダム） / incorrectSelection: 不正解候補の選び方。
+      </div>
     </div>
   );
 }
@@ -484,10 +445,13 @@ function KifsSettingsForm({
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
         <div className="mb-2 text-xs font-semibold text-slate-700">kifusから問題化（batchGenerate）</div>
         <div className="grid gap-2 md:grid-cols-2">
-          <FieldInput label="batchSize (claim件数)" value={value.batchSize} onChange={(next) => update('batchSize', next)} />
+          <FieldInput label="count (claim件数)" value={value.batchSize} onChange={(next) => update('batchSize', next)} />
           <FieldInput label="maxProblemsPerGame" value={value.maxProblemsPerGame} onChange={(next) => update('maxProblemsPerGame', next)} />
           <FieldInput label="maxScanResultsPerGame" value={value.maxScanResultsPerGame} onChange={(next) => update('maxScanResultsPerGame', next)} />
           <FieldInput label="scanDepth" value={value.scanDepth} onChange={(next) => update('scanDepth', next)} />
+          <FieldInput label="finalizeDepth" value={value.finalizeDepth} onChange={(next) => update('finalizeDepth', next)} />
+          <FieldInput label="suspiciousMinDiff" value={value.suspiciousMinDiff} onChange={(next) => update('suspiciousMinDiff', next)} />
+          <FieldInput label="suspiciousMaxDiff" value={value.suspiciousMaxDiff} onChange={(next) => update('suspiciousMaxDiff', next)} />
         </div>
       </div>
 
@@ -590,23 +554,14 @@ function parseOptionalInt(raw: string): number | null {
   return parsed;
 }
 
-function parseOptionalIntWithMin(raw: string, label: string, min: number): number | undefined {
-  const trimmed = raw.trim();
-  if (!trimmed) return undefined;
-  const parsed = Number.parseInt(trimmed, 10);
-  if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < min) {
-    throw new Error(`${label} は ${min} 以上の整数で指定してください`);
-  }
-  return parsed;
-}
-
 function buildBookPayload(value: BookFormState) {
   const bookPath = value.bookPath.trim();
   const enginePath = value.enginePath.trim();
-  const namePrefix = value.namePrefix.trim();
   if (!bookPath) throw new Error('bookPath は必須です');
   if (!enginePath) throw new Error('enginePath は必須です');
-  if (!namePrefix) throw new Error('namePrefix は必須です');
+  if (enginePath.split('/').pop()?.startsWith('.')) {
+    throw new Error('enginePath が不正です（隠しファイルは選択できません）');
+  }
 
   return {
     kind: 'book' as const,
@@ -616,16 +571,16 @@ function buildBookPayload(value: BookFormState) {
       enginePath,
       count: parseRequiredInt(value.count, 'count', 1),
       depth: parseRequiredInt(value.depth, 'depth', 1),
-      namePrefix,
+      namePrefix: 'Book_問題',
       scanMode: value.scanMode,
-      incorrectSource: value.incorrectSource,
+      incorrectSource: 'book' as const,
       incorrectSelection: value.incorrectSelection,
       minDiff: parseRequiredInt(value.minDiff, 'minDiff', 1),
       maxDiff: parseOptionalInt(value.maxDiff),
-      maxLineMoves: parseRequiredInt(value.maxLineMoves, 'maxLineMoves', 1),
-      minLineMoves: parseRequiredInt(value.minLineMoves, 'minLineMoves', 1),
-      randomSeed: parseOptionalInt(value.randomSeed),
-      limitScan: parseOptionalInt(value.limitScan),
+      maxLineMoves: 12,
+      minLineMoves: 4,
+      randomSeed: null,
+      limitScan: null,
       buildBookIndex: false,
       bookIndexFile: null,
       stateFile: null,
@@ -642,6 +597,9 @@ function buildKifsPayload(value: KifsFormState) {
     maxProblemsPerGame: parseRequiredInt(value.maxProblemsPerGame, 'maxProblemsPerGame', 1),
     maxScanResultsPerGame: parseRequiredInt(value.maxScanResultsPerGame, 'maxScanResultsPerGame', 1),
     scanDepth: parseRequiredInt(value.scanDepth, 'scanDepth', 1),
+    finalizeDepth: parseRequiredInt(value.finalizeDepth, 'finalizeDepth', 1),
+    suspiciousMinDiff: parseRequiredInt(value.suspiciousMinDiff, 'suspiciousMinDiff', 1),
+    suspiciousMaxDiff: parseRequiredInt(value.suspiciousMaxDiff, 'suspiciousMaxDiff', 1),
   };
 }
 

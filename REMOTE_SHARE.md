@@ -1,36 +1,26 @@
-# Remote share with ngrok
+# Remote share with Tailscale
 
-This project can be shared from your PC while keeping the engine server local.
+This project can be used from a Mac while the engine server runs on a Windows PC.
 
-## Recommended (single ngrok URL)
+## Recommended setup
 
-1. Start engine server:
+1. Install and sign in to Tailscale on both machines.
+2. On Windows, start the engine server from the launcher:
 
-   cd server
+   cd windows-engine/server
    npm run dev
 
-2. Start web server with proxy to local engine:
+3. On the Mac, point the web app at the Windows machine:
+
+   set `VITE_ENGINE_API_URL=http://<windows-tailscale-name-or-ip>:8765`
+
+4. Start the web app on the Mac:
 
    cd web
    npm run dev
 
-3. Expose web port:
-
-   ngrok http 5173
-
-4. Share the HTTPS ngrok URL with your friend.
-
-In this mode, browser requests use same-origin `/engine-api`, and Vite proxies to `http://127.0.0.1:8765` on your machine.
-
-## Optional: expose engine server directly
-
-If you need to expose engine API directly:
-
-1. Run: `ngrok http 8765`
-2. Set `VITE_ENGINE_API_URL` to the ngrok URL for port 8765.
-3. Restart web dev server.
-
 ## Notes
 
-- Vite allows common tunnel domains (`*.ngrok-free.app`, `*.ngrok.app`, `*.ngrok.io`, `*.trycloudflare.com`).
-- You can add more allowed hosts with `VITE_ALLOWED_HOSTS` in `web/.env`.
+- The web app already calls the engine through `/api/evaluate`, `/api/analyze`, `/api/analyze/stop`, and `/api/generate-explanations`.
+- The same engine API also serves making-job endpoints such as `/api/making-jobs` and `/api/making-options`.
+- If you want HTTPS in front of the Windows server, add a TLS reverse proxy or use Tailscale Serve.

@@ -120,16 +120,6 @@ export function validateProductionProblem(
       );
     }
 
-    if (isEmptyString(choice.explanation)) {
-      addIssue(
-        issues,
-        'warning',
-        'choice_explanation_empty',
-        `${base}.explanation`,
-        `choice ${choice.choice_id} の explanation が空です`,
-      );
-    }
-
     if (!Array.isArray(choice.line) || choice.line.filter((item) => typeof item === 'string' && item.trim().length > 0).length === 0) {
       addIssue(
         issues,

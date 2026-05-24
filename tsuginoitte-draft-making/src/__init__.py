@@ -1,0 +1,1 @@
+"""Shogi problem generator package."""

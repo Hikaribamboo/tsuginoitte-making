@@ -90,7 +90,7 @@ function extractJsonObject(text: string): any | null {
 
 function resolveShogiDatasetRoot(): string {
   return process.env.SHOGI_DATASET_ROOT
-    ?? path.resolve(import.meta.dirname, '..', '..', '..', '..', 'shogi-position-recognition-dataset');
+    ?? path.resolve(import.meta.dirname, '..', '..', 'shogi-position-recognition-dataset');
 }
 
 function resolvePredictionScriptPath(): string {

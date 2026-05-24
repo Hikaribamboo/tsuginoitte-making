@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   getProductionProblemById,
   listProductionChoicesByProblemIds,
@@ -6,6 +6,7 @@ import {
   updateProductionProblemById,
 } from '../api/production';
 import MiniBoard from '../components/MiniBoard';
+import { TAG_CATEGORIES } from '../lib/constants';
 import {
   getProductionDetailValidationSummary,
   getProductionValidationSummary,
@@ -14,7 +15,7 @@ import {
   type ProductionValidationStatus,
   type ProductionValidationSummary,
 } from '../lib/productionValidation';
-import { applyUsiMove, parseSfen } from '../lib/sfen';
+import { applyUsiMove, boardToSfen, parseSfen } from '../lib/sfen';
 import type { HandPieceType, Side } from '../types/shogi';
 import type {
   ProductionChoice,
@@ -30,6 +31,45 @@ type ChoiceLineApplyResult =
 
 const MODE_OPTIONS: Array<'all' | ProductionProblemMode> = ['all', 'next_move', 'joseki'];
 const STATUS_OPTIONS: Array<'all' | string> = ['all', 'active', 'draft'];
+const TAG_OPTIONS = TAG_CATEGORIES.flatMap((group) => group.tags);
+const EXPLANATION_HELPER_CHARS = [
+  '▲',
+  '１',
+  '２',
+  '３',
+  '４',
+  '５',
+  '６',
+  '７',
+  '８',
+  '９',
+  '△',
+  '一',
+  '二',
+  '三',
+  '四',
+  '五',
+  '六',
+  '七',
+  '八',
+  '九',
+  '飛',
+  '角',
+  '金',
+  '銀',
+  '桂',
+  '香',
+  '歩',
+  '龍',
+  '馬',
+  '成銀',
+  '成桂',
+  '成香',
+  'と',
+  '成',
+  '打',
+  '同',
+];
 
 const ProductionReview: React.FC = () => {
   const [loadingList, setLoadingList] = useState(false);
@@ -49,6 +89,8 @@ const ProductionReview: React.FC = () => {
   const [draftQuery, setDraftQuery] = useState('');
   const [query, setQuery] = useState('');
   const [selectedChoiceId, setSelectedChoiceId] = useState<number | null>(null);
+  const [isExplanationFocused, setIsExplanationFocused] = useState(false);
+  const explanationRef = useRef<HTMLTextAreaElement | null>(null);
 
   const loadList = async () => {
     try {
@@ -121,7 +163,12 @@ const ProductionReview: React.FC = () => {
         if (!cancelled) {
           setDetail(nextDetail);
           setDetailDraft(nextDetail);
-          setSelectedChoiceId(nextDetail.choices[0]?.choice_id ?? null);
+          setSelectedChoiceId(
+            nextDetail.choices.find((choice) => choice.choice_id === nextDetail.correctChoiceId)?.choice_id
+              ?? nextDetail.choices[0]?.choice_id
+              ?? null,
+          );
+          setIsExplanationFocused(false);
         }
       } catch (nextError: any) {
         if (!cancelled) {
@@ -156,6 +203,7 @@ const ProductionReview: React.FC = () => {
   const selectedIssues = selectedSummary.issues;
   const activeChoice =
     detailDraft?.choices.find((choice) => choice.choice_id === selectedChoiceId)
+      ?? detailDraft?.choices.find((choice) => choice.choice_id === detailDraft.correctChoiceId)
       ?? detailDraft?.choices[0]
       ?? null;
 
@@ -188,6 +236,28 @@ const ProductionReview: React.FC = () => {
           choice.choice_id === choiceId ? { ...choice, ...patch } : choice,
         ),
       };
+    });
+  };
+
+  const insertExplanationChar = (char: string) => {
+    if (!activeChoice) return;
+    const textarea = explanationRef.current;
+    const current = activeChoice.explanation ?? '';
+
+    if (!textarea) {
+      updateChoice(activeChoice.choice_id, { explanation: `${current}${char}` });
+      return;
+    }
+
+    const start = textarea.selectionStart ?? current.length;
+    const end = textarea.selectionEnd ?? start;
+    const next = `${current.slice(0, start)}${char}${current.slice(end)}`;
+    updateChoice(activeChoice.choice_id, { explanation: next });
+
+    requestAnimationFrame(() => {
+      const cursor = start + char.length;
+      textarea.focus();
+      textarea.setSelectionRange(cursor, cursor);
     });
   };
 
@@ -227,7 +297,7 @@ const ProductionReview: React.FC = () => {
   return (
     <div className="h-[calc(100vh-106px)] min-h-[680px] overflow-hidden rounded-xl border border-sky-200/80 bg-gradient-to-b from-sky-50 via-blue-50 to-slate-50 shadow-sm">
       <div className="flex h-full">
-        <aside className="w-[250px] shrink-0 border-r border-sky-200/80 bg-white/75 backdrop-blur-sm">
+        <aside className="w-[220px] shrink-0 border-r border-sky-200/80 bg-white/75 backdrop-blur-sm">
           <div className="border-b border-sky-200/70 px-4 py-3">
             <h2 className="text-xl font-semibold text-slate-900">本番問題一覧</h2>
             <div className="mt-1 text-xs text-sky-700">{items.length.toLocaleString('ja-JP')} 件</div>
@@ -378,20 +448,176 @@ const ProductionReview: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
-                  <div className="rounded-lg border border-slate-200 bg-white p-3">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">board preview</div>
-                    <SafeMiniBoard sfen={detailDraft.rootSfen} />
+                <div className="grid gap-4 xl:grid-cols-3">
+                  <div className="xl:col-span-2">
+                    <div className="grid h-full gap-3 lg:grid-cols-2">
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">盤面プレビュー</div>
+                        <BoardPreviewWithMoves
+                          rootSfen={detailDraft.rootSfen}
+                          introMovesUsi={detailDraft.introMovesUsi}
+                          choice={activeChoice}
+                        />
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <div className="text-sm font-semibold text-slate-900">選択肢編集</div>
+                          {activeChoice?.choice_id === detailDraft.correctChoiceId ? (
+                            <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-[2px] text-[11px] font-semibold text-emerald-700">
+                              正解
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <div className="mb-3 flex flex-wrap gap-2">
+                          {detailDraft.choices
+                            .slice()
+                            .sort((a, b) => a.choice_id - b.choice_id)
+                            .map((choice) => (
+                              <button
+                                key={choice.choice_id}
+                                type="button"
+                                className={`rounded-md border px-2 py-1 text-xs ${
+                                  selectedChoiceId === choice.choice_id
+                                    ? 'border-sky-500 bg-sky-100 text-sky-800'
+                                    : 'border-slate-300 bg-white text-slate-700'
+                                }`}
+                                onClick={() => {
+                                  setSelectedChoiceId(choice.choice_id);
+                                  setIsExplanationFocused(false);
+                                }}
+                              >
+                                {choice.choice_id}
+                                {choice.choice_id === detailDraft.correctChoiceId ? ' 正解' : ''}
+                              </button>
+                            ))}
+                        </div>
+
+                        {!activeChoice ? (
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                            choice がありません。
+                          </div>
+                        ) : (
+                          <>
+                            <div className="grid gap-2 md:grid-cols-2">
+                              <label className="flex flex-col gap-1">
+                                <span className="text-xs text-slate-600">label</span>
+                                <input
+                                  className="h-9 rounded-lg border border-slate-300 px-3 text-sm"
+                                  value={activeChoice.label}
+                                  onChange={(event) => updateChoice(activeChoice.choice_id, { label: event.target.value })}
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1">
+                                <span className="text-xs text-slate-600">usi</span>
+                                <input
+                                  className="h-9 rounded-lg border border-slate-300 px-3 font-mono text-sm"
+                                  value={activeChoice.usi}
+                                  onChange={(event) => updateChoice(activeChoice.choice_id, { usi: event.target.value })}
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1">
+                                <span className="text-xs text-slate-600">eval_cp</span>
+                                <input
+                                  className="h-9 rounded-lg border border-slate-300 px-3 text-sm"
+                                  type="number"
+                                  value={activeChoice.eval_cp ?? ''}
+                                  onChange={(event) =>
+                                    updateChoice(activeChoice.choice_id, {
+                                      eval_cp: event.target.value === '' ? null : Number(event.target.value),
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1">
+                                <span className="text-xs text-slate-600">eval_percent</span>
+                                <input
+                                  className="h-9 rounded-lg border border-slate-300 px-3 text-sm"
+                                  type="number"
+                                  value={activeChoice.eval_percent ?? ''}
+                                  onChange={(event) =>
+                                    updateChoice(activeChoice.choice_id, {
+                                      eval_percent: event.target.value === '' ? null : Number(event.target.value),
+                                    })
+                                  }
+                                />
+                              </label>
+                            </div>
+
+                            <label className="mt-2 flex flex-col gap-1">
+                              <span className="text-xs text-slate-600">explanation</span>
+                              <textarea
+                                ref={explanationRef}
+                                className="min-h-[72px] rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                                value={activeChoice.explanation ?? ''}
+                                onFocus={() => setIsExplanationFocused(true)}
+                                onBlur={() => setIsExplanationFocused(false)}
+                                onChange={(event) => updateChoice(activeChoice.choice_id, { explanation: event.target.value })}
+                              />
+                            </label>
+
+                            {isExplanationFocused ? (
+                              <div className="mt-2 grid grid-cols-10 gap-1">
+                                {EXPLANATION_HELPER_CHARS.map((char) => (
+                                  <button
+                                    key={char}
+                                    type="button"
+                                    className="h-8 rounded border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50"
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => insertExplanationChar(char)}
+                                  >
+                                    {char}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+
+                            <label className="mt-2 flex flex-col gap-1">
+                              <span className="text-xs text-slate-600">line（1行1手）</span>
+                              <textarea
+                                className="min-h-[96px] rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"
+                                value={activeChoice.line.join('\n')}
+                                onChange={(event) =>
+                                  updateChoice(activeChoice.choice_id, {
+                                    line: event.target.value
+                                      .split('\n')
+                                      .map((item) => item.trim())
+                                      .filter(Boolean),
+                                  })
+                                }
+                              />
+                            </label>
+
+                            {lineErrors[activeChoice.choice_id] && !lineErrors[activeChoice.choice_id]?.ok ? (
+                              <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
+                                <div className="font-semibold">読み筋失敗</div>
+                                <div>
+                                  <strong>エラー:</strong>{' '}
+                                  {(lineErrors[activeChoice.choice_id] as Extract<ChoiceLineApplyResult, { ok: false }>).message}
+                                </div>
+                                {(lineErrors[activeChoice.choice_id] as Extract<ChoiceLineApplyResult, { ok: false }>).failedMove ? (
+                                  <div>
+                                    <strong>失敗した手:</strong>{' '}
+                                    {(lineErrors[activeChoice.choice_id] as Extract<ChoiceLineApplyResult, { ok: false }>).failedMove}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
-                    <div className="grid gap-2 md:grid-cols-3">
+                    <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-1">
                       <Field label="mode" value={detailDraft.mode} />
                       <Field label="status" value={detailDraft.status ?? '-'} />
                       <Field label="display_no" value={detailDraft.displayNo ?? '-'} />
                     </div>
 
-                    <div className="mt-3 grid gap-2 md:grid-cols-3">
+                    <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-1">
                       <label className="flex flex-col gap-1">
                         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">correct_choice_id</span>
                         <input
@@ -449,7 +675,7 @@ const ProductionReview: React.FC = () => {
                       </label>
                     </div>
 
-                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-1">
                       <label className="flex flex-col gap-1">
                         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">problem_rating</span>
                         <input
@@ -537,26 +763,12 @@ const ProductionReview: React.FC = () => {
                       />
                     </label>
 
-                    <label className="mt-3 flex flex-col gap-1">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">tags（改行区切り）</span>
-                      <textarea
-                        className="min-h-[72px] rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                        value={detailDraft.tags.join('\n')}
-                        onChange={(event) =>
-                          setDetailDraft((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  tags: event.target.value
-                                    .split('\n')
-                                    .map((item) => item.trim())
-                                    .filter(Boolean),
-                                }
-                              : current,
-                          )
-                        }
-                      />
-                    </label>
+                    <TagEditor
+                      tags={detailDraft.tags}
+                      onChange={(nextTags) =>
+                        setDetailDraft((current) => (current ? { ...current, tags: nextTags } : current))
+                      }
+                    />
                   </div>
                 </div>
               </section>
@@ -582,74 +794,6 @@ const ProductionReview: React.FC = () => {
                   </div>
                 )}
               </section>
-
-              <section className="rounded-xl border border-sky-200/80 bg-white/75 p-4 shadow-sm backdrop-blur-sm">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="text-sm font-semibold text-slate-900">盤面 / 選択肢</div>
-                  <div className="flex gap-2">
-                    {detailDraft.choices.slice().sort((a, b) => a.choice_id - b.choice_id).map((choice) => (
-                      <button
-                        key={choice.choice_id}
-                        type="button"
-                        className={`rounded-md border px-2 py-1 text-xs ${selectedChoiceId === choice.choice_id ? 'border-sky-500 bg-sky-100 text-sky-800' : 'border-slate-300 bg-white text-slate-700'}`}
-                        onClick={() => setSelectedChoiceId(choice.choice_id)}
-                      >
-                        choice {choice.choice_id}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {!activeChoice ? (
-                  <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">choice がありません。</div>
-                ) : (
-                  <div className="grid gap-3 xl:grid-cols-[360px_1fr]">
-                    <div className="rounded-lg border border-slate-200 bg-white p-3">
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">board preview</div>
-                      <BoardPreviewWithMoves
-                        rootSfen={detailDraft.rootSfen}
-                        introMovesUsi={detailDraft.introMovesUsi}
-                        choice={activeChoice}
-                      />
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white p-3">
-                      <div className="mb-2 text-sm font-semibold text-slate-900">choice {activeChoice.choice_id}</div>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        <label className="flex flex-col gap-1">
-                          <span className="text-xs text-slate-600">label</span>
-                          <input className="h-9 rounded-lg border border-slate-300 px-3 text-sm" value={activeChoice.label} onChange={(event) => updateChoice(activeChoice.choice_id, { label: event.target.value })} />
-                        </label>
-                        <label className="flex flex-col gap-1">
-                          <span className="text-xs text-slate-600">usi</span>
-                          <input className="h-9 rounded-lg border border-slate-300 px-3 font-mono text-sm" value={activeChoice.usi} onChange={(event) => updateChoice(activeChoice.choice_id, { usi: event.target.value })} />
-                        </label>
-                        <label className="flex flex-col gap-1">
-                          <span className="text-xs text-slate-600">eval_cp</span>
-                          <input className="h-9 rounded-lg border border-slate-300 px-3 text-sm" type="number" value={activeChoice.eval_cp ?? ''} onChange={(event) => updateChoice(activeChoice.choice_id, { eval_cp: event.target.value === '' ? null : Number(event.target.value) })} />
-                        </label>
-                        <label className="flex flex-col gap-1">
-                          <span className="text-xs text-slate-600">eval_percent</span>
-                          <input className="h-9 rounded-lg border border-slate-300 px-3 text-sm" type="number" value={activeChoice.eval_percent ?? ''} onChange={(event) => updateChoice(activeChoice.choice_id, { eval_percent: event.target.value === '' ? null : Number(event.target.value) })} />
-                        </label>
-                      </div>
-                      <label className="mt-2 flex flex-col gap-1">
-                        <span className="text-xs text-slate-600">explanation</span>
-                        <textarea className="min-h-[72px] rounded-lg border border-slate-300 px-3 py-2 text-sm" value={activeChoice.explanation ?? ''} onChange={(event) => updateChoice(activeChoice.choice_id, { explanation: event.target.value })} />
-                      </label>
-                      <label className="mt-2 flex flex-col gap-1">
-                        <span className="text-xs text-slate-600">line（1行1手）</span>
-                        <textarea className="min-h-[96px] rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs" value={activeChoice.line.join('\n')} onChange={(event) => updateChoice(activeChoice.choice_id, { line: event.target.value.split('\n').map((item) => item.trim()).filter(Boolean) })} />
-                      </label>
-                      {lineErrors[activeChoice.choice_id] && !lineErrors[activeChoice.choice_id]?.ok ? (
-                        <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
-                          <div className="font-semibold">読み筋失敗</div>
-                          <div><strong>エラー:</strong> {(lineErrors[activeChoice.choice_id] as Extract<ChoiceLineApplyResult, { ok: false }>).message}</div>
-                          {(lineErrors[activeChoice.choice_id] as Extract<ChoiceLineApplyResult, { ok: false }>).failedMove ? <div><strong>失敗した手:</strong> {(lineErrors[activeChoice.choice_id] as Extract<ChoiceLineApplyResult, { ok: false }>).failedMove}</div> : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                )}
-              </section>
             </div>
           )}
         </main>
@@ -657,6 +801,116 @@ const ProductionReview: React.FC = () => {
     </div>
   );
 };
+
+function TagEditor({
+  tags,
+  onChange,
+}: {
+  tags: string[];
+  onChange: (tags: string[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const [focused, setFocused] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  const addTag = (raw: string) => {
+    const tag = raw.trim();
+    if (!tag) return;
+    if (tags.includes(tag)) {
+      setDraft('');
+      return;
+    }
+    onChange([...tags, tag]);
+    setDraft('');
+  };
+
+  const removeTag = (tag: string) => {
+    onChange(tags.filter((item) => item !== tag));
+  };
+
+  const filtered = useMemo(() => {
+    const q = draft.trim().toLowerCase();
+    return TAG_OPTIONS.filter((option) => {
+      if (tags.includes(option.value)) return false;
+      if (!q) return true;
+      return option.value.toLowerCase().includes(q) || option.label.toLowerCase().includes(q);
+    }).slice(0, 20);
+  }, [draft, tags]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current != null) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">tags</div>
+      <div className="flex flex-wrap gap-1">
+        {tags.length === 0 ? <span className="text-xs text-slate-400">未設定</span> : null}
+        {tags.map((tag) => {
+          const known = TAG_OPTIONS.find((item) => item.value === tag);
+          return (
+            <button
+              key={tag}
+              type="button"
+              className="rounded-full border border-sky-300 bg-sky-50 px-2 py-[2px] text-xs text-sky-700 hover:bg-sky-100"
+              onClick={() => removeTag(tag)}
+              title="クリックで削除"
+            >
+              {known ? `${known.label} (${known.value})` : tag} ×
+            </button>
+          );
+        })}
+      </div>
+
+      <input
+        className="h-9 rounded-lg border border-slate-300 px-3 text-sm"
+        value={draft}
+        list="production-tag-options"
+        placeholder="タグを入力（Enterで追加）"
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          timerRef.current = window.setTimeout(() => setFocused(false), 120);
+        }}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ',') {
+            event.preventDefault();
+            addTag(draft);
+          }
+        }}
+      />
+      <datalist id="production-tag-options">
+        {TAG_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </datalist>
+
+      {focused ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+          <div className="mb-1 text-xs text-slate-500">候補</div>
+          <div className="flex flex-wrap gap-1">
+            {filtered.length === 0 ? <span className="text-xs text-slate-400">候補なし</span> : null}
+            {filtered.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className="rounded border border-slate-300 bg-white px-2 py-[2px] text-xs text-slate-700 hover:bg-slate-100"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => addTag(option.value)}
+              >
+                {option.label} ({option.value})
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function groupByProblemId(choices: ProductionChoice[]): Map<number, ProductionChoice[]> {
   const grouped = new Map<number, ProductionChoice[]>();
@@ -679,10 +933,14 @@ function Banner({ text, tone = 'info' }: { text: string; tone?: 'info' | 'error'
   return <div className={`mb-2 rounded-lg border px-3 py-2 text-sm ${cls}`}>{text}</div>;
 }
 
-function SafeMiniBoard({ sfen }: { sfen: string }) {
+function SafeMiniBoard({ sfen, className }: { sfen: string; className?: string }) {
   try {
     parseSfen(sfen);
-    return <MiniBoard sfen={sfen} size={22} />;
+    return (
+      <div className={className}>
+        <MiniBoard sfen={sfen} size={26} />
+      </div>
+    );
   } catch {
     return <div className="text-xs text-rose-600">盤面を表示できません（root_sfen形式エラー）</div>;
   }
@@ -695,13 +953,14 @@ function BoardPreviewWithMoves({
 }: {
   rootSfen: string;
   introMovesUsi: string[];
-  choice: ProductionChoice;
+  choice: ProductionChoice | null;
 }) {
   const moves = useMemo(() => {
+    if (!choice) return introMovesUsi.slice();
     const head = choice.usi.trim() ? [choice.usi.trim()] : [];
     const lineMoves = choice.line.map((token) => token.trim()).filter(Boolean);
     return [...introMovesUsi, ...(lineMoves[0] === head[0] ? lineMoves : [...head, ...lineMoves])];
-  }, [choice.line, choice.usi, introMovesUsi]);
+  }, [choice, introMovesUsi]);
 
   const states = useMemo(() => {
     try {
@@ -709,15 +968,14 @@ function BoardPreviewWithMoves({
       let state = parseSfen(rootSfen);
       for (const move of moves) {
         const applied = applyUsiMove(state.board, state.senteHand, state.goteHand, state.sideToMove, move);
-        const nextSide: Side = state.sideToMove === 'sente' ? 'gote' : 'sente';
         state = {
           board: applied.board,
           senteHand: applied.senteHand,
           goteHand: applied.goteHand,
-          sideToMove: nextSide,
+          sideToMove: state.sideToMove === 'sente' ? 'gote' : 'sente',
           moveNumber: state.moveNumber + 1,
         };
-        out.push(boardToSfenSafe(state));
+        out.push(boardToSfen(state.board, state.sideToMove, state.senteHand, state.goteHand, state.moveNumber));
       }
       return out;
     } catch {
@@ -726,17 +984,48 @@ function BoardPreviewWithMoves({
   }, [moves, rootSfen]);
 
   const [step, setStep] = useState(0);
-  useEffect(() => setStep(0), [choice.choice_id, rootSfen]);
+  const [flipped, setFlipped] = useState(false);
+
+  useEffect(() => setStep(0), [choice?.choice_id, rootSfen]);
   const maxStep = Math.max(0, states.length - 1);
   const clamped = Math.max(0, Math.min(step, maxStep));
 
   return (
-    <div>
-      <SafeMiniBoard sfen={states[clamped] ?? rootSfen} />
+    <div className="flex h-full flex-col">
+      <div className="flex justify-center overflow-auto py-1">
+        <div style={{ transform: flipped ? 'rotate(180deg)' : undefined }}>
+          <SafeMiniBoard sfen={states[clamped] ?? rootSfen} />
+        </div>
+      </div>
       <div className="mt-2 flex items-center justify-between gap-2">
-        <button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={clamped <= 0}>前へ</button>
-        <div className="text-xs text-slate-600">step {clamped} / {maxStep}</div>
-        <button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs" onClick={() => setStep((current) => Math.min(maxStep, current + 1))} disabled={clamped >= maxStep}>次へ</button>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-2 py-1 text-xs"
+          onClick={() => setStep((current) => Math.max(0, current - 1))}
+          disabled={clamped <= 0}
+        >
+          前へ
+        </button>
+        <div className="text-xs text-slate-600">
+          step {clamped} / {maxStep}
+        </div>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-2 py-1 text-xs"
+          onClick={() => setStep((current) => Math.min(maxStep, current + 1))}
+          disabled={clamped >= maxStep}
+        >
+          次へ
+        </button>
+      </div>
+      <div className="mt-2 flex justify-end">
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700"
+          onClick={() => setFlipped((current) => !current)}
+        >
+          盤面を反転
+        </button>
       </div>
       <ol className="mt-2 max-h-[180px] list-decimal overflow-y-auto pl-5 text-xs text-slate-700">
         {moves.map((move, index) => (
@@ -747,33 +1036,6 @@ function BoardPreviewWithMoves({
       </ol>
     </div>
   );
-}
-
-function boardToSfenSafe(state: ReturnType<typeof parseSfen>): string {
-  const rank = (row: number) => {
-    let out = '';
-    let empties = 0;
-    for (let col = 0; col < 9; col++) {
-      const piece = state.board[row][col];
-      if (!piece) {
-        empties += 1;
-        continue;
-      }
-      if (empties > 0) {
-        out += String(empties);
-        empties = 0;
-      }
-      const base = piece.type === 'K' ? 'K' : piece.type;
-      const mark = piece.side === 'gote' ? base.toLowerCase() : base.toUpperCase();
-      out += piece.promoted ? `+${mark}` : mark;
-    }
-    if (empties > 0) out += String(empties);
-    return out;
-  };
-
-  const boardPart = Array.from({ length: 9 }, (_, i) => rank(i)).join('/');
-  const side = state.sideToMove === 'sente' ? 'b' : 'w';
-  return `${boardPart} ${side} - ${Math.max(1, state.moveNumber)}`;
 }
 
 function Field({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {

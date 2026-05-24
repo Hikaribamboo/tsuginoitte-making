@@ -332,7 +332,7 @@ const WorkspaceList: React.FC = () => {
   const hasPasteContent = pasteText.trim().length > 0;
 
   return (
-    <div className="max-w-[800px] mx-auto">
+    <div className="mx-auto w-full max-w-[1600px]">
       <div className="mb-4">
         <h2 className="text-lg font-semibold">下書き一覧</h2>
       </div>
@@ -497,7 +497,7 @@ const WorkspaceList: React.FC = () => {
           下書きがありません。上の棋譜欄に貼り付けて保存してください。
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {sortedWorkspaces.map((ws) => {
             const hasDraft = ws.draft !== null;
             const d = hasDraft ? (ws.draft as any) : null;
@@ -512,10 +512,10 @@ const WorkspaceList: React.FC = () => {
             return (
               <div
                 key={ws.id}
-                className="border border-gray-200 rounded-lg p-3 hover:border-blue-300 hover:bg-blue-50/30 transition-colors cursor-pointer flex items-center gap-3"
+                className="flex cursor-pointer items-start gap-2 rounded-lg border border-gray-200 p-2.5 transition-colors hover:border-blue-300 hover:bg-blue-50/30"
                 onClick={() => navigate(`/paste-problem?workspace=${ws.id}`)}
               >
-                <div className="flex-shrink-0">
+                <div className="pt-1">
                   <input
                     type="checkbox"
                     checked={selectedWorkspaceIds.includes(ws.id)}
@@ -526,36 +526,36 @@ const WorkspaceList: React.FC = () => {
                     onClick={(event) => event.stopPropagation()}
                   />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-[14px] truncate">{ws.name}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="truncate text-[13px] font-semibold">{ws.name}</span>
                     {displayNo != null && (
-                      <span className="bg-blue-100 text-blue-700 px-1.5 py-0 rounded text-[11px] font-mono font-semibold flex-shrink-0">
+                      <span className="flex-shrink-0 rounded bg-blue-100 px-1.5 py-0 text-[10px] font-mono font-semibold text-blue-700">
                         No.{displayNo}
                       </span>
                     )}
                     {hasDraft && !rootSfen && (
-                      <span className="bg-gray-100 text-gray-500 px-1.5 py-0 rounded text-[10px]">
+                      <span className="rounded bg-gray-100 px-1.5 py-0 text-[10px] text-gray-500">
                         空
                       </span>
                     )}
                     {rootSfen && (
-                      <span className="bg-emerald-100 text-emerald-700 px-1.5 py-0 rounded text-[10px]">
+                      <span className="rounded bg-emerald-100 px-1.5 py-0 text-[10px] text-emerald-700">
                         下書きあり
                       </span>
                     )}
                     {d?.mode && (
-                      <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0 rounded text-[10px]">
+                      <span className="rounded bg-indigo-100 px-1.5 py-0 text-[10px] text-indigo-700">
                         {d.mode === 'joseki' ? '定跡' : '次の一手'}
                       </span>
                     )}
                     {d?.imagePositionSource && (
-                      <span className="bg-amber-100 text-amber-700 px-1.5 py-0 rounded text-[10px]">
+                      <span className="rounded bg-amber-100 px-1.5 py-0 text-[10px] text-amber-700">
                         画像局面
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-0.5 flex-wrap">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-gray-500">
                     <span>{formatDate(ws.updated_at)}</span>
                     {moveCount != null && moveCount > 0 && (
                       <span>{moveCount}手</span>
@@ -568,14 +568,14 @@ const WorkspaceList: React.FC = () => {
                     )}
                   </div>
                   {imagePositionMemo && (
-                    <div className="mt-1 max-h-[36px] overflow-hidden whitespace-pre-wrap text-[11px] leading-relaxed text-gray-600">
+                    <div className="mt-1 line-clamp-2 whitespace-pre-wrap text-[10px] leading-relaxed text-gray-600">
                       画像メモ: {imagePositionMemo}
                     </div>
                   )}
                 </div>
                 <button
                   type="button"
-                  className="text-gray-400 hover:text-red-500 text-[13px] px-2 py-1 border-0 bg-transparent flex-shrink-0"
+                  className="flex-shrink-0 border-0 bg-transparent px-1.5 py-1 text-[12px] text-gray-400 hover:text-red-500"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDelete(ws.id, ws.name);

@@ -1,0 +1,11 @@
+{
+  "name": "tsuginoitte-windows-engine-launcher",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix ../../server run dev",
+    "start": "npm --prefix ../../server run start",
+    "dev:with-web-build": "npm --prefix ../../server run dev:with-web-build"
+  }
+}

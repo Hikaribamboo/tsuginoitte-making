@@ -33,33 +33,12 @@ function normalizeTagArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
 }
 
-async function countByStatus(status: KifuStatus): Promise<number> {
-  const { count, error } = await supabase
-    .from('kifus')
-    .select('id', { count: 'exact', head: true })
-    .eq('status', status);
-  if (error) throw error;
-  return count ?? 0;
-}
-
-async function countTotal(): Promise<number> {
-  const { count, error } = await supabase
-    .from('kifus')
-    .select('id', { count: 'exact', head: true });
-  if (error) throw error;
-  return count ?? 0;
-}
-
 export async function getKifuSummary(maxTagScanRows = 20000): Promise<KifuSummary> {
-  const [total, ...statusCounts] = await Promise.all([
-    countTotal(),
-    ...KNOWN_STATUSES.map((status) => countByStatus(status)),
-  ]);
-
-  const statuses: KifuStatusCount[] = KNOWN_STATUSES.map((status, index) => ({
-    status,
-    count: statusCounts[index] ?? 0,
-  }));
+  const statusMap = new Map<KifuStatus, number>();
+  for (const status of KNOWN_STATUSES) {
+    statusMap.set(status, 0);
+  }
+  statusMap.set('unknown', 0);
 
   const tagMap = new Map<string, number>();
   const pageSize = 1000;
@@ -71,12 +50,18 @@ export async function getKifuSummary(maxTagScanRows = 20000): Promise<KifuSummar
     const upper = offset + pageSize - 1;
     const { data, error } = await supabase
       .from('kifus')
-      .select('tags')
+      .select('status, tags')
       .range(offset, upper);
     if (error) throw error;
 
     const rows = data ?? [];
     for (const row of rows) {
+      const rawStatus = (row as { status?: unknown }).status;
+      const normalizedStatus: KifuStatus = KNOWN_STATUSES.includes(rawStatus as KifuStatus)
+        ? (rawStatus as KifuStatus)
+        : 'unknown';
+      statusMap.set(normalizedStatus, (statusMap.get(normalizedStatus) ?? 0) + 1);
+
       const tags = normalizeTagArray((row as { tags?: unknown }).tags);
       for (const tag of tags) {
         tagMap.set(tag, (tagMap.get(tag) ?? 0) + 1);
@@ -91,15 +76,19 @@ export async function getKifuSummary(maxTagScanRows = 20000): Promise<KifuSummar
     offset += pageSize;
   }
 
+  const statuses: KifuStatusCount[] = Array.from(statusMap.entries())
+    .map(([status, count]) => ({ status, count }))
+    .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status));
+
   const tags: KifuTagCount[] = Array.from(tagMap.entries())
     .map(([tag, count]) => ({ tag, count }))
     .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 
   return {
-    total,
+    total: sampledRows,
     statuses,
     tags,
-    sampledAllRows: reachedEnd || sampledRows >= total,
+    sampledAllRows: reachedEnd,
   };
 }
 
