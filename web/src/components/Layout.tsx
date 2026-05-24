@@ -5,9 +5,9 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
 
   const navItems = [
-    { path: '/', label: '局面作成' },
-    { path: '/workspaces', label: 'ワークスペース一覧' },
-    { path: '/favorites', label: 'お気に入り一覧' },
+    { path: '/making', label: '作問スタジオ' },
+    { path: '/workspaces', label: '下書き一覧' },
+    { path: '/production', label: '本番問題' },
   ];
 
   return (
@@ -19,7 +19,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             <Link
               key={item.path}
               to={item.path}
-              className={`text-slate-300 no-underline text-sm px-2 py-1 rounded transition-all hover:text-white hover:bg-white/10 ${location.pathname === item.path ? 'text-white bg-white/10' : ''}`}
+              className={`text-slate-300 no-underline text-sm px-2 py-1 rounded transition-all hover:text-white hover:bg-white/10 ${isActivePath(location.pathname, item.path) ? 'text-white bg-white/10' : ''}`}
             >
               {item.label}
             </Link>
@@ -30,5 +30,15 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     </div>
   );
 };
+
+function isActivePath(pathname: string, tabPath: string): boolean {
+  if (tabPath === '/making') {
+    return pathname === '/making' || (pathname.startsWith('/making/') && pathname !== '/making/production');
+  }
+  if (tabPath === '/production') {
+    return pathname === '/production' || pathname === '/making/production';
+  }
+  return pathname === tabPath || pathname.startsWith(`${tabPath}/`);
+}
 
 export default Layout;

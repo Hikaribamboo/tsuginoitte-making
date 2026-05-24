@@ -47,7 +47,7 @@ const PasteIntroMoveCard: React.FC<PasteIntroMoveCardProps> = ({
           )}
           {isActive && (
             <div className="text-blue-600 text-[13px] font-medium py-1 animate-pulse">
-              盤面で「行き先→元」の順に指してください...
+              「行き先→元のマス/持ち駒」の順に指してください...
             </div>
           )}
         </div>
@@ -60,7 +60,7 @@ const PasteIntroMoveCard: React.FC<PasteIntroMoveCardProps> = ({
           )}
           {isActive && (
             <div className="text-blue-600 text-[13px] font-medium py-1 animate-pulse">
-              盤面で「行き先→元」の順に指してください...
+              「行き先→元のマス/持ち駒」の順に指してください...
             </div>
           )}
         </>

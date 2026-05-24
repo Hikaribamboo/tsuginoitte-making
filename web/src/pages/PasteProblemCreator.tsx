@@ -65,6 +65,18 @@ interface PasteDraft {
   rootEvalCp: number | null;
   rootEvalPercent: number | null;
   savedAt: string;
+  imagePositionSource?: {
+    imageItemId?: string;
+    fileName?: string;
+    memo?: string;
+    recognitionModel?: string | null;
+    recognitionConfidence?: number | null;
+    recognitionNotes?: string[];
+    issues?: unknown[];
+    introMoveUsi?: string | null;
+    correctMoveUsi?: string | null;
+    correctMoveLabel?: string | null;
+  } | null;
 }
 
 function draftSignature(draft: PasteDraft): string {
@@ -181,6 +193,7 @@ const PasteProblemCreator: React.FC = () => {
   const [showDeleteWsModal, setShowDeleteWsModal] = useState(false);
   const [showDeleteWorkspaceConfirm, setShowDeleteWorkspaceConfirm] = useState(false);
   const [savedProblemId, setSavedProblemId] = useState<number | null>(null);
+  const [imagePositionSource, setImagePositionSource] = useState<PasteDraft['imagePositionSource']>(null);
 
   // ---- Choice drafts ----
   const [choices, setChoices] = useState<Record<SlotKey, ChoiceDraft>>(
@@ -300,8 +313,9 @@ const PasteProblemCreator: React.FC = () => {
     problemRating,
     rootEvalCp,
     rootEvalPercent,
+    imagePositionSource,
     savedAt: new Date().toISOString(),
-  }), [kifText, rootSfen, kifMoves, introMoveUsi, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent]);
+  }), [kifText, rootSfen, kifMoves, introMoveUsi, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent, imagePositionSource]);
 
   const lastSavedRef = React.useRef<string>('');
 
@@ -363,6 +377,7 @@ const PasteProblemCreator: React.FC = () => {
           if (d.problemRating != null) setProblemRating(d.problemRating);
           setRootEvalCp(d.rootEvalCp ?? null);
           setRootEvalPercent(d.rootEvalPercent ?? null);
+          setImagePositionSource(d.imagePositionSource ?? null);
           const sig = draftSignature({
             ...d,
             choices: d.choices ?? {
@@ -377,6 +392,7 @@ const PasteProblemCreator: React.FC = () => {
             problemRating: d.problemRating ?? 1200,
             rootEvalCp: d.rootEvalCp ?? null,
             rootEvalPercent: d.rootEvalPercent ?? null,
+            imagePositionSource: d.imagePositionSource ?? null,
             savedAt: d.savedAt ?? new Date().toISOString(),
             kifText: d.kifText ?? '',
             rootSfen: d.rootSfen ?? '',
@@ -387,7 +403,8 @@ const PasteProblemCreator: React.FC = () => {
           setHasUnsavedChanges(false);
           setMessage('ワークスペースの下書きを復元しました');
         } else {
-          const sig = draftSignature(buildDraft());
+          setImagePositionSource(null);
+          const sig = draftSignature({ ...buildDraft(), imagePositionSource: null });
           lastSavedRef.current = sig;
           setHasUnsavedChanges(false);
         }
@@ -1070,26 +1087,45 @@ const PasteProblemCreator: React.FC = () => {
 
   const handleHandPieceClick = useCallback(
     (side: Side, type: HandPieceType) => {
-      const currentSide = analysisMode ? store.sideToMove : parsed?.sideToMove;
-      if (!currentSide || side !== currentSide) return;
+      if (introMoveActive) {
+        const destination = introDestinationRef.current ?? introDestination;
+        if (!destination || !displayParsed) return;
 
-      if (introMoveActive && introDestination && parsed) {
-        console.log('[intro-move] hand piece commit', {
+        const previousSide = displayParsed.sideToMove === 'sente' ? 'gote' : 'sente';
+        if (side !== previousSide) return;
+
+        const rewoundBoard = displayParsed.board.map((line) => [...line]);
+        rewoundBoard[destination.row][destination.col] = null;
+        const senteHand = { ...displayParsed.senteHand };
+        const goteHand = { ...displayParsed.goteHand };
+        const previousHand = previousSide === 'sente' ? senteHand : goteHand;
+        previousHand[type] = Math.min(99, previousHand[type] + 1);
+        const rewoundRootSfen = boardToSfen(
+          rewoundBoard,
+          previousSide,
+          senteHand,
+          goteHand,
+          Math.max(1, displayParsed.moveNumber - 1),
+        );
+        console.log('[intro-move] hand drop rewind', {
           type,
-          destination: introDestination,
+          destination,
+          previousSide,
+          rewoundRootSfen,
         });
-        registerIntroMove(`${type}*${toUsiSquare(introDestination.row, introDestination.col)}`);
+        registerIntroMove(`${type}*${toUsiSquare(destination.row, destination.col)}`, rewoundRootSfen);
         return;
       }
 
-      if (introMoveActive) return;
+      const currentSide = analysisMode ? store.sideToMove : parsed?.sideToMove;
+      if (!currentSide || side !== currentSide) return;
 
       setSelectedCell(null);
       setSelectedHandPiece((prev) =>
         prev?.side === side && prev?.type === type ? null : { side, type },
       );
     },
-    [analysisMode, store, parsed, introMoveActive, introDestination, registerIntroMove],
+    [analysisMode, store, parsed, introMoveActive, introDestination, displayParsed, registerIntroMove],
   );
 
   // ---- Field handlers ----
@@ -1571,6 +1607,8 @@ const PasteProblemCreator: React.FC = () => {
     });
     return null;
   })();
+  const imagePositionMemo = imagePositionSource?.memo?.trim() ?? '';
+  const imagePositionFileName = imagePositionSource?.fileName?.trim() ?? '';
 
   return (
     <>
@@ -1590,6 +1628,22 @@ const PasteProblemCreator: React.FC = () => {
             </span>
           )}
         </div>
+
+        {imagePositionMemo && (
+          <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2">
+            <div className="flex items-center gap-2 text-[11px] font-semibold text-amber-800">
+              <span>画像メモ</span>
+              {imagePositionFileName && (
+                <span className="min-w-0 truncate text-[10px] font-normal text-amber-700">
+                  {imagePositionFileName}
+                </span>
+              )}
+            </div>
+            <div className="mt-1 whitespace-pre-wrap text-[12px] leading-relaxed text-gray-700">
+              {imagePositionMemo}
+            </div>
+          </div>
+        )}
 
         <div className="mb-2 rounded-lg border border-gray-200 bg-white/70 px-3 py-2">
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -1643,6 +1697,7 @@ const PasteProblemCreator: React.FC = () => {
                     goteHand={parsed.goteHand}
                     sideToMove={parsed.sideToMove}
                     selectedCell={introMoveActive ? introDestination : selectedCell}
+                    showAllHandPieces={introMoveActive && !!introDestination}
                     onCellClick={handleCellClick}
                     onHandPieceClick={handleHandPieceClick}
                   />

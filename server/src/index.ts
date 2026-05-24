@@ -3,17 +3,24 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { existsSync } from 'fs';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { execFile } from 'child_process';
 import OpenAI from 'openai';
+import { promisify } from 'util';
+import { tmpdir } from 'os';
 import { ShogiEngine } from './engine.js';
-import type { AnalysisLine } from './engine.js';
 import type { AnalysisTuning, DepthBenchmarkResult } from './engine.js';
+import { cancelMakingJob, getMakingJob, listMakingJobs, startMakingJob } from './makingJobs.js';
+import { listMakingPathOptions } from './makingOptions.js';
+
+const execFileAsync = promisify(execFile);
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '8765', 10);
 const HOST = process.env.HOST ?? '0.0.0.0';
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '12mb' }));
 
 const engine = new ShogiEngine(
   process.env.ENGINE_PATH,
@@ -24,6 +31,262 @@ let benchRunning = false;
 // API routes
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+app.get('/api/making-jobs', (_req, res) => {
+  res.json({ jobs: listMakingJobs() });
+});
+
+app.get('/api/making-options', async (_req, res) => {
+  try {
+    const options = await listMakingPathOptions();
+    res.json(options);
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message ?? 'failed to list making options' });
+  }
+});
+
+app.get('/api/making-jobs/:jobId', (req, res) => {
+  const job = getMakingJob(req.params.jobId);
+  if (!job) {
+    res.status(404).json({ error: 'job not found' });
+    return;
+  }
+  res.json({ job });
+});
+
+app.post('/api/making-jobs/start', (req, res) => {
+  try {
+    const job = startMakingJob(req.body);
+    res.status(201).json({ job });
+  } catch (error: any) {
+    res.status(400).json({ error: error?.message ?? 'failed to start job' });
+  }
+});
+
+app.post('/api/making-jobs/:jobId/cancel', (req, res) => {
+  const job = cancelMakingJob(req.params.jobId);
+  if (!job) {
+    res.status(404).json({ error: 'job not found' });
+    return;
+  }
+  res.json({ job });
+});
+
+function extractJsonObject(text: string): any | null {
+  const direct = text.trim();
+  try {
+    return JSON.parse(direct);
+  } catch {
+    const match = direct.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function resolveShogiDatasetRoot(): string {
+  return process.env.SHOGI_DATASET_ROOT
+    ?? path.resolve(import.meta.dirname, '..', '..', '..', '..', 'shogi-position-recognition-dataset');
+}
+
+function resolvePredictionScriptPath(): string {
+  return process.env.SHOGI_PREDICTION_SCRIPT
+    ?? path.join(resolveShogiDatasetRoot(), 'scripts', 'predict_sfen.py');
+}
+
+function resolvePredictionModelPath(): string {
+  return process.env.SHOGI_PREDICTION_MODEL
+    ?? path.join(resolveShogiDatasetRoot(), 'models', 'resnet18_shogi_piece_classifier.pt');
+}
+
+function decodeDataUrlImage(dataUrl: string): Buffer {
+  const match = dataUrl.match(/^data:[^;]+;base64,(.+)$/);
+  if (!match) {
+    throw new Error('image data URL is invalid');
+  }
+  return Buffer.from(match[1], 'base64');
+}
+
+function sampleRectList(rects: any) {
+  if (!Array.isArray(rects)) return undefined;
+  return [
+    ...rects.slice(0, 3),
+    ...rects.slice(Math.max(rects.length - 3, 3)),
+  ];
+}
+
+function summarizeCropInfo(cropInfo: any) {
+  if (!cropInfo || typeof cropInfo !== 'object') return cropInfo;
+  return {
+    method: cropInfo.method,
+    metadataSource: cropInfo.metadataSource,
+    metadataSourceImageSize: cropInfo.metadataSourceImageSize,
+    cropRect: cropInfo.cropRect,
+    inputSize: cropInfo.inputSize,
+    croppedSize: cropInfo.croppedSize,
+    resizedSize: cropInfo.resizedSize,
+    gridImageSize: cropInfo.gridImageSize,
+    rawGridCellWidth: cropInfo.rawGridCellWidth,
+    rawGridCellHeight: cropInfo.rawGridCellHeight,
+    resizedGridCellWidth: cropInfo.resizedGridCellWidth,
+    resizedGridCellHeight: cropInfo.resizedGridCellHeight,
+    modelInputCellSize: cropInfo.modelInputCellSize,
+    cellRectsRawSample: sampleRectList(cropInfo.cellRectsRaw),
+    cellRectsResizedSample: sampleRectList(cropInfo.cellRectsResized),
+  };
+}
+
+function summarizeDebugLog(debugLog: any) {
+  if (!debugLog || typeof debugLog !== 'object') return debugLog;
+  return {
+    inputImagePath: debugLog.inputImagePath,
+    inputSize: debugLog.inputSize,
+    metadataSource: debugLog.metadataSource,
+    metadataSourceImageSize: debugLog.metadataSourceImageSize,
+    cropInfo: debugLog.cropInfo,
+    croppedSize: debugLog.croppedSize,
+    resizedSize: debugLog.resizedSize,
+    rawGridCellWidth: debugLog.rawGridCellWidth,
+    rawGridCellHeight: debugLog.rawGridCellHeight,
+    resizedGridCellWidth: debugLog.resizedGridCellWidth,
+    resizedGridCellHeight: debugLog.resizedGridCellHeight,
+    modelInputCellSize: debugLog.modelInputCellSize,
+    cellRectsRawSample: sampleRectList(debugLog.cellRectsRaw),
+    cellRectsResizedSample: sampleRectList(debugLog.cellRectsResized),
+  };
+}
+
+function summarizePrediction(parsed: any) {
+  const squares = Array.isArray(parsed?.squares) ? parsed.squares : [];
+  const statusCounts = squares.reduce((counts: Record<string, number>, square: any) => {
+    const status = typeof square?.status === 'string' ? square.status : 'unknown';
+    counts[status] = (counts[status] ?? 0) + 1;
+    return counts;
+  }, {});
+
+  return {
+    sfen: parsed?.sfen,
+    confidence: parsed?.confidence,
+    squareCount: squares.length,
+    statusCounts,
+    pieceBoxCount: Array.isArray(parsed?.pieceBox) ? parsed.pieceBox.length : 0,
+    validationIssueCount: Array.isArray(parsed?.validationIssues) ? parsed.validationIssues.length : 0,
+    inputSize: parsed?.inputSize,
+    croppedSize: parsed?.croppedSize,
+    resizedSize: parsed?.resizedSize,
+    gridImageSize: parsed?.gridImageSize,
+    cropInfo: summarizeCropInfo(parsed?.cropInfo),
+    debugImages: parsed?.debugImages,
+    debugLog: summarizeDebugLog(parsed?.debugLog),
+    boardCropPath: parsed?.boardCropPath,
+    boardGridPath: parsed?.boardGridPath,
+    cellsPreviewPath: parsed?.cellsPreviewPath,
+  };
+}
+
+async function runLocalShogiPrediction(imageDataUrl: string): Promise<any> {
+  const scriptPath = resolvePredictionScriptPath();
+  const modelPath = resolvePredictionModelPath();
+  if (!existsSync(scriptPath)) {
+    throw new Error(`prediction script not found: ${scriptPath}`);
+  }
+  if (!existsSync(modelPath)) {
+    throw new Error(`prediction model not found: ${modelPath}`);
+  }
+
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'tsuginoitte-shogi-'));
+  const imagePath = path.join(tempDir, 'input.png');
+  try {
+    const imageBuffer = decodeDataUrlImage(imageDataUrl);
+    await writeFile(imagePath, imageBuffer);
+    const pythonBin = process.env.PYTHON_BIN ?? 'python3';
+    const args = [
+      scriptPath,
+      '--image',
+      imagePath,
+      '--model',
+      modelPath,
+    ];
+    const fallbackSourceId = process.env.SHOGI_PREDICTION_FALLBACK_SOURCE_ID ?? '002';
+    const fallbackMetadataPath = path.join(resolveShogiDatasetRoot(), 'metadata', `${fallbackSourceId}.json`);
+    if (existsSync(fallbackMetadataPath)) {
+      args.push('--fallback-source-id', fallbackSourceId);
+    } else {
+      console.warn('[recognize] fallback metadata not found; using predictor auto crop fallback', {
+        fallbackSourceId,
+        fallbackMetadataPath,
+      });
+    }
+    console.log('[recognize] invoking python predictor', {
+      pythonBin,
+      scriptPath,
+      modelPath,
+      imagePath,
+      imageBytes: imageBuffer.length,
+      datasetRoot: resolveShogiDatasetRoot(),
+      fallbackSourceId: existsSync(fallbackMetadataPath) ? fallbackSourceId : null,
+    });
+
+    const { stdout, stderr } = await execFileAsync(
+      pythonBin,
+      args,
+      { maxBuffer: 10 * 1024 * 1024 },
+    );
+    if (stderr.trim()) {
+      console.warn('[recognize] predictor stderr:', stderr.trim());
+    }
+    const parsed = extractJsonObject(stdout);
+    if (!parsed || typeof parsed.sfen !== 'string') {
+      console.error('[recognize] failed to parse predictor stdout head:', stdout.slice(0, 1000));
+      throw new Error('Failed to parse prediction output');
+    }
+    console.log('[recognize] predictor result', summarizePrediction(parsed));
+    return parsed;
+  } catch (err: any) {
+    console.error('[recognize] predictor failed', {
+      message: err?.message,
+      code: err?.code,
+      stdout: typeof err?.stdout === 'string' ? err.stdout.slice(0, 2000) : undefined,
+      stderr: typeof err?.stderr === 'string' ? err.stderr.slice(0, 4000) : undefined,
+    });
+    throw err;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+app.post('/api/recognize-shogi-position', async (req, res) => {
+  console.log('[recognize] request received', {
+    contentType: req.headers['content-type'],
+    bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body) : [],
+    imageChars: typeof req.body?.image === 'string' ? req.body.image.length : 0,
+  });
+
+  const image = req.body?.image;
+  if (!image || typeof image !== 'string' || !image.startsWith('data:image/')) {
+    console.warn('[recognize] bad request: image data URL is missing or invalid');
+    res.status(400).json({ error: 'image data URL is required' });
+    return;
+  }
+
+  try {
+    const parsed = await runLocalShogiPrediction(image);
+    console.log('[recognize] response sent', summarizePrediction(parsed));
+    res.json({
+      ...parsed,
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : undefined,
+      notes: Array.isArray(parsed.notes) ? parsed.notes.map(String) : [],
+      model: path.basename(resolvePredictionModelPath()),
+      raw: parsed,
+    });
+  } catch (err: any) {
+    console.error('Shogi image recognition error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/evaluate', async (req, res) => {
@@ -450,9 +713,14 @@ if (existsSync(distDir)) {
 // Start server after engine is ready
 async function main() {
   try {
-    await engine.start();
+    if (process.env.ENABLE_SHOGI_ENGINE === '1') {
+      await engine.start();
+      console.log('Shogi engine enabled');
+    } else {
+      console.log('Shogi engine disabled. Set ENABLE_SHOGI_ENGINE=1 to enable engine APIs.');
+    }
     app.listen(PORT, HOST, () => {
-      console.log(`Engine API server running on http://${HOST}:${PORT}`);
+      console.log(`Express API server running on http://${HOST}:${PORT}`);
     });
   } catch (err) {
     console.error('Failed to start engine:', err);

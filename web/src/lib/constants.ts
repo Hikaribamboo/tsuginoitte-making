@@ -88,6 +88,10 @@ export const TAG_CATEGORIES: TagCategory[] = [
       { value: 'endgame', label: '終盤' },
     ],
   },
+  {
+    category: '解析由来',
+    tags: [{ value: 'qhapaq', label: 'Qhapaq流' }],
+  },
 ] ;
 
 export const AVAILABLE_TAGS = TAG_CATEGORIES.flatMap((g) => g.tags);

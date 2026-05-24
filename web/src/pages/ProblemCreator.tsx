@@ -642,7 +642,7 @@ const ProblemCreator: React.FC = () => {
   const validate = (): string[] => {
     const errors: string[] = [];
     if (!favoriteId)
-      errors.push("お気に入り一覧から問題作成を開始してください");
+      errors.push("作問スタジオから局面を選んで問題作成を開始してください");
     if (!rootSfen) errors.push("局面（root_sfen）が未設定です");
     if (!choices.correct.usi) errors.push("正解手が未設定です");
     if (!choices.incorrect1.usi) errors.push("不正解手１が未設定です");
@@ -672,7 +672,7 @@ const ProblemCreator: React.FC = () => {
 
   const handleSaveDraft = async () => {
     if (!favoriteId) {
-      setMessage("お気に入り一覧から開始した局面のみ途中保存できます");
+      setMessage("作問スタジオから開始した局面のみ途中保存できます");
       return;
     }
 
@@ -804,7 +804,7 @@ const ProblemCreator: React.FC = () => {
         setMessage(
           `保存しました (problem_id: ${problemId})\nお気に入りから削除しました`,
         );
-        navigate("/favorites");
+        navigate("/workspaces");
       } catch (deleteError: any) {
         setMessage(
           `保存しました (problem_id: ${problemId})\nお気に入り削除エラー: ${deleteError.message}`,
@@ -850,9 +850,9 @@ const ProblemCreator: React.FC = () => {
     return (
       <div className="w-full h-[calc(100vh-84px)] overflow-hidden">
         <div className="bg-red-50 border border-red-300 text-red-700 p-3 rounded mb-3">
-          局面が選択されていません。お気に入り一覧から問題作成を選んでください。
+          局面が選択されていません。作問スタジオから作問フローを開始してください。
         </div>
-        <button onClick={() => navigate("/favorites")}>お気に入り一覧へ</button>
+        <button onClick={() => navigate("/making")}>作問スタジオへ</button>
       </div>
     );
   }

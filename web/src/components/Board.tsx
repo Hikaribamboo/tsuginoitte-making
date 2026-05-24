@@ -18,7 +18,11 @@ interface BoardProps {
   arrow?: ArrowInfo | null;
   arrows?: ArrowInfo[];
   onCellClick?: (row: number, col: number) => void;
+  onCellDoubleClick?: (row: number, col: number) => void;
+  onCellDrop?: (row: number, col: number, payload: string) => void;
   onHandPieceClick?: (side: Side, pieceType: HandPieceType) => void;
+  selectedHandPiece?: { side: Side; type: HandPieceType } | null;
+  showAllHandPieces?: boolean;
 }
 
 const FILE_LABELS = ['９', '８', '７', '６', '５', '４', '３', '２', '１'];
@@ -35,7 +39,11 @@ const Board: React.FC<BoardProps> = ({
   arrow,
   arrows,
   onCellClick,
+  onCellDoubleClick,
+  onCellDrop,
   onHandPieceClick,
+  selectedHandPiece,
+  showAllHandPieces = false,
 }) => {
   const arrowList = arrows ?? (arrow ? [arrow] : []);
 
@@ -47,6 +55,8 @@ const Board: React.FC<BoardProps> = ({
         hand={goteHand}
         onClick={onHandPieceClick}
         label="☖持駒"
+        selectedType={selectedHandPiece?.side === 'gote' ? selectedHandPiece.type : null}
+        showAll={showAllHandPieces}
       />
 
       <div className="flex flex-col items-center">
@@ -78,6 +88,19 @@ const Board: React.FC<BoardProps> = ({
                       className={`border border-blue-700/35 flex items-center justify-center cursor-pointer relative select-none hover:bg-cyan-100/80 ${isSelected ? 'bg-sky-500/45' : ''}`}
                       style={{ width: BOARD_CELL_SIZE, height: BOARD_CELL_SIZE }}
                       onClick={() => onCellClick?.(ri, ci)}
+                      onDoubleClick={() => onCellDoubleClick?.(ri, ci)}
+                      onDragOver={(e) => {
+                        if (!onCellDrop) return;
+                        e.preventDefault();
+                      }}
+                      onDrop={(e) => {
+                        if (!onCellDrop) return;
+                        e.preventDefault();
+                        const payload = e.dataTransfer.getData('application/json') || e.dataTransfer.getData('text/plain');
+                        if (payload) {
+                          onCellDrop(ri, ci, payload);
+                        }
+                      }}
                     >
                       {cell && (
                         <span
@@ -113,6 +136,8 @@ const Board: React.FC<BoardProps> = ({
         hand={senteHand}
         onClick={onHandPieceClick}
         label="☗持駒"
+        selectedType={selectedHandPiece?.side === 'sente' ? selectedHandPiece.type : null}
+        showAll={showAllHandPieces}
       />
     </div>
   );
@@ -130,23 +155,29 @@ interface HandDisplayProps {
   hand: HandPieces;
   onClick?: (side: Side, type: HandPieceType) => void;
   label: string;
+  selectedType?: HandPieceType | null;
+  showAll?: boolean;
 }
 
-const HandDisplay: React.FC<HandDisplayProps> = ({ side, hand, onClick, label }) => {
-  const pieces = HAND_ORDER.filter((t) => hand[t] > 0);
+const HandDisplay: React.FC<HandDisplayProps> = ({ side, hand, onClick, label, selectedType = null, showAll = false }) => {
+  const pieces = showAll ? HAND_ORDER : HAND_ORDER.filter((t) => hand[t] > 0);
   return (
-    <div className={`min-w-12 p-2 bg-sky-100/70 border border-sky-400/45 rounded backdrop-blur-[1px] ${side === 'sente' ? 'self-end' : 'self-start'}`}>
-      <div className="text-xs text-gray-500 mb-1 whitespace-nowrap">{label}</div>
-      <div className="flex flex-col gap-1">
+    <div className={`min-w-[58px] p-2 bg-sky-100/70 border border-sky-400/45 rounded backdrop-blur-[1px] ${side === 'sente' ? 'self-end' : 'self-start'}`}>
+      <div className="text-[11px] text-gray-500 mb-1 whitespace-nowrap leading-none">{label}</div>
+      <div className="flex flex-col gap-0.5">
         {pieces.length === 0 && <span className="text-[11px] text-gray-400">なし</span>}
         {pieces.map((t) => (
           <span
             key={t}
-            className="text-[20px] font-bold cursor-pointer p-0.5 rounded text-center hover:bg-blue-500/20"
+            className={`flex items-baseline justify-between gap-1 text-[19px] font-bold leading-none cursor-pointer px-1 py-0.5 rounded hover:bg-blue-500/20 ${hand[t] === 0 ? 'text-gray-300' : 'text-slate-800'} ${selectedType === t ? 'bg-blue-500/35 ring-2 ring-blue-500/40' : ''}`}
             onClick={() => onClick?.(side, t)}
           >
-            {HAND_KANJI[t]}
-            {hand[t] > 1 && <sub>{hand[t]}</sub>}
+            <span>{HAND_KANJI[t]}</span>
+            {showAll ? (
+              <span className="text-[12px] leading-none">{hand[t]}</span>
+            ) : hand[t] > 1 && (
+              <span className="text-[12px] leading-none">{hand[t]}</span>
+            )}
           </span>
         ))}
       </div>

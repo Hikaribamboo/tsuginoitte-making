@@ -22,6 +22,8 @@ const WorkspaceList: React.FC = () => {
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [savingBranches, setSavingBranches] = useState(false);
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
   const [sortKey, setSortKey] = useState<'newest' | 'oldest' | 'rating-asc' | 'rating-desc' | 'name-asc' | 'name-desc'>('newest');
 
   // Inline KIF paste state
@@ -47,6 +49,10 @@ const WorkspaceList: React.FC = () => {
   useEffect(() => {
     fetchWorkspaces();
   }, [fetchWorkspaces]);
+
+  useEffect(() => {
+    setSelectedWorkspaceIds((prev) => prev.filter((id) => workspaces.some((workspace) => workspace.id === id)));
+  }, [workspaces]);
 
   const sortedWorkspaces = useMemo(() => {
     const arr = [...workspaces];
@@ -278,6 +284,41 @@ const WorkspaceList: React.FC = () => {
     }
   };
 
+  const toggleWorkspaceSelection = (workspaceId: string) => {
+    setSelectedWorkspaceIds((prev) =>
+      prev.includes(workspaceId) ? prev.filter((id) => id !== workspaceId) : [...prev, workspaceId],
+    );
+  };
+
+  const allSelected = sortedWorkspaces.length > 0
+    && sortedWorkspaces.every((workspace) => selectedWorkspaceIds.includes(workspace.id));
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedWorkspaceIds([]);
+      return;
+    }
+    setSelectedWorkspaceIds(sortedWorkspaces.map((workspace) => workspace.id));
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedWorkspaceIds.length === 0) return;
+    if (!window.confirm(`${selectedWorkspaceIds.length}件の下書きを削除しますか？`)) return;
+
+    setDeletingSelected(true);
+    try {
+      for (const workspaceId of selectedWorkspaceIds) {
+        await deleteWorkspace(workspaceId);
+      }
+      setWorkspaces((prev) => prev.filter((workspace) => !selectedWorkspaceIds.includes(workspace.id)));
+      setSelectedWorkspaceIds([]);
+    } catch (e: any) {
+      setError(e?.message ?? '下書きの一括削除に失敗しました');
+    } finally {
+      setDeletingSelected(false);
+    }
+  };
+
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleDateString('ja-JP', {
@@ -293,7 +334,7 @@ const WorkspaceList: React.FC = () => {
   return (
     <div className="max-w-[800px] mx-auto">
       <div className="mb-4">
-        <h2 className="text-lg font-semibold">ワークスペース一覧</h2>
+        <h2 className="text-lg font-semibold">下書き一覧</h2>
       </div>
 
       {/* Inline KIF paste area */}
@@ -411,20 +452,41 @@ const WorkspaceList: React.FC = () => {
           </div>
         )}
 
-        <div className="flex items-center gap-2">
-          <label className="text-[12px] text-gray-600">並び替え:</label>
-          <select
-            value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as any)}
-            className="text-[12px] border px-2 py-1 rounded"
-          >
-            <option value="newest">新しい順</option>
-            <option value="oldest">古い順</option>
-            <option value="rating-desc">レート大きい順</option>
-            <option value="rating-asc">レート小さい順</option>
-            <option value="name-asc">名前 A→Z</option>
-            <option value="name-desc">名前 Z→A</option>
-          </select>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-[12px] text-gray-600">並び替え:</label>
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as any)}
+              className="text-[12px] border px-2 py-1 rounded"
+            >
+              <option value="newest">新しい順</option>
+              <option value="oldest">古い順</option>
+              <option value="rating-desc">レート大きい順</option>
+              <option value="rating-asc">レート小さい順</option>
+              <option value="name-asc">名前 A→Z</option>
+              <option value="name-desc">名前 Z→A</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 text-[12px] text-gray-600">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleSelectAll}
+              />
+              全選択
+            </label>
+            <button
+              type="button"
+              className="text-[12px] px-2 py-1 rounded border border-red-300 text-red-700 bg-red-50 hover:bg-red-100 disabled:opacity-50"
+              disabled={selectedWorkspaceIds.length === 0 || deletingSelected}
+              onClick={handleDeleteSelected}
+            >
+              {deletingSelected ? '削除中...' : `選択削除 (${selectedWorkspaceIds.length})`}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -432,7 +494,7 @@ const WorkspaceList: React.FC = () => {
         <div className="text-[13px] text-gray-500 py-8 text-center">読み込み中...</div>
       ) : sortedWorkspaces.length === 0 ? (
         <div className="text-[13px] text-gray-500 py-8 text-center border border-dashed border-gray-300 rounded-lg">
-          ワークスペースがありません。上の棋譜欄に貼り付けて保存してください。
+          下書きがありません。上の棋譜欄に貼り付けて保存してください。
         </div>
       ) : (
         <div className="flex flex-col gap-2">
@@ -444,12 +506,26 @@ const WorkspaceList: React.FC = () => {
             const tags: string[] = d?.tags ?? [];
             const correctLabel = d?.choices?.correct?.label;
             const rootSfen = d?.rootSfen;
+            const imagePositionMemo = typeof d?.imagePositionSource?.memo === 'string'
+              ? d.imagePositionSource.memo.trim()
+              : '';
             return (
               <div
                 key={ws.id}
                 className="border border-gray-200 rounded-lg p-3 hover:border-blue-300 hover:bg-blue-50/30 transition-colors cursor-pointer flex items-center gap-3"
                 onClick={() => navigate(`/paste-problem?workspace=${ws.id}`)}
               >
+                <div className="flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={selectedWorkspaceIds.includes(ws.id)}
+                    onChange={(event) => {
+                      event.stopPropagation();
+                      toggleWorkspaceSelection(ws.id);
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-[14px] truncate">{ws.name}</span>
@@ -473,6 +549,11 @@ const WorkspaceList: React.FC = () => {
                         {d.mode === 'joseki' ? '定跡' : '次の一手'}
                       </span>
                     )}
+                    {d?.imagePositionSource && (
+                      <span className="bg-amber-100 text-amber-700 px-1.5 py-0 rounded text-[10px]">
+                        画像局面
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-0.5 flex-wrap">
                     <span>{formatDate(ws.updated_at)}</span>
@@ -486,6 +567,11 @@ const WorkspaceList: React.FC = () => {
                       <span className="text-gray-400">{tags.join(', ')}</span>
                     )}
                   </div>
+                  {imagePositionMemo && (
+                    <div className="mt-1 max-h-[36px] overflow-hidden whitespace-pre-wrap text-[11px] leading-relaxed text-gray-600">
+                      画像メモ: {imagePositionMemo}
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
