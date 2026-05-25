@@ -57,7 +57,6 @@ export function getEnginePath(): string {
   const engineGroupDir = isMac ? 'mac' : 'windows';
   const candidates = [
     path.resolve(import.meta.dirname, '..', '..', '..', 'engines', engineGroupDir, engineName),
-    path.resolve(import.meta.dirname, '..', '..', 'engines', engineGroupDir, engineName),
   ];
   const found = candidates.find((candidate) => existsSync(candidate));
   if (found) return found;

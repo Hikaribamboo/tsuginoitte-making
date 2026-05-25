@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { createKifus, getKifuSummary, type KifuSummary } from '../api/kifus';
+import {
+  createBasePosition,
+  createKifus,
+  getKifuSummary,
+  listBasePositions,
+  type BasePosition,
+  type KifuSummary,
+} from '../api/kifus';
 import {
   cancelMakingJob,
   listMakingJobs,
@@ -15,20 +22,38 @@ type KifusGenerateFormState = {
   totalGames: string;
 };
 
+type BasePositionFormState = {
+  id: string;
+  initialSfen: string;
+  tagsText: string;
+  note: string;
+};
+
 const DEFAULT_FORM: KifusGenerateFormState = {
   gamesPerBasePosition: '3',
   maxMoves: '180',
   totalGames: '30',
 };
 
+const DEFAULT_BASE_POSITION_FORM: BasePositionFormState = {
+  id: '',
+  initialSfen: '',
+  tagsText: '',
+  note: '',
+};
+
 const MakingKifusGenerator: React.FC = () => {
   const [form, setForm] = useState<KifusGenerateFormState>(DEFAULT_FORM);
+  const [basePositionForm, setBasePositionForm] = useState<BasePositionFormState>(DEFAULT_BASE_POSITION_FORM);
+  const [basePositions, setBasePositions] = useState<BasePosition[]>([]);
   const [jobs, setJobs] = useState<MakingJobSnapshot[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [summary, setSummary] = useState<KifuSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [basePositionsLoading, setBasePositionsLoading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [savingBasePosition, setSavingBasePosition] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -59,9 +84,22 @@ const MakingKifusGenerator: React.FC = () => {
     }
   };
 
+  const refreshBasePositions = async () => {
+    try {
+      setBasePositionsLoading(true);
+      const rows = await listBasePositions();
+      setBasePositions(rows);
+    } catch (nextError: any) {
+      setError(nextError?.message ?? 'base position一覧の取得に失敗しました');
+    } finally {
+      setBasePositionsLoading(false);
+    }
+  };
+
   useEffect(() => {
     void refreshJobs();
     void refreshSummary();
+    void refreshBasePositions();
   }, []);
 
   useEffect(() => {
@@ -76,6 +114,40 @@ const MakingKifusGenerator: React.FC = () => {
 
   const update = <K extends keyof KifusGenerateFormState>(key: K, value: KifusGenerateFormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updateBasePosition = <K extends keyof BasePositionFormState>(key: K, value: BasePositionFormState[K]) => {
+    setBasePositionForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSaveBasePosition = async () => {
+    setSavingBasePosition(true);
+    setError('');
+    setMessage('');
+    try {
+      const initialSfen = basePositionForm.initialSfen.trim();
+      if (!isLikelySfen(initialSfen)) {
+        throw new Error('initial_sfen は SFEN 4要素以上で指定してください');
+      }
+
+      const id = basePositionForm.id.trim() || createBasePositionId(initialSfen);
+      const tags = parseTagsText(basePositionForm.tagsText);
+      const saved = await createBasePosition({
+        id,
+        initialSfen,
+        tags,
+        note: basePositionForm.note,
+        isActive: true,
+      });
+
+      setBasePositionForm(DEFAULT_BASE_POSITION_FORM);
+      setBasePositions((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+      setMessage(`base position ${saved.id} を登録しました`);
+    } catch (nextError: any) {
+      setError(nextError?.message ?? 'base position登録に失敗しました');
+    } finally {
+      setSavingBasePosition(false);
+    }
   };
 
   const handleStart = async () => {
@@ -217,6 +289,62 @@ const MakingKifusGenerator: React.FC = () => {
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-base font-semibold text-slate-900">base position登録</h3>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => void refreshBasePositions()}
+              >
+                一覧更新
+              </button>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <FieldInput
+                label="id"
+                value={basePositionForm.id}
+                onChange={(next) => updateBasePosition('id', next)}
+                placeholder="未入力なら自動生成"
+              />
+              <FieldInput
+                label="tags"
+                value={basePositionForm.tagsText}
+                onChange={(next) => updateBasePosition('tagsText', next)}
+                placeholder="opening, ibisha"
+              />
+            </div>
+            <label className="mt-2 flex flex-col gap-1">
+              <span className="text-xs text-slate-600">initial_sfen</span>
+              <textarea
+                className="min-h-20 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900"
+                value={basePositionForm.initialSfen}
+                onChange={(event) => updateBasePosition('initialSfen', event.target.value)}
+              />
+            </label>
+            <label className="mt-2 flex flex-col gap-1">
+              <span className="text-xs text-slate-600">note</span>
+              <input
+                className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900"
+                value={basePositionForm.note}
+                onChange={(event) => updateBasePosition('note', event.target.value)}
+              />
+            </label>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                onClick={handleSaveBasePosition}
+                disabled={savingBasePosition}
+              >
+                {savingBasePosition ? '登録中...' : 'base position登録'}
+              </button>
+              <span className="text-xs text-slate-500">
+                登録済みの有効データは次回のkifs生成ジョブで使われます。
+              </span>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="mb-3 text-base font-semibold text-slate-900">棋譜アップロード</h3>
             <div className="flex flex-wrap items-center gap-2">
               <label className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer">
@@ -285,6 +413,36 @@ const MakingKifusGenerator: React.FC = () => {
 
         <div className="space-y-4">
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-base font-semibold text-slate-900">登録済みbase positions</h3>
+            {basePositionsLoading ? (
+              <div className="text-sm text-slate-500">読み込み中...</div>
+            ) : basePositions.length === 0 ? (
+              <div className="text-sm text-slate-500">DB登録データはまだありません。</div>
+            ) : (
+              <div className="max-h-[260px] space-y-2 overflow-y-auto">
+                {basePositions.slice(0, 50).map((base) => (
+                  <div key={base.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-mono text-xs font-semibold text-slate-800">{base.id}</div>
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${base.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                        {base.is_active ? 'active' : 'inactive'}
+                      </span>
+                    </div>
+                    <div className="mt-1 line-clamp-2 break-all font-mono text-[11px] text-slate-600">{base.initial_sfen}</div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {base.tags.map((tag) => (
+                        <span key={tag} className="rounded bg-white px-1.5 py-0.5 text-[11px] text-slate-600">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="mb-3 text-base font-semibold text-slate-900">ジョブ履歴</h3>
             <div className="max-h-[280px] space-y-2 overflow-y-auto">
               {jobs.map((job) => (
@@ -333,14 +491,37 @@ function extractInitialSfen(sourceText: string, fallbackCurrentSfen: string): st
   return fallbackCurrentSfen;
 }
 
+function isLikelySfen(value: string): boolean {
+  const parts = value.trim().split(/\s+/);
+  return parts.length >= 4 && parts[0].includes('/') && (parts[1] === 'b' || parts[1] === 'w');
+}
+
+function parseTagsText(value: string): string[] {
+  return value
+    .split(/[,、\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function createBasePositionId(initialSfen: string): string {
+  const seed = `${initialSfen}_${Date.now()}`;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+  return `studio_${hash.toString(36)}`;
+}
+
 function FieldInput({
   label,
   value,
   onChange,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  placeholder?: string;
 }) {
   return (
     <label className="flex flex-col gap-1">
@@ -348,6 +529,7 @@ function FieldInput({
       <input
         className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900"
         value={value}
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
       />
     </label>

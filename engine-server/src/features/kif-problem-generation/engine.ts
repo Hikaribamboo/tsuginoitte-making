@@ -215,8 +215,6 @@ export function defaultEnginePath() {
 
   const candidates = [
     path.resolve(currentDir, '..', '..', '..', '..', 'engines', engineGroupDir, engineName),
-    path.resolve(currentDir, '..', '..', '..', 'engines', engineGroupDir, engineName),
-    path.resolve(currentDir, '..', '..', 'engines', engineGroupDir, engineName),
   ];
   const found = candidates.find((candidate) => existsSync(candidate));
   if (found) return found;

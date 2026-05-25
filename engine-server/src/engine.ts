@@ -66,7 +66,7 @@ export class ShogiEngine {
   constructor(enginePath?: string, evalDir?: string) {
     const root = path.resolve(import.meta.dirname, '..');
     this.tuning = ShogiEngine.detectDefaultTuning();
-    // Prefer explicit ENGINE_PATH env var, then repo-level engines, then bundled legacy engines
+    // Prefer explicit ENGINE_PATH env var, then repo-level engines, then bundled legacy engines.
     const envPath = process.env.ENGINE_PATH?.trim();
     if (enginePath) {
       this.enginePath = enginePath;
@@ -76,10 +76,7 @@ export class ShogiEngine {
       const isMac = process.platform === 'darwin';
       const engineName = isMac ? 'YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1' : 'AobaNNUE_ZEN2.exe';
       const engineGroupDir = isMac ? 'mac' : 'windows';
-      const candidates = [
-        path.join(root, 'engines', engineGroupDir, engineName),
-        path.join(root, 'src', 'engines', engineGroupDir, engineName),
-      ];
+      const candidates = [path.join(root, 'engines', engineGroupDir, engineName)];
       const found = candidates.find((candidate) => existsSync(candidate));
       if (found) {
         this.enginePath = found;
@@ -102,7 +99,6 @@ export class ShogiEngine {
       const candidateEvalDirs = [
         path.join(path.dirname(this.enginePath), 'eval'),
         path.join(root, 'engines', 'eval'),
-        path.join(root, 'src', 'engines', 'eval'),
       ];
       this.evalDir = candidateEvalDirs.find((dir) => existsSync(dir)) ?? '';
     }

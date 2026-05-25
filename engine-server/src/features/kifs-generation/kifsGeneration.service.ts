@@ -42,7 +42,7 @@ export async function runKifsGenerationJob(args: KifsGenerationJobArgs): Promise
   if (settings.blackMovetimeMs != null) env.AMTS_SP_BLACK_MOVETIME_MS = String(settings.blackMovetimeMs);
   if (settings.whiteMovetimeMs != null) env.AMTS_SP_WHITE_MOVETIME_MS = String(settings.whiteMovetimeMs);
   if (!env.ENGINE_PATH) {
-    env.ENGINE_PATH = path.join(rootDir, 'src', 'engines', 'mac', 'YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1');
+    env.ENGINE_PATH = path.join(rootDir, 'engines', 'mac', 'YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1');
   }
 
   setStep('kifs 生成中 (generate:kifus)');

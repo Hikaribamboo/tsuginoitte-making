@@ -19,6 +19,24 @@ export interface KifuSummary {
   sampledAllRows: boolean;
 }
 
+export interface BasePosition {
+  id: string;
+  initial_sfen: string;
+  tags: string[];
+  note: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateBasePositionInput {
+  id: string;
+  initialSfen: string;
+  tags?: string[];
+  note?: string | null;
+  isActive?: boolean;
+}
+
 export interface CreateKifuInput {
   initialSfen: string;
   moves: string[];
@@ -112,4 +130,33 @@ export async function createKifus(inputs: CreateKifuInput[]): Promise<number> {
     inserted += chunk.length;
   }
   return inserted;
+}
+
+export async function listBasePositions(): Promise<BasePosition[]> {
+  const { data, error } = await supabase
+    .from('making_base_positions')
+    .select('id, initial_sfen, tags, note, is_active, created_at, updated_at')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as BasePosition[];
+}
+
+export async function createBasePosition(input: CreateBasePositionInput): Promise<BasePosition> {
+  const payload = {
+    id: input.id.trim(),
+    initial_sfen: input.initialSfen.trim(),
+    tags: input.tags ?? [],
+    note: input.note?.trim() || null,
+    is_active: input.isActive ?? true,
+  };
+
+  const { data, error } = await supabase
+    .from('making_base_positions')
+    .insert(payload)
+    .select('id, initial_sfen, tags, note, is_active, created_at, updated_at')
+    .single();
+
+  if (error) throw error;
+  return data as BasePosition;
 }
