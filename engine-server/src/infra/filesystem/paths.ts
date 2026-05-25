@@ -1,1 +1,0 @@
-export { listMakingPathOptions } from '../../makingOptions.js';

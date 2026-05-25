@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { ShogiEngine } from './engine.js';
-import { createEngineApp } from './api/routes.js';
+import { createEngineApp } from './api/createEngineApp.js';
 import { getEnginePath } from './services/engine/engineClient.js';
 
 const engine = new ShogiEngine(getEnginePath(), process.env.EVAL_DIR);

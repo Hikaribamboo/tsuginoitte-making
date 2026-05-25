@@ -1,1 +1,0 @@
-export { runLocalShogiPrediction } from './recognition.service.js';

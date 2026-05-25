@@ -1,6 +1,6 @@
 import path from 'path';
 import { existsSync } from 'fs';
-import { UsiEngine, defaultEnginePath } from './usiEngineAdapter.js';
+import { UsiEngine, defaultEnginePath } from '../../features/kif-problem-generation/engine.js';
 
 export type PvInfo = {
   multipv: number;
