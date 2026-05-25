@@ -3,4 +3,4 @@ dist/
 .env
 *.local
 
-engines/
+server/engines/

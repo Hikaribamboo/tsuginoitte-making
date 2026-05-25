@@ -6,7 +6,7 @@ import {
   listMakingJobs,
   startMakingJob,
   type MakingJobSnapshot,
-} from '../api/making-jobs';
+} from '../api/backend';
 import { parseKifRecord } from '../lib/kif-parser';
 
 type KifusGenerateFormState = {

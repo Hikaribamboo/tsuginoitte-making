@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { startAnalysisStream, type AnalysisLine } from '../api/engine';
+import { startAnalysisStream, type AnalysisLine } from '../api/backend';
 import { pvToJapanese } from '../lib/usi-to-label';
 import { parseSfen } from '../lib/sfen';
 

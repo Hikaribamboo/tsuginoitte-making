@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase } from './rpc';
 import type { FavoritePosition } from '../types/problem';
 import type { ProblemCreatorDraft } from '../lib/problem-draft';
 import { isProblemCreatorDraft } from '../lib/problem-draft';

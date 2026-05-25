@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../api/rpc';
 import {
   cancelMakingJob,
+  getMakingPathOptions,
   listMakingJobs,
   startMakingJob,
   type MakingJobSnapshot,
-} from '../api/making-jobs';
-import { getMakingPathOptions } from '../api/making-options';
+} from '../api/backend';
 import { createWorkspace, listWorkspaces, saveWorkspaceDraft } from '../api/workspaces';
 
 type SourceKind = 'kifs' | 'books';

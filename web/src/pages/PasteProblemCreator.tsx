@@ -18,7 +18,7 @@ import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches, extractBr
 import type { KifBranch, KifTreeNode } from '../lib/kif-parser';
 import { saveProblem, getNextDisplayNo, saveMultipleProblems, saveLearningProblem } from '../api/problems';
 import { getWorkspace, saveWorkspaceDraft, deleteWorkspace } from '../api/workspaces';
-import { generateExplanations } from '../api/engine';
+import { generateExplanations } from '../api/backend';
 import { DEFAULT_PROMPT } from '../lib/constants';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
 import type { ChoiceDraft } from '../types/problem';

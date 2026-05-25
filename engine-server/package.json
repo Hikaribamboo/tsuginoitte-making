@@ -1,0 +1,27 @@
+{
+  "name": "tsuginoitte-engine-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "cross-env ENABLE_SHOGI_ENGINE=1 PORT=8765 tsx watch --no-cache src/index.ts",
+    "start": "cross-env ENABLE_SHOGI_ENGINE=1 PORT=8765 tsx --no-cache src/index.ts",
+    "dev:windows-tailscale": "cross-env ENABLE_SHOGI_ENGINE=1 HOST=100.65.146.62 PORT=8765 AMTS_ENGINE_THREADS=4 AMTS_ENGINE_HASH_MB=1024 AMTS_ENGINE_OWN_BOOK=false FV_SCALE=40 AMTS_FINALIZE_DEPTH=24 tsx watch --no-cache src/index.ts",
+    "start:windows-tailscale": "cross-env ENABLE_SHOGI_ENGINE=1 HOST=100.65.146.62 PORT=8765 AMTS_ENGINE_THREADS=4 AMTS_ENGINE_HASH_MB=1024 AMTS_ENGINE_OWN_BOOK=false FV_SCALE=40 AMTS_FINALIZE_DEPTH=24 tsx --no-cache src/index.ts",
+    "kif-problem:batch": "tsx --no-cache src/features/problem-generation/kif/tools/batchGenerate.ts",
+    "dev:with-web-build": "cd ../web && npm run build && cd ../engine-server && npm run dev"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.1",
+    "express": "^4.19.2",
+    "@supabase/supabase-js": "^2.43.4"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "cross-env": "^10.1.0",
+    "tsx": "^4.11.0",
+    "typescript": "^5.4.5"
+  }
+}

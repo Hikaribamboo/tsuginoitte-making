@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase } from './rpc';
 import type {
   ProductionChoice,
   ProductionProblem,

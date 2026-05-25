@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase } from './rpc';
 
 export type KifuStatus = 'pending' | 'processing' | 'done' | 'failed' | 'impossible' | 'unknown';
 

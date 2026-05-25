@@ -2,12 +2,36 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "Start Engine Server",
+			"label": "web dev server",
 			"type": "shell",
-			"command": "npm run start",
+			"command": "cd web && npm run dev -- --host 127.0.0.1 --port 5173",
 			"isBackground": true,
 			"problemMatcher": [],
 			"group": "none"
-		}
+		},
+		{
+			"label": "engine-server dev",
+			"type": "shell",
+			"command": "cd engine-server && npm run dev",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "none"
+		},
+		{
+			"label": "engine-server dev with web build",
+			"type": "shell",
+			"command": "cd web && npm run build && cd ../engine-server && npm run dev",
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "none"
+		},
+		{
+			"label": "ai-server dev",
+			"type": "shell",
+			"command": "cd ai-server && npm run dev",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "none"
+		},
 	]
 }

@@ -12,7 +12,7 @@ import { useBoardStore } from "../hooks/useBoardStore";
 import { parseSfen, toUsiSquare } from "../lib/sfen";
 import { usiToLabel, pvToJapanese } from "../lib/usi-to-label";
 import { cpToWinRatePercentFromRootSfen } from "../lib/eval-percent";
-import { evaluatePosition, generateExplanations } from "../api/engine";
+import { evaluatePosition, generateExplanations } from "../api/backend";
 import { getNextDisplayNoByMode, saveLearningProblem } from "../api/problems";
 import {
   deleteFavorite,

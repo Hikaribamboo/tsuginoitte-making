@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom';
 import Board from '../components/Board';
 import MiniBoard from '../components/MiniBoard';
-import { recognizeShogiPosition } from '../api/image-position';
+import { recognizeShogiPosition } from '../api/backend';
 import {
   createWorkspace,
   listWorkspaces,

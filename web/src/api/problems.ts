@@ -1,5 +1,5 @@
 import type { LearningMode, LearningProblemInput } from '../types/problem';
-import { supabase } from '../lib/supabase';
+import { supabase } from './rpc';
 
 const DISPLAY_NO_MIN = 49;
 
