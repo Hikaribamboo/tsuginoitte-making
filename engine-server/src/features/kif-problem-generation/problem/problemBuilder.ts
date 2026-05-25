@@ -1,10 +1,10 @@
 // src/problem/problemBuilder.ts
 import { cpToWinRatePercentFromRootSfen } from "../evaluation/cpToWinRate";
 import type { EngineClient, PvInfo } from "../../../services/engine/engineClient";
-import type { ChoiceOut, ProblemOut } from "../sql/buildSql";
 import type { ScanResult } from "../types";
 import { buildStateAtSForLabel } from "./buildStateAtSForLabel";
 import { normalizeCpToSentePerspective } from "./rootEval";
+import type { ChoiceOut, ProblemOut } from "./types";
 
 type Color = "b" | "w";
 
