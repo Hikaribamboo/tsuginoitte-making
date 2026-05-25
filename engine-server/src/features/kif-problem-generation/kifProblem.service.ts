@@ -78,6 +78,6 @@ export async function runKifProblemJob(args: KifProblemJobArgs): Promise<KifProb
   }
 
   const tsxPath = path.join(rootDir, 'node_modules', '.bin', 'tsx');
-  await runCommand(tsxPath, ['--no-cache', 'src/features/problem-generation/kif/tools/batchGenerate.ts'], rootDir, env);
+  await runCommand(tsxPath, ['--no-cache', 'src/features/kif-problem-generation/tools/batchGenerate.ts'], rootDir, env);
   return { notes: ['batchGenerate completed'] };
 }

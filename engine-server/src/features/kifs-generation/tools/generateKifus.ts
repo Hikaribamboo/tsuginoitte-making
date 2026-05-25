@@ -2,12 +2,12 @@ import "dotenv/config";
 import path from 'path';
 import { createClient } from "@supabase/supabase-js";
 
-import { createUsiEngineClient, defaultEnginePath } from "../../../services/engine/engineClient";
-import { selfPlayConfig } from "../../kif-problem-generation/configs/selfPlayConfig.js";
-import { loadBasePositions } from "../../kif-problem-generation/selfPlay/basePositions.js";
-import { buildKifuInsertRow, insertKifuRows, validateKifuInsertRow } from "../../kif-problem-generation/selfPlay/kifuInsert.js";
-import { runSelfPlayGame } from "../../kif-problem-generation/selfPlay/runSelfPlayGame.js";
-import type { KifuInsertRow } from "../../kif-problem-generation/selfPlay/types.js";
+import { createUsiEngineClient } from "../../../services/engine/engineClient";
+import { selfPlayConfig } from "../configs/selfPlayConfig.js";
+import { loadBasePositions } from "../selfPlay/basePositions.js";
+import { buildKifuInsertRow, insertKifuRows, validateKifuInsertRow } from "../selfPlay/kifuInsert.js";
+import { runSelfPlayGame } from "../selfPlay/runSelfPlayGame.js";
+import type { KifuInsertRow } from "../selfPlay/types.js";
 
 function mustEnv(name: string): string {
   const v = process.env[name];

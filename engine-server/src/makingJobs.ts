@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import path from 'path';
-import { runBookProblemJob } from './features/problem-generation/books/bookProblem.service.js';
-import { runKifProblemJob } from './features/problem-generation/kif/kifProblem.service.js';
+import { runBookProblemJob } from './features/book-problem-generation/bookProblem.service.js';
+import { runKifProblemJob } from './features/kif-problem-generation/kifProblem.service.js';
 import { runKifsGenerationJob } from './features/kifs-generation/kifsGeneration.service.js';
 
 type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';

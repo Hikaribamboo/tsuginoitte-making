@@ -2,11 +2,11 @@ import "dotenv/config";
 import path from 'path';
 import { createClient } from "@supabase/supabase-js";
 
-import { createChoiceLabel } from "../../../kif-problem-generation/label/createChoiceLabel.js";
-import { config } from "../../../kif-problem-generation/config.js";
-import { createUsiEngineClient, defaultEnginePath, getEnginePath } from "../../../../services/engine/engineClient";
-import { buildProblemOutFromScan } from "../../../kif-problem-generation/problem/problemBuilder.js";
-import { scanGame } from "../../../kif-problem-generation/scanGame.js";
+import { createUsiEngineClient, getEnginePath } from "../../../services/engine/engineClient";
+import { config } from "../config.js";
+import { createChoiceLabel } from "../label/createChoiceLabel.js";
+import { buildProblemOutFromScan } from "../problem/problemBuilder.js";
+import { scanGame } from "../scanGame.js";
 
 type KifuRow = {
   id: number;
