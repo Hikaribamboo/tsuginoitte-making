@@ -1,5 +1,5 @@
 {
-  "sfen": "lnsgkgsnl/1r7/p1pppp1pp/6p2/1p7/2P1P4/PP1P1PPPP/1B2R4/LNSGKGSNL b - 1",
+  "sfen": "ln3gsnl/1r1sg1k2/p1pp1p1pp/4p1p2/1p7/2PP5/PPBSPPPPP/4R4/LN1GKGSNL b - 1",
   "sideToMove": "b",
   "hands": "-",
   "moveNumber": 1,
@@ -42,53 +42,53 @@
     {
       "file": 7,
       "rank": 1,
-      "piece": "s",
-      "confidence": 0.9998179078102112,
+      "piece": "empty",
+      "confidence": 0.9927323460578918,
       "topCandidates": [
         {
-          "piece": "s",
-          "confidence": 0.9998179078102112
+          "piece": "empty",
+          "confidence": 0.9927323460578918
         },
         {
-          "piece": "g",
-          "confidence": 6.748075247742236e-05
+          "piece": "k",
+          "confidence": 0.0032068872824311256
         }
       ],
-      "status": "confirmed"
+      "status": "empty"
     },
     {
       "file": 6,
       "rank": 1,
-      "piece": "g",
-      "confidence": 0.9999829530715942,
+      "piece": "empty",
+      "confidence": 0.9928228855133057,
       "topCandidates": [
         {
-          "piece": "g",
-          "confidence": 0.9999829530715942
+          "piece": "empty",
+          "confidence": 0.9928228855133057
         },
         {
-          "piece": "L",
-          "confidence": 6.3618176682211924e-06
+          "piece": "k",
+          "confidence": 0.0031743678264319897
         }
       ],
-      "status": "confirmed"
+      "status": "empty"
     },
     {
       "file": 5,
       "rank": 1,
-      "piece": "k",
-      "confidence": 0.9534543752670288,
+      "piece": "empty",
+      "confidence": 0.9927771091461182,
       "topCandidates": [
         {
-          "piece": "k",
-          "confidence": 0.9534543752670288
+          "piece": "empty",
+          "confidence": 0.9927771091461182
         },
         {
-          "piece": "b",
-          "confidence": 0.029415452852845192
+          "piece": "k",
+          "confidence": 0.003189951414242387
         }
       ],
-      "status": "confirmed"
+      "status": "empty"
     },
     {
       "file": 4,
@@ -102,7 +102,7 @@
         },
         {
           "piece": "L",
-          "confidence": 1.0064070920634549e-05
+          "confidence": 1.0058744919660967e-05
         }
       ],
       "status": "confirmed"
@@ -196,15 +196,15 @@
       "file": 7,
       "rank": 2,
       "piece": "empty",
-      "confidence": 0.9921620488166809,
+      "confidence": 0.9921453595161438,
       "topCandidates": [
         {
           "piece": "empty",
-          "confidence": 0.9921620488166809
+          "confidence": 0.9921453595161438
         },
         {
           "piece": "k",
-          "confidence": 0.003412841120734811
+          "confidence": 0.003420099848881364
         }
       ],
       "status": "empty"
@@ -212,50 +212,50 @@
     {
       "file": 6,
       "rank": 2,
-      "piece": "empty",
-      "confidence": 0.9921661615371704,
+      "piece": "s",
+      "confidence": 0.9998677968978882,
       "topCandidates": [
         {
-          "piece": "empty",
-          "confidence": 0.9921661615371704
+          "piece": "s",
+          "confidence": 0.9998677968978882
         },
         {
-          "piece": "k",
-          "confidence": 0.0034112315624952316
+          "piece": "g",
+          "confidence": 9.291491005569696e-05
         }
       ],
-      "status": "empty"
+      "status": "confirmed"
     },
     {
       "file": 5,
       "rank": 2,
-      "piece": "empty",
-      "confidence": 0.9921748042106628,
+      "piece": "g",
+      "confidence": 0.9999914169311523,
       "topCandidates": [
         {
-          "piece": "empty",
-          "confidence": 0.9921748042106628
+          "piece": "g",
+          "confidence": 0.9999914169311523
         },
         {
-          "piece": "k",
-          "confidence": 0.0034076112788170576
+          "piece": "p",
+          "confidence": 2.0758593564096373e-06
         }
       ],
-      "status": "empty"
+      "status": "confirmed"
     },
     {
       "file": 4,
       "rank": 2,
       "piece": "empty",
-      "confidence": 0.9921882152557373,
+      "confidence": 0.9921546578407288,
       "topCandidates": [
         {
           "piece": "empty",
-          "confidence": 0.9921882152557373
+          "confidence": 0.9921546578407288
         },
         {
           "piece": "k",
-          "confidence": 0.0034031060058623552
+          "confidence": 0.0034158211201429367
         }
       ],
       "status": "empty"
@@ -263,19 +263,19 @@
     {
       "file": 3,
       "rank": 2,
-      "piece": "empty",
-      "confidence": 0.9921882152557373,
+      "piece": "k",
+      "confidence": 0.9479937553405762,
       "topCandidates": [
         {
-          "piece": "empty",
-          "confidence": 0.9921882152557373
+          "piece": "k",
+          "confidence": 0.9479937553405762
         },
         {
-          "piece": "k",
-          "confidence": 0.0034031060058623552
+          "piece": "b",
+          "confidence": 0.031018761917948723
         }
       ],
-      "status": "empty"
+      "status": "confirmed"
     },
     {
       "file": 2,
@@ -382,19 +382,19 @@
     {
       "file": 5,
       "rank": 3,
-      "piece": "p",
-      "confidence": 0.9999998807907104,
+      "piece": "empty",
+      "confidence": 0.9921935796737671,
       "topCandidates": [
         {
-          "piece": "p",
-          "confidence": 0.9999998807907104
+          "piece": "empty",
+          "confidence": 0.9921935796737671
         },
         {
-          "piece": "P",
-          "confidence": 1.2688290951246017e-07
+          "piece": "k",
+          "confidence": 0.0034011679235845804
         }
       ],
-      "status": "confirmed"
+      "status": "empty"
     },
     {
       "file": 4,
@@ -408,7 +408,7 @@
         },
         {
           "piece": "P",
-          "confidence": 1.4357219413341227e-07
+          "confidence": 1.3941090060143324e-07
         }
       ],
       "status": "confirmed"
@@ -535,33 +535,33 @@
     {
       "file": 5,
       "rank": 4,
-      "piece": "empty",
-      "confidence": 0.9923393726348877,
+      "piece": "p",
+      "confidence": 0.9999998807907104,
       "topCandidates": [
         {
-          "piece": "empty",
-          "confidence": 0.9923393726348877
+          "piece": "p",
+          "confidence": 0.9999998807907104
         },
         {
-          "piece": "k",
-          "confidence": 0.003345692763105035
+          "piece": "P",
+          "confidence": 1.6057930452006985e-07
         }
       ],
-      "status": "empty"
+      "status": "confirmed"
     },
     {
       "file": 4,
       "rank": 4,
       "piece": "empty",
-      "confidence": 0.9923438429832458,
+      "confidence": 0.9923087358474731,
       "topCandidates": [
         {
           "piece": "empty",
-          "confidence": 0.9923438429832458
+          "confidence": 0.9923087358474731
         },
         {
           "piece": "k",
-          "confidence": 0.00334647367708385
+          "confidence": 0.003359614172950387
         }
       ],
       "status": "empty"
@@ -672,15 +672,15 @@
       "file": 6,
       "rank": 5,
       "piece": "empty",
-      "confidence": 0.9921625256538391,
+      "confidence": 0.9921624064445496,
       "topCandidates": [
         {
           "piece": "empty",
-          "confidence": 0.9921625256538391
+          "confidence": 0.9921624064445496
         },
         {
           "piece": "k",
-          "confidence": 0.0034124848898500204
+          "confidence": 0.0034124956000596285
         }
       ],
       "status": "empty"
@@ -816,7 +816,7 @@
         },
         {
           "piece": "p",
-          "confidence": 8.859277045303315e-07
+          "confidence": 8.860755542627885e-07
         }
       ],
       "status": "confirmed"
@@ -824,50 +824,50 @@
     {
       "file": 6,
       "rank": 6,
-      "piece": "empty",
-      "confidence": 0.9922162294387817,
-      "topCandidates": [
-        {
-          "piece": "empty",
-          "confidence": 0.9922162294387817
-        },
-        {
-          "piece": "k",
-          "confidence": 0.0033922498114407063
-        }
-      ],
-      "status": "empty"
-    },
-    {
-      "file": 5,
-      "rank": 6,
       "piece": "P",
-      "confidence": 0.9999974966049194,
+      "confidence": 0.9999973773956299,
       "topCandidates": [
         {
           "piece": "P",
-          "confidence": 0.9999974966049194
+          "confidence": 0.9999973773956299
         },
         {
           "piece": "p",
-          "confidence": 2.157120434276294e-06
+          "confidence": 2.0733648398163496e-06
         }
       ],
       "status": "confirmed"
     },
     {
-      "file": 4,
+      "file": 5,
       "rank": 6,
       "piece": "empty",
-      "confidence": 0.9922480583190918,
+      "confidence": 0.9923426508903503,
       "topCandidates": [
         {
           "piece": "empty",
-          "confidence": 0.9922480583190918
+          "confidence": 0.9923426508903503
         },
         {
           "piece": "k",
-          "confidence": 0.00338163785636425
+          "confidence": 0.0033463516738265753
+        }
+      ],
+      "status": "empty"
+    },
+    {
+      "file": 4,
+      "rank": 6,
+      "piece": "empty",
+      "confidence": 0.9922938346862793,
+      "topCandidates": [
+        {
+          "piece": "empty",
+          "confidence": 0.9922938346862793
+        },
+        {
+          "piece": "k",
+          "confidence": 0.003364678006619215
         }
       ],
       "status": "empty"
@@ -960,33 +960,33 @@
     {
       "file": 7,
       "rank": 7,
-      "piece": "empty",
-      "confidence": 0.9921533465385437,
+      "piece": "B",
+      "confidence": 0.9994704127311707,
       "topCandidates": [
         {
-          "piece": "empty",
-          "confidence": 0.9921533465385437
+          "piece": "B",
+          "confidence": 0.9994704127311707
         },
         {
-          "piece": "k",
-          "confidence": 0.003416686551645398
+          "piece": "G",
+          "confidence": 0.00023163240985013545
         }
       ],
-      "status": "empty"
+      "status": "confirmed"
     },
     {
       "file": 6,
       "rank": 7,
-      "piece": "P",
-      "confidence": 0.9999977350234985,
+      "piece": "S",
+      "confidence": 0.999489426612854,
       "topCandidates": [
         {
-          "piece": "P",
-          "confidence": 0.9999977350234985
+          "piece": "S",
+          "confidence": 0.999489426612854
         },
         {
-          "piece": "p",
-          "confidence": 1.8724384744928102e-06
+          "piece": "G",
+          "confidence": 0.0004758863360621035
         }
       ],
       "status": "confirmed"
@@ -994,19 +994,19 @@
     {
       "file": 5,
       "rank": 7,
-      "piece": "empty",
-      "confidence": 0.9921746850013733,
+      "piece": "P",
+      "confidence": 0.9999978542327881,
       "topCandidates": [
         {
-          "piece": "empty",
-          "confidence": 0.9921746850013733
+          "piece": "P",
+          "confidence": 0.9999978542327881
         },
         {
-          "piece": "k",
-          "confidence": 0.0034080350305885077
+          "piece": "p",
+          "confidence": 1.7612443343750783e-06
         }
       ],
-      "status": "empty"
+      "status": "confirmed"
     },
     {
       "file": 4,
@@ -1020,7 +1020,7 @@
         },
         {
           "piece": "p",
-          "confidence": 1.4923989510862157e-06
+          "confidence": 1.493650529482693e-06
         }
       ],
       "status": "confirmed"
@@ -1096,33 +1096,33 @@
     {
       "file": 8,
       "rank": 8,
-      "piece": "B",
-      "confidence": 0.999415397644043,
+      "piece": "empty",
+      "confidence": 0.9922569990158081,
       "topCandidates": [
         {
-          "piece": "B",
-          "confidence": 0.999415397644043
+          "piece": "empty",
+          "confidence": 0.9922569990158081
         },
         {
-          "piece": "L",
-          "confidence": 0.00020014219626318663
+          "piece": "k",
+          "confidence": 0.0033781873062253
         }
       ],
-      "status": "confirmed"
+      "status": "empty"
     },
     {
       "file": 7,
       "rank": 8,
       "piece": "empty",
-      "confidence": 0.9922441840171814,
+      "confidence": 0.9922530055046082,
       "topCandidates": [
         {
           "piece": "empty",
-          "confidence": 0.9922441840171814
+          "confidence": 0.9922530055046082
         },
         {
           "piece": "k",
-          "confidence": 0.0033835924696177244
+          "confidence": 0.003379979869350791
         }
       ],
       "status": "empty"
@@ -1131,15 +1131,15 @@
       "file": 6,
       "rank": 8,
       "piece": "empty",
-      "confidence": 0.9922509789466858,
+      "confidence": 0.9922539591789246,
       "topCandidates": [
         {
           "piece": "empty",
-          "confidence": 0.9922509789466858
+          "confidence": 0.9922539591789246
         },
         {
           "piece": "k",
-          "confidence": 0.0033807451836764812
+          "confidence": 0.003379728412255645
         }
       ],
       "status": "empty"
@@ -1250,15 +1250,15 @@
       "file": 8,
       "rank": 9,
       "piece": "N",
-      "confidence": 0.9999616146087646,
+      "confidence": 0.9999613761901855,
       "topCandidates": [
         {
           "piece": "N",
-          "confidence": 0.9999616146087646
+          "confidence": 0.9999613761901855
         },
         {
           "piece": "s",
-          "confidence": 8.98531470738817e-06
+          "confidence": 9.030472028825898e-06
         }
       ],
       "status": "confirmed"
@@ -1266,19 +1266,19 @@
     {
       "file": 7,
       "rank": 9,
-      "piece": "S",
-      "confidence": 0.9998390674591064,
+      "piece": "empty",
+      "confidence": 0.9922152161598206,
       "topCandidates": [
         {
-          "piece": "S",
-          "confidence": 0.9998390674591064
+          "piece": "empty",
+          "confidence": 0.9922152161598206
         },
         {
-          "piece": "G",
-          "confidence": 0.00014885939890518785
+          "piece": "k",
+          "confidence": 0.003393543651327491
         }
       ],
-      "status": "confirmed"
+      "status": "empty"
     },
     {
       "file": 6,
@@ -1292,7 +1292,7 @@
         },
         {
           "piece": "l",
-          "confidence": 3.6922278923157137e-06
+          "confidence": 3.6959904718969483e-06
         }
       ],
       "status": "confirmed"
@@ -1415,7 +1415,7 @@
     }
   ],
   "imageId": "input",
-  "imagePath": "/var/folders/71/9gylvt9j0_75zw80r4kc1zc80000gn/T/tsuginoitte-shogi-XtR94e/input.png",
+  "imagePath": "/var/folders/71/9gylvt9j0_75zw80r4kc1zc80000gn/T/tsuginoitte-shogi-QUeUL7/input.png",
   "modelPath": "/Users/hikari/Desktop/tsuginoitte-making/tsuginoitte-making/engine-server/python/recognition/models/resnet18_shogi_piece_classifier.pt",
   "boardCropPath": "/Users/hikari/Desktop/tsuginoitte-making/tsuginoitte-making/engine-server/python/recognition/board_crops/input_board.png",
   "cropInfo": {
@@ -3898,7 +3898,7 @@
       "resizedBoard900WithGrid": "/Users/hikari/Desktop/tsuginoitte-making/tsuginoitte-making/engine-server/python/recognition/reports/debug_06_resized_board_900_with_grid.png"
     },
     "debugLog": {
-      "inputImagePath": "/var/folders/71/9gylvt9j0_75zw80r4kc1zc80000gn/T/tsuginoitte-shogi-XtR94e/input.png",
+      "inputImagePath": "/var/folders/71/9gylvt9j0_75zw80r4kc1zc80000gn/T/tsuginoitte-shogi-QUeUL7/input.png",
       "inputSize": {
         "width": 360,
         "height": 270
@@ -6396,7 +6396,7 @@
     "cellsMontage": "/Users/hikari/Desktop/tsuginoitte-making/tsuginoitte-making/engine-server/python/recognition/reports/debug_07_cells_montage.png"
   },
   "debugLog": {
-    "inputImagePath": "/var/folders/71/9gylvt9j0_75zw80r4kc1zc80000gn/T/tsuginoitte-shogi-XtR94e/input.png",
+    "inputImagePath": "/var/folders/71/9gylvt9j0_75zw80r4kc1zc80000gn/T/tsuginoitte-shogi-QUeUL7/input.png",
     "inputSize": {
       "width": 360,
       "height": 270

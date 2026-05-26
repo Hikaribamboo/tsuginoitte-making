@@ -28,12 +28,10 @@ async function main() {
   const payload: KifuInsertRow[] = [];
   const totalGamesLimit = parseOptionalPositiveInt(process.env.AMTS_SP_TOTAL_GAMES);
   const engineEvalDir = process.env.EVAL_DIR?.trim() || path.join(path.dirname(selfPlayConfig.engineBlack.enginePath), '..', 'eval');
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const supabase = supabaseUrl && serviceKey
-    ? createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } })
-    : null;
-  const basePositions = await loadBasePositions(supabase ? (supabase as any) : undefined);
+  const supabaseUrl = mustEnv("SUPABASE_URL");
+  const serviceKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
+  const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+  const basePositions = await loadBasePositions(supabase as any);
 
   const blackEngine = createUsiEngineClient(selfPlayConfig.engineBlack.enginePath, engineEvalDir);
   const whiteEngine = createUsiEngineClient(selfPlayConfig.engineWhite.enginePath, engineEvalDir);
@@ -91,12 +89,6 @@ async function main() {
     }
 
     if (!selfPlayConfig.insertToSupabase) {
-      return;
-    }
-
-    if (!supabase) {
-      mustEnv("SUPABASE_URL");
-      mustEnv("SUPABASE_SERVICE_ROLE_KEY");
       return;
     }
 

@@ -10,7 +10,7 @@ Book filesから問題を作る機能です。Python book-maker を起動する�
 
 ## kifs-generation
 
-base position から self-play で棋譜を生成し、`kifus` への挿入データを作る機能です。base positions、self-play 設定、self-play runner、kifu insert row builder はここに置きます。
+`making_base_positions` の active な base position から self-play で棋譜を生成し、`kifus` への挿入データを作る機能です。base positions loader、self-play 設定、self-play runner、kifu insert row builder はここに置きます。
 
 ## recognition
 

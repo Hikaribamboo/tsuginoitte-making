@@ -1,4 +1,3 @@
-import basePositionsJson from "../data/basePositions.json";
 import type { BasePosition } from "./types";
 
 type BasePositionRow = {
@@ -67,7 +66,7 @@ function parseBasePositions(raw: unknown, sourceLabel: string): BasePosition[] {
   return out;
 }
 
-async function loadDbBasePositions(supabase: SupabaseLike): Promise<BasePosition[]> {
+export async function loadBasePositions(supabase: SupabaseLike): Promise<BasePosition[]> {
   const { data, error } = await supabase
     .from("making_base_positions")
     .select("id, initial_sfen, tags")
@@ -75,28 +74,16 @@ async function loadDbBasePositions(supabase: SupabaseLike): Promise<BasePosition
     .order("created_at", { ascending: true });
 
   if (error) {
-    console.warn(`[self-play] could not load making_base_positions: ${error.message ?? String(error)}`);
-    return [];
+    throw new Error(`could not load active making_base_positions: ${error.message ?? String(error)}`);
   }
 
   const rows = (data ?? []).map((row) => ({
     ...row,
     tags: row.tags ?? [],
   }));
-  return parseBasePositions(rows, "making_base_positions");
-}
-
-export async function loadBasePositions(supabase?: SupabaseLike): Promise<BasePosition[]> {
-  const bundled = parseBasePositions(basePositionsJson, "basePositions.json");
-  const fromDb = supabase ? await loadDbBasePositions(supabase) : [];
-  const merged = new Map<string, BasePosition>();
-
-  for (const base of bundled) merged.set(base.id, base);
-  for (const base of fromDb) merged.set(base.id, base);
-
-  const out = Array.from(merged.values());
+  const out = parseBasePositions(rows, "making_base_positions");
   if (out.length === 0) {
-    throw new Error("basePositions has no entries");
+    throw new Error("making_base_positions has no active entries");
   }
 
   return out;
