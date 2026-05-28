@@ -4,3 +4,4 @@ dist/
 *.local
 
 server/engines/
+engine-server/engines/eval/
