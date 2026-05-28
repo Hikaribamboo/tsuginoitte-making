@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'child_process';
+import { existsSync } from 'fs';
 import path from 'path';
 import { runBookProblemJob } from './features/book-problem-generation/bookProblem.service.js';
 import { runKifProblemJob } from './features/kif-problem-generation/kifProblem.service.js';
@@ -195,7 +196,39 @@ async function runCommand(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const shell = process.platform === 'win32';
+    const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
+    const diagnosticEnv = [
+      'ENGINE_PATH',
+      'EVAL_DIR',
+      'BOOK_PATH',
+      'BOOK_INDEX_FILE',
+      'STATE_FILE',
+      'AMTS_BATCH_SIZE',
+      'AMTS_MAX_PROBLEMS_PER_GAME',
+      'AMTS_MAX_SCAN_RESULTS_PER_GAME',
+      'AMTS_SCAN_DEPTH',
+      'AMTS_FINALIZE_DEPTH',
+      'AMTS_SUSPICIOUS_MIN_DIFF',
+      'AMTS_SUSPICIOUS_MAX_DIFF',
+    ]
+      .map((key) => `${key}=${env[key] ?? '(unset)'}`)
+      .join(' ');
+
+    appendLog(job, `[command] platform=${process.platform} shell=${shell ? 'true' : 'false'}`);
+    appendLog(job, `[command] cwd=${cwd} exists=${existsSync(cwd)}`);
+    appendLog(job, `[command] cmd=${cmd} exists=${existsSync(cmd)}`);
+    appendLog(job, `[command] args=${JSON.stringify(args)}`);
+    appendLog(job, `[command] pathKey=${pathKey} pathSet=${env[pathKey] ? 'true' : 'false'}`);
+    appendLog(job, `[command] env ${diagnosticEnv}`);
+
+    let child: ChildProcess;
+    try {
+      child = spawn(cmd, args, { cwd, env, shell, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (error) {
+      reject(error);
+      return;
+    }
     job.child = child;
 
     let stdoutBuffer = '';
