@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { existsSync } from "fs";
 import path from 'path';
 import { createClient } from "@supabase/supabase-js";
 
@@ -24,10 +25,24 @@ function parseOptionalPositiveInt(raw: string | undefined): number | null {
   return parsed;
 }
 
+function resolveEngineEvalDir(enginePath: string): string {
+  const fromEnv = process.env.EVAL_DIR?.trim();
+  if (fromEnv) return fromEnv;
+
+  const candidates = [
+    path.join(path.dirname(enginePath), 'eval'),
+    path.join(path.dirname(enginePath), '..', 'eval'),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
 async function main() {
   const payload: KifuInsertRow[] = [];
   const totalGamesLimit = parseOptionalPositiveInt(process.env.AMTS_SP_TOTAL_GAMES);
-  const engineEvalDir = process.env.EVAL_DIR?.trim() || path.join(path.dirname(selfPlayConfig.engineBlack.enginePath), '..', 'eval');
+  const engineEvalDir = resolveEngineEvalDir(selfPlayConfig.engineBlack.enginePath);
+  console.error(`[generateKifus] blackEnginePath=${selfPlayConfig.engineBlack.enginePath} exists=${existsSync(selfPlayConfig.engineBlack.enginePath)}`);
+  console.error(`[generateKifus] whiteEnginePath=${selfPlayConfig.engineWhite.enginePath} exists=${existsSync(selfPlayConfig.engineWhite.enginePath)}`);
+  console.error(`[generateKifus] engineEvalDir=${engineEvalDir} exists=${existsSync(engineEvalDir)}`);
   const supabaseUrl = mustEnv("SUPABASE_URL");
   const serviceKey = mustEnv("SUPABASE_SERVICE_ROLE_KEY");
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
