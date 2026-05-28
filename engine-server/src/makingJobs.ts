@@ -212,6 +212,7 @@ async function runCommand(
       'AMTS_FINALIZE_DEPTH',
       'AMTS_SUSPICIOUS_MIN_DIFF',
       'AMTS_SUSPICIOUS_MAX_DIFF',
+      'AMTS_DEBUG_ENGINE_IO',
     ]
       .map((key) => `${key}=${env[key] ?? '(unset)'}`)
       .join(' ');

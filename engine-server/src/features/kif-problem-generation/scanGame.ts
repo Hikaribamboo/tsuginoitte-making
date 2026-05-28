@@ -276,6 +276,24 @@ function computeUserCpFromGathered(args: { gathered: PvInfo[]; questionTurn: Col
   return userCp;
 }
 
+function formatTopInfos(infos: PvInfo[], turnAtS: Color, limit = 5): string {
+  const cp = infos
+    .filter((x) => x.evalType === "cp" && x.pv.length > 0)
+    .map((x) => ({
+      ...x,
+      eval: normalizeCpToSentePerspective(x.eval, turnAtS),
+    }));
+  const sorted =
+    turnAtS === "b"
+      ? [...cp].sort((a, b) => b.eval - a.eval)
+      : [...cp].sort((a, b) => a.eval - b.eval);
+
+  return sorted
+    .slice(0, limit)
+    .map((x) => `${x.pv[0]}:${x.eval}:${x.pv.join(" ")}`)
+    .join(" | ");
+}
+
 export async function scanGame(args: {
   engine: EngineClient;
   initialSfen: string;
@@ -298,6 +316,9 @@ export async function scanGame(args: {
     const movesToS = moves.slice(0, t);
     const turnAtS = getTurnAtS(initialTurn, t);
     const positionCommandS = buildPositionCommand(initialSfen, movesToS);
+    console.log(
+      `pass2候補: start t ${t}，intro ${introMoveUsi}，actual ${actualMoveUsi}，turn ${turnAtS}，position ${positionCommandS}`
+    );
 
     const bestRes = await engine.analyze({
       positionCommand: positionCommandS,
@@ -418,12 +439,14 @@ export async function scanGame(args: {
           if (userCp != null && rejectIfBestTooBadCp != null && userCp < -rejectIfBestTooBadCp) {
             gaveUp = true;
             giveUpReason = `ユーザー不利(早期) userCp ${userCp} 下限 ${rejectIfBestTooBadCp}`;
+            console.log(`pass2候補: early reject t ${t}，理由 ${giveUpReason}`);
             break outer;
           }
 
           if (userCp != null && rejectIfBestTooGoodCp != null && userCp > rejectIfBestTooGoodCp) {
             gaveUp = true;
             giveUpReason = `ユーザー有利すぎ(早期) userCp ${userCp} 上限 ${rejectIfBestTooGoodCp}`;
+            console.log(`pass2候補: early reject t ${t}，理由 ${giveUpReason}`);
             break outer;
           }
         }
@@ -445,6 +468,9 @@ export async function scanGame(args: {
 
           if (actualInfo) gathered = mergeUniqueByMove(gathered, [actualInfo]);
           hadActual = hasMove(gathered, actualMoveUsi);
+          console.log(
+            `pass2候補: actualIfMissing t ${t} depth ${depth} mp ${mp} found=${actualInfo ? "true" : "false"} hadActual=${hadActual}`
+          );
         }
 
         const endSumm = startTimer();
@@ -470,6 +496,10 @@ export async function scanGame(args: {
           foundWrong2: summary.foundWrong2,
         });
 
+        console.log(
+          `pass2候補: step t ${t} depth ${depth} mp ${mp} gathered=${gathered.length} hadActual=${hadActual} foundWrong2=${summary.foundWrong2} worstLoss=${summary.worstLoss} top=${formatTopInfos(gathered, turnAtS)}`
+        );
+
         if (mp === 10) summaryAtMp10 = summary;
 
         if (summary.foundWrong2) {
@@ -486,6 +516,7 @@ export async function scanGame(args: {
         if (giveUp.giveUp) {
           gaveUp = true;
           giveUpReason = giveUp.reason ?? "見込みなし";
+          console.log(`pass2候補: giveUp t ${t} depth ${depth} mp ${mp} 理由 ${giveUpReason}`);
           break outer;
         }
       }
@@ -539,6 +570,10 @@ export async function scanGame(args: {
           foundWrong2: summary.foundWrong2,
         });
 
+        console.log(
+          `pass2候補: step t ${t} depth ${depth} mp ${mp} gathered=${gathered.length} hadActual=${hasMove(gathered, actualMoveUsi)} foundWrong2=${summary.foundWrong2} worstLoss=${summary.worstLoss} top=${formatTopInfos(gathered, turnAtS)}`
+        );
+
         if (summary.foundWrong2) {
           ok = true;
           break outer;
@@ -553,6 +588,7 @@ export async function scanGame(args: {
         if (giveUp.giveUp) {
           gaveUp = true;
           giveUpReason = giveUp.reason ?? "見込みなし";
+          console.log(`pass2候補: giveUp t ${t} depth ${depth} mp ${mp} 理由 ${giveUpReason}`);
           break outer;
         }
       }
