@@ -55,7 +55,7 @@ export const config = {
     scale: envInt("FV_SCALE", 40, 1, 10000),
   },
 
-  suspiciousMinDiff: envInt("AMTS_SUSPICIOUS_MIN_DIFF", 500, 1, 10000),
+  suspiciousMinDiff: envInt("AMTS_SUSPICIOUS_MIN_DIFF", 300, 1, 10000),
   suspiciousMaxDiff: envInt("AMTS_SUSPICIOUS_MAX_DIFF", 1600, 1, 10000),
 
   maxCandidates: envInt("AMTS_MAX_CANDIDATES", 20, 1, 300),

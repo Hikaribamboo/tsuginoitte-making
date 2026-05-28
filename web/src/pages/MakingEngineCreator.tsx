@@ -90,7 +90,7 @@ const DEFAULT_KIFS_FORM: KifsFormState = {
   maxScanResultsPerGame: '12',
   scanDepth: '12',
   finalizeDepth: '26',
-  suspiciousMinDiff: '500',
+  suspiciousMinDiff: '300',
   suspiciousMaxDiff: '1600',
 };
 
