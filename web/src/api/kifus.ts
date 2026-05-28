@@ -67,7 +67,7 @@ export async function getKifuSummary(maxTagScanRows = 20000): Promise<KifuSummar
   while (sampledRows < maxTagScanRows) {
     const upper = offset + pageSize - 1;
     const { data, error } = await supabase
-      .from('kifus')
+      .from('making_kifus')
       .select('status, tags')
       .range(offset, upper);
     if (error) throw error;
@@ -114,18 +114,24 @@ export async function createKifus(inputs: CreateKifuInput[]): Promise<number> {
   if (inputs.length === 0) return 0;
 
   const payload = inputs.map((input) => ({
+    source_type: 'imported',
+    source_ref: null,
     initial_sfen: input.initialSfen,
     moves: input.moves.join(' '),
     status: 'pending',
     tags: input.tags ?? [],
     base_position_id: input.basePositionId ?? null,
+    source_payload: {
+      created_from: 'making_kifus_generator',
+      moves_count: input.moves.length,
+    },
   }));
 
   const chunkSize = 500;
   let inserted = 0;
   for (let i = 0; i < payload.length; i += chunkSize) {
     const chunk = payload.slice(i, i + chunkSize);
-    const { error } = await supabase.from('kifus').insert(chunk);
+    const { error } = await supabase.from('making_kifus').insert(chunk);
     if (error) throw error;
     inserted += chunk.length;
   }

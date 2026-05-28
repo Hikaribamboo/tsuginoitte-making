@@ -78,7 +78,7 @@ const MakingKifusGenerator: React.FC = () => {
       const nextSummary = await getKifuSummary();
       setSummary(nextSummary);
     } catch (nextError: any) {
-      setError(nextError?.message ?? 'kifus集計の取得に失敗しました');
+      setError(nextError?.message ?? 'making_kifus集計の取得に失敗しました');
     } finally {
       setSummaryLoading(false);
     }
@@ -215,7 +215,7 @@ const MakingKifusGenerator: React.FC = () => {
 
       const inserted = await createKifus(parsedRows);
       await refreshSummary();
-      setMessage(`kifus に ${inserted} 件保存しました（スキップ: ${skipped} 件）`);
+      setMessage(`making_kifus に ${inserted} 件保存しました（スキップ: ${skipped} 件）`);
     } catch (nextError: any) {
       setError(nextError?.message ?? '棋譜アップロードに失敗しました');
     } finally {
@@ -229,7 +229,7 @@ const MakingKifusGenerator: React.FC = () => {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-xl font-semibold text-slate-900">kifs生成</h2>
-            <div className="text-sm text-slate-600">自己対局でkifusを作成し、棋譜ファイルをkifusへ投入します。</div>
+            <div className="text-sm text-slate-600">自己対局でmaking_kifusを作成し、棋譜ファイルをmaking_kifusへ投入します。</div>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <Link to="/making" className="rounded-md border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50">
@@ -371,12 +371,12 @@ const MakingKifusGenerator: React.FC = () => {
               {uploading ? <span className="text-sm text-slate-500">アップロード中...</span> : null}
             </div>
             <div className="mt-2 text-xs text-slate-500">
-              KIF / SFEN / `position sfen ... moves ...` を解析して `kifus` テーブルに保存します。
+              KIF / SFEN / `position sfen ... moves ...` を解析して `making_kifus` テーブルに保存します。
             </div>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="mb-3 text-base font-semibold text-slate-900">kifusテーブル集計</h3>
+            <h3 className="mb-3 text-base font-semibold text-slate-900">making_kifusテーブル集計</h3>
             {summaryLoading ? (
               <div className="text-sm text-slate-500">集計中...</div>
             ) : !summary ? (

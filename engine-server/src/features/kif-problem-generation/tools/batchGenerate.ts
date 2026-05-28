@@ -12,6 +12,7 @@ type KifuRow = {
   id: number;
   initial_sfen: string;
   moves: string;
+  source_ref?: string | null;
 };
 
 function mustEnv(name: string): string {
@@ -55,7 +56,7 @@ export async function main() {
   const batchStartMs = Date.now();
 
   try {
-    const { data, error } = await supabase.rpc("claim_kifus", {
+    const { data, error } = await supabase.rpc("claim_making_kifus", {
       batch_size: config.batch.generateBatchSize,
     });
     if (error) throw error;
@@ -68,7 +69,7 @@ export async function main() {
     const createdAt = new Date().toISOString();
     const prompt = "最善手を選んでください";
 
-    const reviewProblemsPayload: Array<{
+    const draftProblemsPayload: Array<{
       created_at: string;
       prompt: string;
       root_sfen: string;
@@ -76,9 +77,13 @@ export async function main() {
       intro_moves_usi: string[];
       root_eval_cp: number;
       root_eval_percent: number;
+      source_type: string;
+      source_ref: string;
+      source_payload: Record<string, unknown>;
+      source_snapshot: Record<string, unknown>;
     }> = [];
 
-    const reviewChoicesStash: Array<{
+    const draftChoicesStash: Array<{
       tmpIndex: number;
       choice_id: number;
       usi: string;
@@ -87,6 +92,7 @@ export async function main() {
       explanation: string;
       line: string[];
       label: string;
+      source_snapshot: Record<string, unknown>;
     }> = [];
 
     const doneKifuIds: number[] = [];
@@ -132,8 +138,9 @@ export async function main() {
 
           if (!out) continue;
 
-          const tmpIndex = reviewProblemsPayload.length;
-          reviewProblemsPayload.push({
+          const tmpIndex = draftProblemsPayload.length;
+          const sourceRef = `making_kifu:${kifu.id}:problem:${built + 1}`;
+          draftProblemsPayload.push({
             created_at: createdAt,
             prompt: out.prompt,
             root_sfen: out.rootSfen,
@@ -141,10 +148,23 @@ export async function main() {
             intro_moves_usi: out.introMovesUsi,
             root_eval_cp: out.rootEvalCp,
             root_eval_percent: out.rootEvalPercent,
+            source_type: "kif_problem_generation",
+            source_ref: sourceRef,
+            source_payload: {
+              source_kifu_id: kifu.id,
+              source_kifu_ref: kifu.source_ref ?? null,
+              generated_at: createdAt,
+              problem_index_in_kifu: built + 1,
+            },
+            source_snapshot: {
+              source: "batchGenerate",
+              source_kifu_id: kifu.id,
+              source_ref: sourceRef,
+            },
           });
 
           for (const c of out.choices) {
-            reviewChoicesStash.push({
+            draftChoicesStash.push({
               tmpIndex,
               choice_id: c.choiceId,
               usi: c.usi,
@@ -153,6 +173,11 @@ export async function main() {
               explanation: "",
               line: c.line,
               label: createChoiceLabel({ state: out.stateForLabelAtS, usi: c.usi }),
+              source_snapshot: {
+                source: "batchGenerate",
+                source_kifu_id: kifu.id,
+                problem_source_ref: sourceRef,
+              },
             });
           }
 
@@ -169,37 +194,59 @@ export async function main() {
       }
     }
 
-    if (reviewProblemsPayload.length === 0) {
+    if (draftProblemsPayload.length === 0) {
       if (doneKifuIds.length > 0) {
-        await supabase.from("kifus").update({ status: "done" }).in("id", doneKifuIds);
+        await supabase.from("making_kifus").update({ status: "done" }).in("id", doneKifuIds);
       }
       if (impossibleKifuIds.length > 0) {
-        await supabase.from("kifus").update({ status: "impossible" }).in("id", impossibleKifuIds);
+        await supabase.from("making_kifus").update({ status: "impossible" }).in("id", impossibleKifuIds);
       }
       for (const ng of ngKifus) {
-        await supabase.from("kifus").update({ status: "failed" }).eq("id", ng.id);
+        await supabase.from("making_kifus").update({ status: "failed" }).eq("id", ng.id);
       }
       if (stoppedByTimeLimit && unprocessedKifuIds.length > 0) {
-        await supabase.from("kifus").update({ status: "pending" }).in("id", unprocessedKifuIds);
+        await supabase.from("making_kifus").update({ status: "pending" }).in("id", unprocessedKifuIds);
       }
       return;
     }
 
     const { data: inserted, error: insErr } = await supabase
-      .from("review_next_move_problems")
-      .insert(reviewProblemsPayload)
+      .from("making_draft_problems")
+      .insert(draftProblemsPayload.map((problem) => ({
+        workspace_id: null,
+        mode: "next_move",
+        status: "draft",
+        prompt: problem.prompt,
+        root_sfen: problem.root_sfen,
+        intro_moves_usi: problem.intro_moves_usi,
+        correct_choice_id: problem.correct_choice_id,
+        root_eval_cp: problem.root_eval_cp,
+        root_eval_percent: problem.root_eval_percent,
+        problem_rating: null,
+        problem_rating_games: 0,
+        manual_difficulty_tier: null,
+        display_no: null,
+        tags: [],
+        review_comment: null,
+        source_type: problem.source_type,
+        source_ref: problem.source_ref,
+        source_payload: problem.source_payload,
+        source_snapshot: problem.source_snapshot,
+        created_at: problem.created_at,
+        updated_at: problem.created_at,
+      })))
       .select("id")
       .order("id", { ascending: true });
 
     if (insErr) throw insErr;
 
     const insertedIds = (inserted ?? []).map((r: { id: number | string }) => Number(r.id));
-    if (insertedIds.length !== reviewProblemsPayload.length) {
-      throw new Error("inserted review problems length mismatch");
+    if (insertedIds.length !== draftProblemsPayload.length) {
+      throw new Error("inserted draft problems length mismatch");
     }
 
-    const reviewChoicesPayload = reviewChoicesStash.map((c) => ({
-      problem_id: insertedIds[c.tmpIndex],
+    const draftChoicesPayload = draftChoicesStash.map((c) => ({
+      draft_problem_id: insertedIds[c.tmpIndex],
       choice_id: c.choice_id,
       usi: c.usi,
       label: c.label,
@@ -207,25 +254,26 @@ export async function main() {
       eval_percent: c.eval_percent,
       explanation: c.explanation,
       line: c.line,
+      source_snapshot: c.source_snapshot,
     }));
 
-    const { error: choiceErr } = await supabase.from("review_next_move_choices").insert(reviewChoicesPayload);
+    const { error: choiceErr } = await supabase.from("making_draft_choices").insert(draftChoicesPayload);
     if (choiceErr) throw choiceErr;
 
     if (doneKifuIds.length > 0) {
-      const { error: e1 } = await supabase.from("kifus").update({ status: "done" }).in("id", doneKifuIds);
+      const { error: e1 } = await supabase.from("making_kifus").update({ status: "done" }).in("id", doneKifuIds);
       if (e1) throw e1;
     }
     if (impossibleKifuIds.length > 0) {
-      const { error: eImp } = await supabase.from("kifus").update({ status: "impossible" }).in("id", impossibleKifuIds);
+      const { error: eImp } = await supabase.from("making_kifus").update({ status: "impossible" }).in("id", impossibleKifuIds);
       if (eImp) throw eImp;
     }
     for (const ng of ngKifus) {
-      const { error: e2 } = await supabase.from("kifus").update({ status: "failed" }).eq("id", ng.id);
+      const { error: e2 } = await supabase.from("making_kifus").update({ status: "failed" }).eq("id", ng.id);
       if (e2) throw e2;
     }
     if (stoppedByTimeLimit && unprocessedKifuIds.length > 0) {
-      await supabase.from("kifus").update({ status: "pending" }).in("id", unprocessedKifuIds);
+      await supabase.from("making_kifus").update({ status: "pending" }).in("id", unprocessedKifuIds);
     }
   } finally {
     await engine.quit();

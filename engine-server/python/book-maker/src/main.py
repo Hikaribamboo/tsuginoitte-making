@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -264,9 +263,9 @@ def _insert_batch(writer: SupabaseWriter, records: list[dict[str, object]], batc
         name = record["name"]
         assert isinstance(name, str)
         if writer.name_exists(name):
-            print(f"skip existing workspace name: {name}")
+            print(f"skip existing draft name: {name}")
             continue
-        filtered_rows.append({"id": str(uuid.uuid4()), "name": name, "draft": record["draft"]})
+        filtered_rows.append({"name": name, "draft": record["draft"]})
 
     print(f"Inserting batch {batch_label}: {len(filtered_rows)} rows")
     try:

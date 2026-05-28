@@ -1,15 +1,12 @@
 import { supabase } from './rpc';
 import type {
   CreateMakingDraftProblemInput,
-  CreateMakingWorkspaceInput,
   MakingDraftChoice,
   MakingDraftProblem,
+  MakingDraftProblemFilters,
   MakingMode,
   MakingSourceType,
-  MakingWorkspace,
-  MakingWorkspaceFilters,
   UpdateMakingDraftProblemInput,
-  UpdateMakingWorkspaceInput,
   UpsertMakingDraftChoiceInput,
 } from '../types/making';
 
@@ -19,8 +16,13 @@ const MAKING_SOURCE_TYPES: ReadonlySet<MakingSourceType> = new Set([
   'pasted_kifu',
   'pasted_sfen',
   'image',
+  'image_position_creator',
+  'kif_problem_generation',
+  'engine_generated_next_move',
   'db_kifu',
   'local_book',
+  'legacy_workspace',
+  'legacy_review_next_move',
   'imported_legacy_workspace',
   'production_edit',
 ]);
@@ -62,42 +64,13 @@ function normalizeTextArray(value: string[] | undefined, fallback: string[] = []
   return (value ?? fallback).map((item) => String(item));
 }
 
-function normalizeWorkspaceInput(input: CreateMakingWorkspaceInput): CreateMakingWorkspaceInput {
-  assertOneOf(input.mode, MAKING_MODES, 'mode');
-  assertOneOf(input.source_type, MAKING_SOURCE_TYPES, 'source_type');
-  if (input.status !== undefined) {
-    assertOneOf(input.status, MAKING_WORKSPACE_STATUSES, 'workspace status');
-  }
-
-  return {
-    ...input,
-    source_ref: input.source_ref ?? null,
-    source_payload: input.source_payload ?? {},
-    status: input.status ?? 'draft',
-    tags_summary: normalizeTextArray(input.tags_summary),
-    current_draft_problem_id: input.current_draft_problem_id ?? null,
-    published_problem_id: input.published_problem_id ?? null,
-  };
-}
-
-function normalizeWorkspacePatch(patch: UpdateMakingWorkspaceInput): UpdateMakingWorkspaceInput {
-  if (patch.mode !== undefined) {
-    assertOneOf(patch.mode, MAKING_MODES, 'mode');
-  }
-  if (patch.source_type !== undefined) {
-    assertOneOf(patch.source_type, MAKING_SOURCE_TYPES, 'source_type');
-  }
-  if (patch.status !== undefined) {
-    assertOneOf(patch.status, MAKING_WORKSPACE_STATUSES, 'workspace status');
-  }
-
-  return patch;
-}
-
 function normalizeDraftProblemInput(input: CreateMakingDraftProblemInput): CreateMakingDraftProblemInput {
   assertOneOf(input.mode, MAKING_MODES, 'mode');
   assertIntegerInRange(input.correct_choice_id, 1, 3, 'correct_choice_id');
 
+  if (input.source_type !== undefined && input.source_type !== null) {
+    assertOneOf(input.source_type, MAKING_SOURCE_TYPES, 'source_type');
+  }
   if (input.status !== undefined) {
     assertOneOf(input.status, MAKING_WORKSPACE_STATUSES, 'draft status');
   }
@@ -116,6 +89,7 @@ function normalizeDraftProblemInput(input: CreateMakingDraftProblemInput): Creat
 
   return {
     ...input,
+    workspace_id: input.workspace_id ?? null,
     status: input.status ?? 'draft',
     intro_moves_usi: normalizeTextArray(input.intro_moves_usi),
     root_eval_cp: input.root_eval_cp ?? null,
@@ -126,6 +100,9 @@ function normalizeDraftProblemInput(input: CreateMakingDraftProblemInput): Creat
     display_no: input.display_no ?? null,
     tags: normalizeTextArray(input.tags),
     review_comment: input.review_comment ?? null,
+    source_type: input.source_type ?? null,
+    source_ref: input.source_ref ?? null,
+    source_payload: input.source_payload ?? {},
     source_snapshot: input.source_snapshot ?? {},
   };
 }
@@ -133,6 +110,9 @@ function normalizeDraftProblemInput(input: CreateMakingDraftProblemInput): Creat
 function normalizeDraftProblemPatch(patch: UpdateMakingDraftProblemInput): UpdateMakingDraftProblemInput {
   if (patch.mode !== undefined) {
     assertOneOf(patch.mode, MAKING_MODES, 'mode');
+  }
+  if (patch.source_type !== undefined && patch.source_type !== null) {
+    assertOneOf(patch.source_type, MAKING_SOURCE_TYPES, 'source_type');
   }
   if (patch.status !== undefined) {
     assertOneOf(patch.status, MAKING_WORKSPACE_STATUSES, 'draft status');
@@ -183,21 +163,17 @@ function sortByChoiceId<T extends { choice_id: number }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => a.choice_id - b.choice_id);
 }
 
-export async function listMakingWorkspaces(filters: MakingWorkspaceFilters = {}): Promise<MakingWorkspace[]> {
+export async function listMakingDraftProblems(
+  filters: MakingDraftProblemFilters = {},
+): Promise<MakingDraftProblem[]> {
   let query = supabase
-    .from('making_workspaces')
+    .from('making_draft_problems')
     .select('*')
     .order('updated_at', { ascending: false });
 
-  if (filters.mode) {
-    query = query.eq('mode', filters.mode);
-  }
-  if (filters.status) {
-    query = query.eq('status', filters.status);
-  }
-  if (filters.sourceType) {
-    query = query.eq('source_type', filters.sourceType);
-  }
+  if (filters.mode) query = query.eq('mode', filters.mode);
+  if (filters.status) query = query.eq('status', filters.status);
+  if (filters.sourceType) query = query.eq('source_type', filters.sourceType);
   if (filters.limit !== undefined) {
     const offset = filters.offset ?? 0;
     query = query.range(offset, offset + filters.limit - 1);
@@ -205,59 +181,18 @@ export async function listMakingWorkspaces(filters: MakingWorkspaceFilters = {})
 
   const { data, error } = await query;
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []) as MakingDraftProblem[];
 }
 
-export async function getMakingWorkspace(workspaceId: string): Promise<MakingWorkspace | null> {
+export async function getMakingDraftProblem(draftProblemId: number): Promise<MakingDraftProblem | null> {
   const { data, error } = await supabase
-    .from('making_workspaces')
+    .from('making_draft_problems')
     .select('*')
-    .eq('id', workspaceId)
+    .eq('id', draftProblemId)
     .maybeSingle();
 
   if (error) throw error;
-  return data ?? null;
-}
-
-export async function createMakingWorkspace(input: CreateMakingWorkspaceInput): Promise<MakingWorkspace> {
-  const normalized = normalizeWorkspaceInput(input);
-  const { data, error } = await supabase
-    .from('making_workspaces')
-    .insert({
-      title: normalized.title,
-      source_type: normalized.source_type,
-      source_ref: normalized.source_ref,
-      source_payload: normalized.source_payload,
-      mode: normalized.mode,
-      status: normalized.status,
-      tags_summary: normalized.tags_summary,
-      current_draft_problem_id: normalized.current_draft_problem_id,
-      published_problem_id: normalized.published_problem_id,
-    })
-    .select('*')
-    .single();
-
-  if (error) throw error;
-  return data;
-}
-
-export async function updateMakingWorkspace(
-  workspaceId: string,
-  patch: UpdateMakingWorkspaceInput,
-): Promise<MakingWorkspace> {
-  const normalized = normalizeWorkspacePatch(patch);
-  const { data, error } = await supabase
-    .from('making_workspaces')
-    .update(cleanUndefined({
-      ...normalized,
-      updated_at: nowIso(),
-    }))
-    .eq('id', workspaceId)
-    .select('*')
-    .single();
-
-  if (error) throw error;
-  return data;
+  return (data ?? null) as MakingDraftProblem | null;
 }
 
 export async function createMakingDraftProblem(
@@ -282,6 +217,9 @@ export async function createMakingDraftProblem(
       display_no: normalized.display_no,
       tags: normalized.tags,
       review_comment: normalized.review_comment,
+      source_type: normalized.source_type,
+      source_ref: normalized.source_ref,
+      source_payload: normalized.source_payload,
       source_snapshot: normalized.source_snapshot,
     })
     .select('*')

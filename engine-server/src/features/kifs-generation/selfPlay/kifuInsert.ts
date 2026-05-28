@@ -19,11 +19,16 @@ export function buildKifuInsertRow(args: {
   basePositionId: string;
 }): KifuInsertRow {
   return {
+    source_type: "self_play",
+    source_ref: null,
     initial_sfen: args.initialSfen,
     moves: args.movesText,
     status: "pending",
     tags: args.tags,
     base_position_id: args.basePositionId,
+    source_payload: {
+      generated_by: "self_play",
+    },
   };
 }
 
@@ -60,7 +65,7 @@ export async function insertKifuRows(args: {
   const chunkSize = args.chunkSize ?? 200;
   for (let i = 0; i < args.rows.length; i += chunkSize) {
     const chunk = args.rows.slice(i, i + chunkSize);
-    const { error } = await args.supabase.from("kifus").insert(chunk);
+    const { error } = await args.supabase.from("making_kifus").insert(chunk);
     if (error) {
       throw error;
     }

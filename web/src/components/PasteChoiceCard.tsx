@@ -19,6 +19,7 @@ interface PasteChoiceCardProps {
   explanationRef?: React.Ref<HTMLTextAreaElement>;
   onClear: () => void;
   onShowReplay: () => void;
+  replayDisabled?: boolean;
 }
 
 const SLOT_LABELS: Record<string, string> = {
@@ -45,6 +46,7 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
   explanationRef,
   onClear,
   onShowReplay,
+  replayDisabled = false,
 }) => {
   return (
     <div
@@ -93,9 +95,12 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
           </button>
           {draft.usi && (
             <button
-              className="text-[11px] px-2 py-0.5 bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700"
+              className={`text-[11px] px-2 py-0.5 text-white border-indigo-600 ${
+                replayDisabled ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
+              }`}
               type="button"
               onClick={onShowReplay}
+              disabled={replayDisabled}
             >
               ▶ 再生
             </button>

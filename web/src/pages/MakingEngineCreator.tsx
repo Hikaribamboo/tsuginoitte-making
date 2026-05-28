@@ -63,26 +63,11 @@ type KifsFormState = {
   suspiciousMaxDiff: string;
 };
 
-type ReviewProblemRow = {
+type GeneratedDraftProblemRow = {
   id: number;
   created_at: string;
-  prompt: string;
-  root_sfen: string;
-  correct_choice_id: number;
-  intro_moves_usi: string[];
-  root_eval_cp: number | null;
-  root_eval_percent: number | null;
-};
-
-type ReviewChoiceRow = {
-  problem_id: number;
-  choice_id: number;
-  usi: string;
-  label: string;
-  explanation: string | null;
-  line: string[];
-  eval_cp: number | null;
-  eval_percent: number | null;
+  source_type: string | null;
+  source_ref: string | null;
 };
 
 const DEFAULT_BOOK_FORM: BookFormState = {
@@ -456,8 +441,8 @@ function KifsSettingsForm({
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-        batchGenerate 完了後、ジョブ開始〜終了時刻の範囲で作成された review_next_move_problems を読み取り、
-        下書き一覧に取り込みます。
+        batchGenerate 完了後、ジョブ開始〜終了時刻の範囲で作成された making_draft_problems を確認し、
+        下書き一覧に反映します。
       </div>
     </div>
   );
@@ -746,8 +731,10 @@ async function importKifsJobResult(job: MakingJobSnapshot): Promise<number> {
   const windowEnd = new Date(end).toISOString();
 
   const { data: problemsData, error: problemsError } = await supabase
-    .from('review_next_move_problems')
-    .select('id, created_at, prompt, root_sfen, correct_choice_id, intro_moves_usi, root_eval_cp, root_eval_percent')
+    .from('making_draft_problems')
+    .select('id, created_at, source_type, source_ref')
+    .eq('mode', 'next_move')
+    .eq('source_type', 'kif_problem_generation')
     .gte('created_at', windowStart)
     .lte('created_at', windowEnd)
     .order('id', { ascending: false })
@@ -755,75 +742,8 @@ async function importKifsJobResult(job: MakingJobSnapshot): Promise<number> {
 
   if (problemsError) throw problemsError;
 
-  const problems = (problemsData ?? []) as ReviewProblemRow[];
-  if (problems.length === 0) return 0;
-
-  const problemIds = problems.map((problem) => problem.id);
-  const { data: choicesData, error: choicesError } = await supabase
-    .from('review_next_move_choices')
-    .select('problem_id, choice_id, usi, label, explanation, line, eval_cp, eval_percent')
-    .in('problem_id', problemIds)
-    .order('problem_id', { ascending: true })
-    .order('choice_id', { ascending: true });
-
-  if (choicesError) throw choicesError;
-
-  const grouped = new Map<number, ReviewChoiceRow[]>();
-  for (const row of (choicesData ?? []) as ReviewChoiceRow[]) {
-    const current = grouped.get(row.problem_id) ?? [];
-    current.push(row);
-    grouped.set(row.problem_id, current);
-  }
-
-  const workspaces = await listWorkspaces();
-  let nextNo = getNextWorkspaceNumber(workspaces.map((workspace) => workspace.name));
-  let importedCount = 0;
-
-  for (const problem of problems.slice().reverse()) {
-    const choices = grouped.get(problem.id) ?? [];
-    const workspace = await createWorkspace(buildAutoWorkspaceName(nextNo, `kifs:${problem.id}`));
-    nextNo += 1;
-
-    const sortedChoices = choices.slice().sort((a, b) => a.choice_id - b.choice_id);
-    const correct = sortedChoices.find((choice) => choice.choice_id === problem.correct_choice_id) ?? null;
-    const incorrects = sortedChoices.filter((choice) => choice.choice_id !== problem.correct_choice_id);
-    const introMovesUsi = Array.isArray(problem.intro_moves_usi) ? problem.intro_moves_usi : [];
-
-    const draft: WorkspaceDraft = {
-      kifText: '',
-      rootSfen: problem.root_sfen ?? '',
-      kifMoves: introMovesUsi,
-      introMoveUsi: introMovesUsi[introMovesUsi.length - 1] ?? '',
-      choices: {
-        correct: toChoiceDraft('correct', correct),
-        incorrect1: toChoiceDraft('incorrect1', incorrects[0]),
-        incorrect2: toChoiceDraft('incorrect2', incorrects[1]),
-      },
-      readingLineInputs: {
-        correct: '',
-        incorrect1: '',
-        incorrect2: '',
-      },
-      prompt: problem.prompt ?? '最善手を選んでください',
-      tags: [],
-      displayNo: null,
-      problemRating: 1200,
-      rootEvalCp: problem.root_eval_cp,
-      rootEvalPercent: problem.root_eval_percent,
-      mode: 'next_move',
-      savedAt: new Date().toISOString(),
-      sourceEngineJob: {
-        kind: 'kifs',
-        jobId: job.id,
-        sourceReviewProblemId: problem.id,
-      },
-    };
-
-    await saveWorkspaceDraft(workspace.id, draft as unknown as Record<string, unknown>);
-    importedCount += 1;
-  }
-
-  return importedCount;
+  const problems = (problemsData ?? []) as GeneratedDraftProblemRow[];
+  return problems.length;
 }
 
 export default MakingEngineCreator;

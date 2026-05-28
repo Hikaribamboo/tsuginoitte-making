@@ -4,6 +4,7 @@ interface PasteIntroMoveCardProps {
   draftUsi: string;
   draftLabel: string;
   isActive: boolean;
+  error?: string;
   onActivate: () => void;
   onClear: () => void;
 }
@@ -12,6 +13,7 @@ const PasteIntroMoveCard: React.FC<PasteIntroMoveCardProps> = ({
   draftUsi,
   draftLabel,
   isActive,
+  error = '',
   onActivate,
   onClear,
 }) => {
@@ -50,6 +52,11 @@ const PasteIntroMoveCard: React.FC<PasteIntroMoveCardProps> = ({
               「行き先→元のマス/持ち駒」の順に指してください...
             </div>
           )}
+          {error && (
+            <div className="text-[11px] text-red-600 bg-red-50 px-2 py-0.5 rounded">
+              {error}
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -61,6 +68,11 @@ const PasteIntroMoveCard: React.FC<PasteIntroMoveCardProps> = ({
           {isActive && (
             <div className="text-blue-600 text-[13px] font-medium py-1 animate-pulse">
               「行き先→元のマス/持ち駒」の順に指してください...
+            </div>
+          )}
+          {error && (
+            <div className="text-[11px] text-red-600 bg-red-50 px-2 py-0.5 rounded">
+              {error}
             </div>
           )}
         </>

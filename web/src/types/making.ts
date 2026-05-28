@@ -5,8 +5,13 @@ export type MakingSourceType =
   | 'pasted_kifu'
   | 'pasted_sfen'
   | 'image'
+  | 'image_position_creator'
+  | 'kif_problem_generation'
+  | 'engine_generated_next_move'
   | 'db_kifu'
   | 'local_book'
+  | 'legacy_workspace'
+  | 'legacy_review_next_move'
   | 'imported_legacy_workspace'
   | 'production_edit';
 
@@ -18,24 +23,9 @@ export type MakingPublishTargetEnv = 'dev' | 'prod';
 export type MakingPublishAction = 'create' | 'update';
 export type MakingPublishStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
-export interface MakingWorkspace {
-  id: string;
-  title: string;
-  source_type: MakingSourceType;
-  source_ref: string | null;
-  source_payload: Record<string, unknown>;
-  mode: MakingMode;
-  status: MakingWorkspaceStatus;
-  tags_summary: string[];
-  current_draft_problem_id: number | null;
-  published_problem_id: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface MakingDraftProblem {
   id: number;
-  workspace_id: string;
+  workspace_id: string | null;
   mode: MakingMode;
   status: MakingDraftProblemStatus;
   prompt: string;
@@ -51,6 +41,9 @@ export interface MakingDraftProblem {
   tags: string[];
   review_comment: string | null;
   production_problem_id: number | null;
+  source_type: MakingSourceType | string | null;
+  source_ref: string | null;
+  source_payload: Record<string, unknown>;
   source_snapshot: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -66,6 +59,7 @@ export interface MakingDraftChoice {
   eval_percent: number | null;
   line: string[];
   explanation: string;
+  source_snapshot?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -117,30 +111,16 @@ export interface MakingPublishJob {
   finished_at: string | null;
 }
 
-export interface MakingWorkspaceFilters {
+export interface MakingDraftProblemFilters {
   mode?: MakingMode;
-  status?: MakingWorkspaceStatus;
+  status?: MakingDraftProblemStatus;
   sourceType?: MakingSourceType;
   limit?: number;
   offset?: number;
 }
 
-export interface CreateMakingWorkspaceInput {
-  title: string;
-  source_type: MakingSourceType;
-  mode: MakingMode;
-  source_ref?: string | null;
-  source_payload?: Record<string, unknown>;
-  status?: MakingWorkspaceStatus;
-  tags_summary?: string[];
-  current_draft_problem_id?: number | null;
-  published_problem_id?: number | null;
-}
-
-export type UpdateMakingWorkspaceInput = Partial<Omit<MakingWorkspace, 'id' | 'created_at' | 'updated_at'>>;
-
 export interface CreateMakingDraftProblemInput {
-  workspace_id: string;
+  workspace_id?: string | null;
   mode: MakingMode;
   status?: MakingDraftProblemStatus;
   prompt: string;
@@ -155,6 +135,9 @@ export interface CreateMakingDraftProblemInput {
   display_no?: number | null;
   tags?: string[];
   review_comment?: string | null;
+  source_type?: MakingSourceType | string | null;
+  source_ref?: string | null;
+  source_payload?: Record<string, unknown>;
   source_snapshot?: Record<string, unknown>;
 }
 

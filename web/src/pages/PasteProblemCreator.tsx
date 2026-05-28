@@ -11,7 +11,7 @@ import AnalysisPanel from '../components/AnalysisPanel';
 import type { BestMove } from '../components/AnalysisPanel';
 import Toggle from '../components/Toggle';
 import { useBoardStore } from '../hooks/useBoardStore';
-import { INITIAL_SFEN, parseSfen, applyUsiMove, boardToSfen, toUsiSquare } from '../lib/sfen';
+import { INITIAL_SFEN, parseSfen, applyUsiMove, boardToSfen, toUsiSquare, parseUsiSquare } from '../lib/sfen';
 import { usiToLabel, pvToJapanese } from '../lib/usi-to-label';
 import { cpToWinRatePercent } from '../lib/eval-percent';
 import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches, extractBranchProblems } from '../lib/kif-parser';
@@ -272,9 +272,17 @@ const PasteProblemCreator: React.FC = () => {
   } | null>(null);
 
   const searchSfen = rootSfen;
+  const introMoveError = useMemo(() => {
+    const move = introMoveUsi.trim();
+    if (!rootSfen || !move) return '';
+    const validation = validateMoveSequence(rootSfen, [move]);
+    return validation.ok ? '' : formatMoveValidationError('イントロが非合法です', validation);
+  }, [rootSfen, introMoveUsi]);
+
   const displaySfen = useMemo(() => {
     if (!rootSfen) return rootSfen;
     if (!introMoveUsi) return rootSfen;
+    if (validateMoveSequence(rootSfen, [introMoveUsi]).ok === false) return rootSfen;
     try {
       const base = parseSfen(rootSfen);
       const res = applyUsiMove(base.board, base.senteHand, base.goteHand, base.sideToMove, introMoveUsi);
@@ -584,10 +592,10 @@ const PasteProblemCreator: React.FC = () => {
       }
 
       const registeredUsi = choices[slot].usi;
-      const introMoveUsi = kifMoves.length > 0 ? kifMoves[kifMoves.length - 1] : '';
+      const currentIntroMoveUsi = introMoveUsi.trim();
       const initialPrevDest = registeredUsi
         ? usiDestinationToBoardCoord(registeredUsi) ?? undefined
-        : (introMoveUsi ? usiDestinationToBoardCoord(introMoveUsi) ?? undefined : undefined);
+        : (currentIntroMoveUsi ? usiDestinationToBoardCoord(currentIntroMoveUsi) ?? undefined : undefined);
       const result = parseReadingLine(text, {
         initialPrevDest,
       });
@@ -634,6 +642,20 @@ const PasteProblemCreator: React.FC = () => {
       }
       console.log('[handleParseReadingLine] includesChoiceMove:', includesChoiceMove, 'choiceUsi:', choiceUsi, 'continuationMoves:', continuationMoves);
 
+      const validationMoves = [
+        ...(currentIntroMoveUsi ? [currentIntroMoveUsi] : []),
+        choiceUsi,
+        ...continuationMoves,
+      ];
+      const validation = validateMoveSequence(rootSfen, validationMoves);
+      if (!validation.ok) {
+        setReadingLineErrors((prev) => ({
+          ...prev,
+          [slot]: formatMoveValidationError('読み筋が非合法です', validation),
+        }));
+        return;
+      }
+
       const board = parsed?.board;
       const side = parsed?.sideToMove ?? 'sente';
       const label = board ? usiToLabel(choiceUsi, board, side) : choiceUsi;
@@ -672,7 +694,7 @@ const PasteProblemCreator: React.FC = () => {
       const evalStr = result.evalCp !== null ? ` 評価値${result.evalCp}cp` : '';
       setMessage(`読み筋を登録しました（${lineLen}手${evalStr}）`);
     },
-    [rootSfen, parsed, markerSide, choices, kifMoves],
+    [rootSfen, parsed, markerSide, choices, introMoveUsi],
   );
 
 
@@ -1609,6 +1631,18 @@ const PasteProblemCreator: React.FC = () => {
   })();
   const imagePositionMemo = imagePositionSource?.memo?.trim() ?? '';
   const imagePositionFileName = imagePositionSource?.fileName?.trim() ?? '';
+  const choiceLineErrors = SLOT_ORDER.reduce<Record<SlotKey, string>>((acc, slot) => {
+    const draft = choices[slot];
+    const introMoves = introMoveUsi.trim() ? [introMoveUsi.trim()] : [];
+    if (!rootSfen || !draft.usi) {
+      acc[slot] = '';
+      return acc;
+    }
+    const moves = [...introMoves, ...buildReplayLine(draft)];
+    const validation = validateMoveSequence(rootSfen, moves);
+    acc[slot] = validation.ok ? '' : formatMoveValidationError('読み筋が非合法です', validation);
+    return acc;
+  }, { correct: '', incorrect1: '', incorrect2: '' });
 
   return (
     <>
@@ -1799,8 +1833,9 @@ const PasteProblemCreator: React.FC = () => {
               {introMoveCardRenderLog}
               <PasteIntroMoveCard
                 draftUsi={introMoveUsi}
-                draftLabel={introMoveUsi && parsed ? usiToLabel(introMoveUsi, parsed.board, parsed.sideToMove) : ''}
+                draftLabel={introMoveUsi && searchParsed ? usiToLabel(introMoveUsi, searchParsed.board, searchParsed.sideToMove) : ''}
                 isActive={introMoveActive}
+                error={introMoveError}
                 onActivate={handleActivateIntroMove}
                 onClear={handleClearIntroMove}
               />
@@ -1811,7 +1846,7 @@ const PasteProblemCreator: React.FC = () => {
                   draft={choices[slot]}
                   isActive={activeSlot === slot}
                   readingLineInput={readingLineInputs[slot]}
-                  readingLineError={readingLineErrors[slot]}
+                  readingLineError={readingLineErrors[slot] || choiceLineErrors[slot]}
                   onActivate={() => handleActivateChoiceSlot(slot)}
                   onReadingLineChange={(text) =>
                     setReadingLineInputs((prev) => ({ ...prev, [slot]: text }))
@@ -1828,6 +1863,7 @@ const PasteProblemCreator: React.FC = () => {
                   }}
                   onClear={() => handleClearSlot(slot)}
                   onShowReplay={() => setReplaySlot(slot)}
+                  replayDisabled={Boolean(choiceLineErrors[slot])}
                 />
               ))}
             </div>
@@ -2014,7 +2050,7 @@ const PasteProblemCreator: React.FC = () => {
       {replaySlot && choices[replaySlot].usi && rootSfen && (
         <ReadingLineModal
           rootSfen={rootSfen}
-          line={buildReplayLine(choices[replaySlot])}
+          line={buildReplayLine(choices[replaySlot], introMoveUsi)}
           onClose={() => setReplaySlot(null)}
         />
       )}
@@ -2078,9 +2114,98 @@ function pickChoiceFields(draft: ChoiceDraft) {
   };
 }
 
-function buildReplayLine(draft: ChoiceDraft): string[] {
+function buildReplayLine(draft: ChoiceDraft, introMoveUsi = ''): string[] {
+  const introMoves = introMoveUsi.trim() ? [introMoveUsi.trim()] : [];
   if (!draft.usi) return draft.line;
-  return draft.line[0] === draft.usi ? draft.line : [draft.usi, ...draft.line];
+  const line = draft.line[0] === draft.usi ? draft.line : [draft.usi, ...draft.line];
+  return [...introMoves, ...line];
+}
+
+type MoveValidationResult =
+  | { ok: true }
+  | { ok: false; message: string; failedMove?: string; moveIndex: number };
+
+function validateMoveSequence(rootSfen: string, moves: string[]): MoveValidationResult {
+  try {
+    let state = parseSfen(rootSfen);
+    for (let i = 0; i < moves.length; i++) {
+      const move = moves[i].trim();
+      if (!move) continue;
+
+      const single = validateSingleMove(state, move);
+      if (single) {
+        return { ok: false, message: single, failedMove: move, moveIndex: i + 1 };
+      }
+
+      const applied = applyUsiMove(
+        state.board,
+        state.senteHand,
+        state.goteHand,
+        state.sideToMove,
+        move,
+      );
+      state = {
+        board: applied.board,
+        senteHand: applied.senteHand,
+        goteHand: applied.goteHand,
+        sideToMove: state.sideToMove === 'sente' ? 'gote' : 'sente',
+        moveNumber: state.moveNumber + 1,
+      };
+    }
+    return { ok: true };
+  } catch (error: any) {
+    return {
+      ok: false,
+      message: error?.message ?? String(error),
+      moveIndex: 1,
+    };
+  }
+}
+
+function validateSingleMove(state: ReturnType<typeof parseSfen>, move: string): string | null {
+  if (/^[PLNSGBR]\*[1-9][a-i]$/i.test(move)) {
+    const pieceType = move[0].toUpperCase() as HandPieceType;
+    const to = parseUsiSquare(move.slice(2, 4));
+    if (!isBoardCellInBounds(to)) return '打つマスが盤外です';
+    const hand = state.sideToMove === 'sente' ? state.senteHand : state.goteHand;
+    if ((hand[pieceType] ?? 0) <= 0) return '持ち駒にない駒を打っています';
+    const destinations = getValidDropSquares(state.board, state.sideToMove, pieceType);
+    if (!destinations.some((dest) => dest.row === to.row && dest.col === to.col)) {
+      return 'そのマスには打てません';
+    }
+    return null;
+  }
+
+  if (!/^[1-9][a-i][1-9][a-i]\+?$/i.test(move)) {
+    return 'USI形式が不正です';
+  }
+
+  const from = parseUsiSquare(move.slice(0, 2));
+  const to = parseUsiSquare(move.slice(2, 4));
+  if (!isBoardCellInBounds(from) || !isBoardCellInBounds(to)) return 'USI座標が盤外です';
+
+  const piece = state.board[from.row]?.[from.col] ?? null;
+  if (!piece) return '移動元に駒がありません';
+  if (piece.side !== state.sideToMove) return '手番と違う側の駒を動かしています';
+
+  const target = state.board[to.row]?.[to.col] ?? null;
+  if (target && target.side === state.sideToMove) return '自分の駒があるマスには移動できません';
+
+  const destinations = getValidDestinations(state.board, from.row, from.col, state.sideToMove);
+  if (!destinations.some((dest) => dest.row === to.row && dest.col === to.col)) {
+    return 'その駒はそのマスへ動けません';
+  }
+
+  return null;
+}
+
+function isBoardCellInBounds(cell: BoardCell): boolean {
+  return cell.row >= 0 && cell.row < 9 && cell.col >= 0 && cell.col < 9;
+}
+
+function formatMoveValidationError(prefix: string, validation: Extract<MoveValidationResult, { ok: false }>): string {
+  const move = validation.failedMove ? `（${validation.failedMove}）` : '';
+  return `${prefix}: ${validation.moveIndex}手目${move} ${validation.message}`;
 }
 
 export default PasteProblemCreator;
