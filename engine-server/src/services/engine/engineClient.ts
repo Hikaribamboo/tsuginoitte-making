@@ -53,11 +53,13 @@ export function getEnginePath(): string {
   if (fromEnv && fromEnv.length > 0) return fromEnv;
 
   const isMac = process.platform === 'darwin';
-  const engineName = isMac ? 'YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1' : 'AobaNNUE_ZEN2.exe';
   const engineGroupDir = isMac ? 'mac' : 'windows';
-  const candidates = [
+  const engineNames = isMac
+    ? ['YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1']
+    : ['AobaNNUE_AVX2.exe', 'AobaNNUE_ZEN2.exe'];
+  const candidates = engineNames.map((engineName) =>
     path.resolve(import.meta.dirname, '..', '..', '..', 'engines', engineGroupDir, engineName),
-  ];
+  );
   const found = candidates.find((candidate) => existsSync(candidate));
   if (found) return found;
 

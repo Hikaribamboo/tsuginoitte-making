@@ -44,6 +44,17 @@ type KifProblemJobArgs = {
   setStep: (step: string) => void;
 };
 
+function resolveLocalBin(rootDir: string, command: string): string {
+  return path.join(rootDir, 'node_modules', '.bin', process.platform === 'win32' ? `${command}.cmd` : command);
+}
+
+function defaultEnginePath(rootDir: string): string {
+  const isWindows = process.platform === 'win32';
+  return isWindows
+    ? path.join(rootDir, 'engines', 'windows', 'AobaNNUE_AVX2.exe')
+    : path.join(rootDir, 'engines', 'mac', 'YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1');
+}
+
 export async function runKifProblemJob(args: KifProblemJobArgs): Promise<KifProblemResult> {
   const { settings, rootDir, runCommand, setStep } = args;
   if (!settings.runBatchGenerate) {
@@ -74,10 +85,10 @@ export async function runKifProblemJob(args: KifProblemJobArgs): Promise<KifProb
   if (settings.blackMovetimeMs != null) env.AMTS_SP_BLACK_MOVETIME_MS = String(settings.blackMovetimeMs);
   if (settings.whiteMovetimeMs != null) env.AMTS_SP_WHITE_MOVETIME_MS = String(settings.whiteMovetimeMs);
   if (!env.ENGINE_PATH) {
-    env.ENGINE_PATH = path.join(rootDir, 'engines', 'mac', 'YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1');
+    env.ENGINE_PATH = defaultEnginePath(rootDir);
   }
 
-  const tsxPath = path.join(rootDir, 'node_modules', '.bin', 'tsx');
+  const tsxPath = resolveLocalBin(rootDir, 'tsx');
   await runCommand(tsxPath, ['--no-cache', 'src/features/kif-problem-generation/tools/batchGenerate.ts'], rootDir, env);
   return { notes: ['batchGenerate completed'] };
 }

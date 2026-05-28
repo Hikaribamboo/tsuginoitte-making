@@ -74,9 +74,11 @@ export class ShogiEngine {
       this.enginePath = envPath;
     } else {
       const isMac = process.platform === 'darwin';
-      const engineName = isMac ? 'YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1' : 'AobaNNUE_ZEN2.exe';
       const engineGroupDir = isMac ? 'mac' : 'windows';
-      const candidates = [path.join(root, 'engines', engineGroupDir, engineName)];
+      const engineNames = isMac
+        ? ['YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1']
+        : ['AobaNNUE_AVX2.exe', 'AobaNNUE_ZEN2.exe'];
+      const candidates = engineNames.map((engineName) => path.join(root, 'engines', engineGroupDir, engineName));
       const found = candidates.find((candidate) => existsSync(candidate));
       if (found) {
         this.enginePath = found;
@@ -88,7 +90,7 @@ export class ShogiEngine {
           'kif-problem-generation',
           'engines',
           isMac ? 'mac' : 'windows',
-          engineName,
+          engineNames[0],
         );
       }
     }

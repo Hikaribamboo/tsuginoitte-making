@@ -208,17 +208,17 @@ export class UsiEngine {
 export function defaultEnginePath() {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
   const isMac = process.platform === 'darwin';
-  const engineName = isMac
-    ? 'YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1'
-    : 'AobaNNUE_ZEN2.exe';
   const engineGroupDir = isMac ? 'mac' : 'windows';
+  const engineNames = isMac
+    ? ['YaneuraOu_NNUE_halfKP256-V830Git_APPLEM1']
+    : ['AobaNNUE_AVX2.exe', 'AobaNNUE_ZEN2.exe'];
 
-  const candidates = [
+  const candidates = engineNames.map((engineName) =>
     path.resolve(currentDir, '..', '..', '..', '..', 'engines', engineGroupDir, engineName),
-  ];
+  );
   const found = candidates.find((candidate) => existsSync(candidate));
   if (found) return found;
 
   // Fallback to bundled engines inside kif-problem-generation
-  return path.resolve(currentDir, '../../engines', engineGroupDir, engineName);
+  return path.resolve(currentDir, '../../engines', engineGroupDir, engineNames[0]);
 }
