@@ -276,24 +276,6 @@ function computeUserCpFromGathered(args: { gathered: PvInfo[]; questionTurn: Col
   return userCp;
 }
 
-function formatTopInfos(infos: PvInfo[], turnAtS: Color, limit = 5): string {
-  const cp = infos
-    .filter((x) => x.evalType === "cp" && x.pv.length > 0)
-    .map((x) => ({
-      ...x,
-      eval: normalizeCpToSentePerspective(x.eval, turnAtS),
-    }));
-  const sorted =
-    turnAtS === "b"
-      ? [...cp].sort((a, b) => b.eval - a.eval)
-      : [...cp].sort((a, b) => a.eval - b.eval);
-
-  return sorted
-    .slice(0, limit)
-    .map((x) => `${x.pv[0]}:${x.eval}:${x.pv.join(" ")}`)
-    .join(" | ");
-}
-
 export async function scanGame(args: {
   engine: EngineClient;
   initialSfen: string;
@@ -316,9 +298,7 @@ export async function scanGame(args: {
     const movesToS = moves.slice(0, t);
     const turnAtS = getTurnAtS(initialTurn, t);
     const positionCommandS = buildPositionCommand(initialSfen, movesToS);
-    console.log(
-      `pass2候補: start t ${t}，intro ${introMoveUsi}，actual ${actualMoveUsi}，turn ${turnAtS}，position ${positionCommandS}`
-    );
+    console.log(`pass2候補: start t ${t}，actual ${actualMoveUsi}，turn ${turnAtS}`);
 
     const bestRes = await engine.analyze({
       positionCommand: positionCommandS,
@@ -468,9 +448,7 @@ export async function scanGame(args: {
 
           if (actualInfo) gathered = mergeUniqueByMove(gathered, [actualInfo]);
           hadActual = hasMove(gathered, actualMoveUsi);
-          console.log(
-            `pass2候補: actualIfMissing t ${t} depth ${depth} mp ${mp} found=${actualInfo ? "true" : "false"} hadActual=${hadActual}`
-          );
+          console.log(`pass2候補: actual補完 t ${t} d${depth} mp${mp} found=${actualInfo ? "true" : "false"}`);
         }
 
         const endSumm = startTimer();
@@ -496,9 +474,7 @@ export async function scanGame(args: {
           foundWrong2: summary.foundWrong2,
         });
 
-        console.log(
-          `pass2候補: step t ${t} depth ${depth} mp ${mp} gathered=${gathered.length} hadActual=${hadActual} foundWrong2=${summary.foundWrong2} worstLoss=${summary.worstLoss} top=${formatTopInfos(gathered, turnAtS)}`
-        );
+        console.log(`pass2候補: step t ${t} d${depth} mp${mp} 候補${gathered.length} 実戦手${hadActual ? "有" : "無"} 悪手${summary.foundWrong2 ? "有" : "無"} worstLoss=${summary.worstLoss}`);
 
         if (mp === 10) summaryAtMp10 = summary;
 
@@ -571,7 +547,7 @@ export async function scanGame(args: {
         });
 
         console.log(
-          `pass2候補: step t ${t} depth ${depth} mp ${mp} gathered=${gathered.length} hadActual=${hasMove(gathered, actualMoveUsi)} foundWrong2=${summary.foundWrong2} worstLoss=${summary.worstLoss} top=${formatTopInfos(gathered, turnAtS)}`
+          `pass2候補: step t ${t} d${depth} mp${mp} 候補${gathered.length} 実戦手${hasMove(gathered, actualMoveUsi) ? "有" : "無"} 悪手${summary.foundWrong2 ? "有" : "無"} worstLoss=${summary.worstLoss}`
         );
 
         if (summary.foundWrong2) {

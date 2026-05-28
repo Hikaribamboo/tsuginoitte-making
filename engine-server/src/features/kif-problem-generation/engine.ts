@@ -18,17 +18,6 @@ type AnalyzeResult = {
   bestmove: string | null;
 };
 
-function envBool(name: string, fallback: boolean): boolean {
-  const raw = process.env[name];
-  if (!raw || !raw.trim()) return fallback;
-  const normalized = raw.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return fallback;
-}
-
-const DEBUG_ENGINE_IO = envBool("AMTS_DEBUG_ENGINE_IO", false);
-
 function parseInfoLine(line: string): PvInfo | null {
   if (!line.startsWith("info ")) return null;
   if (!line.includes(" pv ")) return null;
@@ -94,9 +83,6 @@ export class UsiEngine {
   }
 
   write(line: string) {
-    if (DEBUG_ENGINE_IO) {
-      console.log(`[ENGINE-CMD] ${line}`);
-    }
     this.proc.stdin.write(line.endsWith("\n") ? line : line + "\n");
   }
 
@@ -169,13 +155,9 @@ export class UsiEngine {
   }): Promise<AnalyzeResult> {
     const latest: Map<number, PvInfo> = new Map();
     let bestmove: string | null = null;
-    const debugTag = args.label ? `[ENGINE-ANALYZE ${args.label}]` : "[ENGINE-ANALYZE]";
 
     const end = startTimer();
 
-    console.log(
-      `${debugTag} start depth=${args.depth} pvPlies=${args.pvPlies} searchMoves=${args.searchMoves?.join(",") ?? "-"} position="${args.positionCommand}"`
-    );
     this.write(args.positionCommand);
 
     return new Promise((resolve, reject) => {
@@ -205,14 +187,6 @@ export class UsiEngine {
           const ms = end();
           const tag = args.label ? `|${args.label}` : "";
           perfMark(`engine.analyze${tag}`, ms);
-
-          const summary = infos
-            .map((info) => {
-              const score = info.evalType === "mate" ? `mate ${info.eval}` : `cp ${info.eval}`;
-              return `#${info.multipv} ${score} ${info.pv.join(" ")}`;
-            })
-            .join(" | ");
-          console.log(`${debugTag} done ${ms}ms bestmove=${bestmove ?? "-"} infos=${summary || "-"}`);
 
           resolve({ infos, bestmove });
         }
