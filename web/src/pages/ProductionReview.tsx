@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  deleteProductionProblemEverywhere,
   getProductionProblemById,
   listProductionChoicesByProblemIds,
   listProductionProblems,
@@ -75,6 +76,7 @@ const ProductionReview: React.FC = () => {
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [listError, setListError] = useState('');
   const [detailError, setDetailError] = useState('');
   const [saveError, setSaveError] = useState('');
@@ -302,6 +304,32 @@ const ProductionReview: React.FC = () => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!detailDraft || deleting) return;
+
+    const confirmed = window.confirm(
+      `本番問題 No.${detailDraft.displayNo ?? '-'} / ID ${detailDraft.problemId} を削除しますか？\nこの操作は元に戻せません。`,
+    );
+    if (!confirmed) return;
+
+    setDeleting(true);
+    setDetailError('');
+    setSaveError('');
+
+    try {
+      await deleteProductionProblemEverywhere(detailDraft.problemId);
+      setDetail(null);
+      setDetailDraft(null);
+      setSelectedProblemId(null);
+      setSelectedProblemMode(null);
+      await loadList();
+    } catch (nextError: any) {
+      setDetailError(nextError?.message ?? '削除に失敗しました');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="h-[calc(100vh-106px)] min-h-[680px] overflow-hidden rounded-xl border border-sky-200/80 bg-gradient-to-b from-sky-50 via-blue-50 to-slate-50 shadow-sm">
       <div className="flex h-full">
@@ -450,9 +478,17 @@ const ProductionReview: React.FC = () => {
                     <QualityBadge summary={selectedSummary} />
                     <button
                       type="button"
+                      className="h-9 rounded-lg border border-rose-300 bg-white px-4 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                      onClick={handleDelete}
+                      disabled={saving || deleting}
+                    >
+                      {deleting ? '削除中...' : '削除'}
+                    </button>
+                    <button
+                      type="button"
                       className="h-9 rounded-lg border border-sky-500 bg-sky-500 px-4 text-sm font-semibold text-white hover:bg-sky-600 disabled:opacity-60"
                       onClick={handleSave}
-                      disabled={saving}
+                      disabled={saving || deleting}
                     >
                       {saving ? '保存中...' : '保存'}
                     </button>

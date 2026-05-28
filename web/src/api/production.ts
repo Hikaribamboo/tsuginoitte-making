@@ -311,3 +311,17 @@ export async function updateProductionProblemById(
 
   return getProductionProblemById(problemId, mode);
 }
+
+export async function deleteProductionProblemEverywhere(problemId: number): Promise<void> {
+  const { error } = await supabase.rpc('delete_next_move_problem_everywhere', {
+    p_problem_id: problemId,
+  });
+
+  if (!error) return;
+
+  const retry = await supabase.rpc('delete_next_move_problem_everywhere', {
+    problem_id: problemId,
+  });
+
+  if (retry.error) throw retry.error;
+}
