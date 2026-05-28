@@ -1052,7 +1052,7 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
   const handleAddWorkspace = async () => {
     const issues = validateSfenPosition(currentSfen);
     if (hasBlockingPositionIssue(issues)) {
-      const ok = window.confirm('この局面にはエラーがあります。それでもワークスペースに追加しますか？');
+      const ok = window.confirm('この局面にはエラーがあります。それでも下書きに追加しますか？');
       if (!ok) return;
     }
 
@@ -1096,9 +1096,9 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
           correctMoveLabel: correctMove?.label ?? null,
         },
       });
-      setMessage(`ワークスペース「${ws.name}」に追加しました`);
+      setMessage(`下書き「${ws.name}」に追加しました`);
     } catch (err: any) {
-      setMessage(`ワークスペース追加に失敗しました: ${err.message}`);
+      setMessage(`下書き追加に失敗しました: ${err.message}`);
     } finally {
       setSavingWorkspace(false);
     }
@@ -1143,10 +1143,10 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
             disabled={savingWorkspace}
             className="bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700"
           >
-            {savingWorkspace ? '追加中...' : 'ワークスペース一覧に追加'}
+            {savingWorkspace ? '追加中...' : '下書き一覧に追加'}
           </button>
           <button type="button" onClick={() => navigate('/workspaces')}>
-            ワークスペース一覧へ
+            下書き一覧へ
           </button>
         </div>
       </div>

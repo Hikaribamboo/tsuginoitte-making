@@ -409,7 +409,7 @@ const PasteProblemCreator: React.FC = () => {
           });
           lastSavedRef.current = sig;
           setHasUnsavedChanges(false);
-          setMessage('ワークスペースの下書きを復元しました');
+          setMessage('下書きの下書きを復元しました');
         } else {
           setImagePositionSource(null);
           const sig = draftSignature({ ...buildDraft(), imagePositionSource: null });
@@ -446,7 +446,7 @@ const PasteProblemCreator: React.FC = () => {
 
   const persistWorkspaceDraft = useCallback(async () => {
     if (!workspaceId) {
-      setMessage('ワークスペースを開いたときだけ途中保存できます');
+      setMessage('下書きを開いたときだけ途中保存できます');
       return false;
     }
     setDraftSaving(true);
@@ -468,7 +468,7 @@ const PasteProblemCreator: React.FC = () => {
   const handleSaveDraftToDb = useCallback(async () => {
     const saved = await persistWorkspaceDraft();
     if (saved) {
-      setMessage('ワークスペースを途中保存しました（DB）');
+      setMessage('下書きを途中保存しました（DB）');
     }
   }, [persistWorkspaceDraft]);
 
@@ -484,10 +484,10 @@ const PasteProblemCreator: React.FC = () => {
     try {
       await deleteWorkspace(workspaceId);
       setShowDeleteWorkspaceConfirm(false);
-      setMessage('ワークスペースを削除しました');
+      setMessage('下書きを削除しました');
       navigate('/workspaces');
     } catch (e: any) {
-      setMessage(`ワークスペース削除エラー: ${e.message}`);
+      setMessage(`下書き削除エラー: ${e.message}`);
     }
   }, [navigate, workspaceId]);
 
@@ -1889,7 +1889,7 @@ const PasteProblemCreator: React.FC = () => {
                     onClick={() => setShowDeleteWorkspaceConfirm(true)}
                     className="bg-red-50 text-red-700 border-red-300 hover:bg-red-100 text-[11px]"
                   >
-                    ワークスペース削除
+                    下書き削除
                   </button>
                 )}
                 <button onClick={() => setShowPreview(true)} type="button" className="text-[11px]">
@@ -2009,9 +2009,9 @@ const PasteProblemCreator: React.FC = () => {
             className="bg-white rounded-xl shadow-2xl p-5 w-full max-w-[380px] mx-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-semibold mb-2">ワークスペースを削除</h3>
+            <h3 className="text-base font-semibold mb-2">下書きを削除</h3>
             <p className="text-[13px] text-gray-600 mb-4">
-              「{workspaceName ?? 'このワークスペース'}」を削除しますか？
+              「{workspaceName ?? 'この下書き'}」を削除しますか？
               <br />
               削除すると途中保存データも消えます。
             </p>
@@ -2069,7 +2069,7 @@ const PasteProblemCreator: React.FC = () => {
             <p className="text-[13px] text-gray-600 mb-4">
               問題を保存しました{savedProblemId != null ? ` (problem_id: ${savedProblemId})` : ''}。
               <br />
-              このワークスペースを削除しますか？
+              この下書きを削除しますか？
             </p>
             <div className="flex justify-end gap-2">
               <button

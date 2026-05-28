@@ -265,7 +265,7 @@ const WorkspaceList: React.FC = () => {
       setPasteText('');
       setPasteTags([]);
       resetParsedBranchState();
-      setPasteError(`✓ ${branchProblems.length}個の分岐をワークスペースに保存しました`);
+      setPasteError(`✓ ${branchProblems.length}個の分岐を下書きに保存しました`);
       await fetchWorkspaces();
     } catch (e: any) {
       setPasteError(e.message ?? '分岐の一括保存に失敗しました');
