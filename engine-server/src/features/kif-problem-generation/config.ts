@@ -15,7 +15,7 @@ function envBool(name: string, fallback: boolean): boolean {
   return fallback;
 }
 
-const FINALIZE_DEPTH = envInt("AMTS_FINALIZE_DEPTH", 18, 1, 80);
+const FINALIZE_DEPTH = envInt("AMTS_FINALIZE_DEPTH", 26, 26, 80);
 const ENGINE_OWN_BOOK = envBool("AMTS_ENGINE_OWN_BOOK", false);
 
 // src/config.ts

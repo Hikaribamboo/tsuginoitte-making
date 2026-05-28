@@ -89,7 +89,7 @@ const DEFAULT_KIFS_FORM: KifsFormState = {
   maxProblemsPerGame: '3',
   maxScanResultsPerGame: '12',
   scanDepth: '12',
-  finalizeDepth: '22',
+  finalizeDepth: '26',
   suspiciousMinDiff: '500',
   suspiciousMaxDiff: '1600',
 };
@@ -666,7 +666,7 @@ function buildKifsPayload(value: KifsFormState) {
     maxProblemsPerGame: parseRequiredInt(value.maxProblemsPerGame, 'maxProblemsPerGame', 1),
     maxScanResultsPerGame: parseRequiredInt(value.maxScanResultsPerGame, 'maxScanResultsPerGame', 1),
     scanDepth: parseRequiredInt(value.scanDepth, 'scanDepth', 1),
-    finalizeDepth: parseRequiredInt(value.finalizeDepth, 'finalizeDepth', 1),
+    finalizeDepth: parseRequiredInt(value.finalizeDepth, 'finalizeDepth', 26),
     suspiciousMinDiff: parseRequiredInt(value.suspiciousMinDiff, 'suspiciousMinDiff', 1),
     suspiciousMaxDiff: parseRequiredInt(value.suspiciousMaxDiff, 'suspiciousMaxDiff', 1),
   };
