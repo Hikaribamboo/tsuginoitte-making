@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { existsSync } from 'fs';
+import os from 'os';
 import path from 'path';
 import { runBookProblemJob } from './features/book-problem-generation/bookProblem.service.js';
 import { runKifProblemJob } from './features/kif-problem-generation/kifProblem.service.js';
@@ -323,6 +324,7 @@ async function executeJob(job: JobRecord, input: JobInput): Promise<void> {
   job.status = 'running';
   job.startedAt = new Date().toISOString();
   appendLog(job, `[job] started (${job.kind})`);
+  appendLog(job, `[job] host hostname=${os.hostname()} platform=${process.platform} pid=${process.pid} cwd=${process.cwd()}`);
 
   try {
     if (input.kind === 'book') {

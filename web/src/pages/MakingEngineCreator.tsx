@@ -3,10 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../api/rpc';
 import {
   cancelMakingJob,
+  evaluatePosition,
   getMakingPathOptions,
   listMakingJobs,
   startMakingJob,
   type MakingJobSnapshot,
+  type EngineEvalResult,
 } from '../api/backend';
 import { createWorkspace, listWorkspaces, saveWorkspaceDraft } from '../api/workspaces';
 
@@ -92,6 +94,9 @@ const DEFAULT_KIFS_FORM: KifsFormState = {
   suspiciousMaxDiff: '1600',
 };
 
+const DEFAULT_ENGINE_TEST_SFEN =
+  'ln3g2l/1r4k2/p2psgns1/2p2bppp/1p2pp3/2PPP1PSP/PP1S1GNP1/3B1GK2/LN1R4L w P 46';
+
 const MakingEngineCreator: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [bookForm, setBookForm] = useState<BookFormState>(DEFAULT_BOOK_FORM);
@@ -103,6 +108,10 @@ const MakingEngineCreator: React.FC = () => {
   const [error, setError] = useState('');
   const [enginePathOptions, setEnginePathOptions] = useState<string[]>([]);
   const [bookPathOptions, setBookPathOptions] = useState<string[]>([]);
+  const [testSfen, setTestSfen] = useState(DEFAULT_ENGINE_TEST_SFEN);
+  const [testDepth, setTestDepth] = useState('29');
+  const [testResult, setTestResult] = useState<EngineEvalResult | null>(null);
+  const [testingEngine, setTestingEngine] = useState(false);
   const importedJobIdsRef = useRef<Set<string>>(new Set());
   const hydratedInitialJobsRef = useRef(false);
 
@@ -220,6 +229,39 @@ const MakingEngineCreator: React.FC = () => {
     }
   };
 
+  const runEngineTest = async () => {
+    setTestingEngine(true);
+    setError('');
+    setMessage('');
+    setTestResult(null);
+    try {
+      const depth = parseRequiredInt(testDepth, 'depth', 1);
+      const result = await evaluatePosition(testSfen.trim(), [], {
+        depth,
+        multipv: 1,
+        newGame: true,
+        usiOptions: {
+          USI_Hash: 1024,
+          USI_Ponder: false,
+          Threads: 4,
+          NumaPolicy: 'auto',
+          Stochastic_Ponder: false,
+          DepthLimit: 0,
+          NodesLimit: 0,
+          EvalDir: 'eval',
+          USI_OwnBook: false,
+          FV_SCALE: 40,
+        },
+      });
+      setTestResult(result);
+      setMessage('エンジン検証が完了しました。');
+    } catch (nextError: any) {
+      setError(nextError?.message ?? 'エンジン検証に失敗しました');
+    } finally {
+      setTestingEngine(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
@@ -317,6 +359,48 @@ const MakingEngineCreator: React.FC = () => {
             ) : null}
           </div>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-base font-semibold text-slate-900">エンジン検証</h3>
+        <div className="grid gap-3 lg:grid-cols-[1fr_120px_auto]">
+          <FieldInput label="sfen" value={testSfen} onChange={setTestSfen} />
+          <FieldInput label="depth" value={testDepth} onChange={setTestDepth} />
+          <div className="flex items-end">
+            <button
+              type="button"
+              className="h-9 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              onClick={runEngineTest}
+              disabled={testingEngine}
+            >
+              {testingEngine ? '解析中...' : '評価'}
+            </button>
+          </div>
+        </div>
+        {testResult ? (
+          <div className="mt-3 space-y-3">
+            <div className="grid gap-2 md:grid-cols-3">
+              <Info label="bestmove" value={testResult.bestmove ?? testResult.pv[0] ?? '-'} mono />
+              <Info label="eval_cp" value={String(testResult.eval_cp)} />
+              <Info label="pv" value={testResult.pv.length > 0 ? testResult.pv.join(' ') : '-'} mono />
+            </div>
+            {testResult.lines && testResult.lines.length > 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 text-xs font-semibold text-slate-700">MultiPV</div>
+                <div className="space-y-1">
+                  {testResult.lines
+                    .filter((line) => line.depth === Number.parseInt(testDepth, 10))
+                    .sort((a, b) => a.multipv - b.multipv)
+                    .map((line) => (
+                      <div key={`${line.depth}-${line.multipv}`} className="font-mono text-xs text-slate-700">
+                        #{line.multipv} depth {line.depth} cp {line.eval_cp} pv {line.pv.join(' ')}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">

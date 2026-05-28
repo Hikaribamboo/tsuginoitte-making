@@ -2,6 +2,7 @@ import cors from 'cors';
 import express, { type Express } from 'express';
 import path from 'path';
 import { existsSync } from 'fs';
+import os from 'os';
 import { ShogiEngine } from '../engine.js';
 import { cancelMakingJob, getMakingJob, listMakingJobs, startMakingJob } from '../makingJobs.js';
 import { listMakingPathOptions } from '../makingOptions.js';
@@ -50,7 +51,13 @@ export function createEngineApp(engine: ShogiEngine): Express {
   app.use(express.json({ limit: '12mb' }));
 
   app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok' });
+    res.json({
+      status: 'ok',
+      hostname: os.hostname(),
+      platform: process.platform,
+      pid: process.pid,
+      cwd: process.cwd(),
+    });
   });
 
   app.get('/api/jobs', (_req, res) => {
@@ -119,7 +126,17 @@ export function createEngineApp(engine: ShogiEngine): Express {
 
   app.post('/api/evaluate', async (req, res) => {
     try {
-      const { sfen, moves = [], depth = 20, nodes, stable = false, searchMoves = [] } = req.body;
+      const {
+        sfen,
+        moves = [],
+        depth = 20,
+        nodes,
+        stable = false,
+        searchMoves = [],
+        multipv,
+        newGame,
+        usiOptions,
+      } = req.body;
       if (!sfen || typeof sfen !== 'string') {
         res.status(400).json({ error: 'sfen is required' });
         return;
@@ -133,8 +150,16 @@ export function createEngineApp(engine: ShogiEngine): Express {
         return;
       }
 
-      const result = await engine.evaluate(sfen, moves, { depth, nodes, stable, searchMoves });
-      res.json({ eval_cp: result.eval_cp, pv: result.pv, bestmove: result.bestmove });
+      const result = await engine.evaluate(sfen, moves, {
+        depth,
+        nodes,
+        stable,
+        searchMoves,
+        multipv,
+        newGame,
+        usiOptions,
+      });
+      res.json(result);
     } catch (error: any) {
       console.error('Evaluate error:', error);
       res.status(500).json({ error: error?.message ?? 'failed to evaluate position' });

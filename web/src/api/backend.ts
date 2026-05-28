@@ -5,7 +5,10 @@ const AI_API = import.meta.env.VITE_AI_API_URL ?? ENGINE_API;
 
 export interface EngineEvalResult {
   eval_cp: number;
+  bestmove?: string;
   pv: string[];
+  lines?: AnalysisLine[];
+  rawLines?: string[];
 }
 
 export interface EvaluateOptions {
@@ -13,6 +16,9 @@ export interface EvaluateOptions {
   nodes?: number;
   stable?: boolean;
   searchMoves?: string[];
+  multipv?: number;
+  newGame?: boolean;
+  usiOptions?: Record<string, string | number | boolean>;
 }
 
 export interface AnalysisLine {
@@ -33,12 +39,15 @@ export async function evaluatePosition(
     nodes,
     stable = false,
     searchMoves = [],
+    multipv,
+    newGame,
+    usiOptions,
   } = options;
 
   const res = await fetch(`${ENGINE_API}/api/evaluate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sfen, moves, depth, nodes, stable, searchMoves }),
+    body: JSON.stringify({ sfen, moves, depth, nodes, stable, searchMoves, multipv, newGame, usiOptions }),
   });
   if (!res.ok) {
     const text = await res.text();

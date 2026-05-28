@@ -8,6 +8,8 @@ export interface EngineResult {
   eval_cp: number;
   pv: string[];
   bestmove: string;
+  lines?: AnalysisLine[];
+  rawLines?: string[];
 }
 
 export interface AnalysisLine {
@@ -39,6 +41,9 @@ interface EvaluateOptions {
   nodes?: number;
   stable?: boolean;
   searchMoves?: string[];
+  multipv?: number;
+  newGame?: boolean;
+  usiOptions?: Record<string, string | number | boolean>;
 }
 
 /**
@@ -178,9 +183,13 @@ export class ShogiEngine {
       await this.stopAnalysis();
     }
 
-    // Reset MultiPV to 1 so we only get the best line.
-    // (startAnalysis may have set it to 5.)
-    this.send('setoption name MultiPV value 1');
+    const multipv = Math.max(1, Math.floor(Number(options.multipv ?? 1)));
+    const usiOptions = options.usiOptions ?? {};
+
+    for (const [name, value] of Object.entries(usiOptions)) {
+      this.setOptionIfSupported(name, String(value));
+    }
+    this.send(`setoption name MultiPV value ${multipv}`);
 
     // Stable mode for repeatable choice scoring: single-thread + clear hash.
     if (stable) {
@@ -189,6 +198,10 @@ export class ShogiEngine {
     }
 
     await this.sendAndWait('isready', 'readyok');
+    if (options.newGame) {
+      this.send('usinewgame');
+      await this.sendAndWait('isready', 'readyok');
+    }
 
     let posCmd = `position sfen ${sfen}`;
     if (moves.length > 0) {
@@ -205,6 +218,9 @@ export class ShogiEngine {
     let evalCp = 0;
     let pv: string[] = [];
     let bestmove = '';
+    const analysisLines = lines
+      .map((line) => this.parseInfoLine(line))
+      .filter((line): line is AnalysisLine => Boolean(line));
 
     for (const line of lines) {
       if (line.startsWith('bestmove')) {
@@ -270,7 +286,7 @@ export class ShogiEngine {
       await this.sendAndWait('isready', 'readyok');
     }
 
-    return { eval_cp: evalCp, pv, bestmove };
+    return { eval_cp: evalCp, pv, bestmove, lines: analysisLines, rawLines: lines };
   }
 
   getCurrentTuning(): AnalysisTuning {
