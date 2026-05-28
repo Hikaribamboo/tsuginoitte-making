@@ -1,8 +1,6 @@
 import type { LearningMode, LearningProblemInput } from '../types/problem';
 import { supabase } from './rpc';
 
-const DISPLAY_NO_MIN = 49;
-
 export type SaveProblemInput = {
   prompt: string;
   root_sfen: string;
@@ -94,49 +92,46 @@ export function normalizeChoicesForSave(choices: SaveChoiceInput[]): SaveChoiceI
 // ---- Display No allocation ----
 
 export async function getNextDisplayNoByMode(mode: LearningMode): Promise<number> {
-  let table: string;
-  let filterMode: LearningMode | null = null;
-
-  if (mode === 'next_move') {
-    table = 'next_move_problems';
-  } else {
-    table = 'problems';
-    filterMode = 'joseki';
-  }
-
-  let query = supabase
-    .from(table)
-    .select('display_no')
-    .not('display_no', 'is', null);
-
-  if (filterMode) {
-    query = query.eq('mode', filterMode);
-  }
-
-  const { data, error } = await query.order('display_no', { ascending: true });
+  const { data, error } = await supabase.rpc('allocate_problem_display_no', {
+    p_mode: mode,
+  });
 
   if (error) {
     throw error;
   }
 
-  // Collect all used display_no values
-  const usedNumbers = new Set<number>();
-  if (Array.isArray(data)) {
-    for (const row of data) {
-      if (typeof row.display_no === 'number') {
-        usedNumbers.add(row.display_no);
-      }
-    }
+  const displayNo = Number(data);
+  if (!Number.isInteger(displayNo) || displayNo <= 0) {
+    throw new Error(`invalid display_no allocated by database: ${String(data)}`);
   }
 
-  // Find the first unused number starting from DISPLAY_NO_MIN
-  for (let candidate = DISPLAY_NO_MIN; candidate <= DISPLAY_NO_MIN + 10000; candidate++) {
-    if (!usedNumbers.has(candidate)) {
-      return candidate;
-    }
-  }
+  return displayNo;
+}
 
-  throw new Error('failed to find available display_no');
+function isDisplayNoUniqueViolation(error: unknown): boolean {
+  const err = error as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown };
+  const text = [
+    err?.code,
+    err?.message,
+    err?.details,
+    err?.hint,
+  ].map((value) => String(value ?? '')).join(' ');
+
+  return (
+    text.includes('23505') ||
+    text.includes('duplicate key') ||
+    text.includes('unique constraint') ||
+    text.includes('display_no')
+  );
+}
+
+function createDisplayNoDuplicateError(displayNo: number | null, mode: LearningMode): Error {
+  const label = mode === 'next_move' ? '次の一手' : '定跡';
+  return new Error(
+    displayNo == null
+      ? `${label}のdisplay_noが重複しています。再度保存してください。`
+      : `${label}のdisplay_no ${displayNo} は既に使われています。別の番号を指定してください。`,
+  );
 }
 
 export async function getNextDisplayNo(): Promise<number> {
@@ -170,49 +165,33 @@ async function saveProblemToNextMoveTable(
   problem: SaveLearningProblemInput,
   choices: SaveChoiceInput[],
 ): Promise<SaveProblemResult> {
-  // Existing retry logic for next_move
-  const MAX_RETRIES = 5;
-  let lastError: any = null;
-  let problemData: any = null;
+  const displayNoToUse = problem.display_no ?? await getNextDisplayNoByMode('next_move');
+  const { data: problemData, error } = await supabase
+    .from('next_move_problems')
+    .insert({
+      prompt: problem.prompt,
+      root_sfen: problem.root_sfen,
+      correct_choice_id: problem.correct_choice_id,
+      intro_moves_usi: problem.intro_moves_usi,
+      root_eval_cp: problem.root_eval_cp,
+      root_eval_percent: problem.root_eval_percent,
+      problem_rating: problem.problem_rating,
+      problem_rating_games: problem.problem_rating_games,
+      display_no: displayNoToUse,
+      tags: problem.tags,
+    })
+    .select('id')
+    .single();
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const displayNoToUse = problem.display_no ?? await getNextDisplayNo();
-    const { data, error } = await supabase
-      .from('next_move_problems')
-      .insert({
-        prompt: problem.prompt,
-        root_sfen: problem.root_sfen,
-        correct_choice_id: problem.correct_choice_id,
-        intro_moves_usi: problem.intro_moves_usi,
-        root_eval_cp: problem.root_eval_cp,
-        root_eval_percent: problem.root_eval_percent,
-        problem_rating: problem.problem_rating,
-        problem_rating_games: problem.problem_rating_games,
-        display_no: displayNoToUse,
-        tags: problem.tags,
-      })
-      .select('id')
-      .single();
-
-    if (!error) {
-      problemData = data;
-      break;
+  if (error) {
+    if (isDisplayNoUniqueViolation(error)) {
+      throw createDisplayNoDuplicateError(displayNoToUse, 'next_move');
     }
-
-    lastError = error;
-
-    // If duplicate display_no, retry with a fresh next value
-    const msg = String(error?.message || (error as any)?.details || '');
-    if (msg.includes('duplicate key') || msg.includes('unique constraint')) {
-      problem.display_no = null;
-      continue;
-    }
-
     throw error;
   }
 
   if (!problemData) {
-    throw lastError || new Error('failed to insert problem');
+    throw new Error('failed to insert problem');
   }
 
   const problemId = problemData.id as number;
@@ -244,54 +223,39 @@ async function saveProblemToProblemsTable(
   choices: SaveChoiceInput[],
 ): Promise<SaveProblemResult> {
   // Save directly to problems / problem_choices (joseki mode)
-  const MAX_RETRIES = 5;
-  let lastError: any = null;
-  let problemData: any = null;
-
   const problemRating = problem.problem_rating ?? 1500;
   const problemRatingGames = problem.problem_rating_games ?? 0;
-  const status =
-    'active'
+  const status = problem.status ?? 'active';
+  const displayNoToUse = problem.display_no ?? await getNextDisplayNoByMode('joseki');
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const displayNoToUse = problem.display_no ?? await getNextDisplayNoByMode('joseki');
-    const { data, error } = await supabase
-      .from('problems')
-      .insert({
-        prompt: problem.prompt,
-        root_sfen: problem.root_sfen,
-        correct_choice_id: problem.correct_choice_id,
-        intro_moves_usi: problem.intro_moves_usi,
-        root_eval_cp: problem.root_eval_cp,
-        root_eval_percent: problem.root_eval_percent,
-        problem_rating: problemRating,
-        problem_rating_games: problemRatingGames,
-        display_no: displayNoToUse,
-        tags: problem.tags,
-        mode: 'joseki',
-        status,
-      })
-      .select('id')
-      .single();
+  const { data: problemData, error } = await supabase
+    .from('problems')
+    .insert({
+      prompt: problem.prompt,
+      root_sfen: problem.root_sfen,
+      correct_choice_id: problem.correct_choice_id,
+      intro_moves_usi: problem.intro_moves_usi,
+      root_eval_cp: problem.root_eval_cp,
+      root_eval_percent: problem.root_eval_percent,
+      problem_rating: problemRating,
+      problem_rating_games: problemRatingGames,
+      display_no: displayNoToUse,
+      tags: problem.tags,
+      mode: 'joseki',
+      status,
+    })
+    .select('id')
+    .single();
 
-    if (!error) {
-      problemData = data;
-      break;
+  if (error) {
+    if (isDisplayNoUniqueViolation(error)) {
+      throw createDisplayNoDuplicateError(displayNoToUse, 'joseki');
     }
-
-    lastError = error;
-
-    const msg = String(error?.message || (error as any)?.details || '');
-    if (msg.includes('duplicate key') || msg.includes('unique constraint')) {
-      problem.display_no = null;
-      continue;
-    }
-
     throw error;
   }
 
   if (!problemData) {
-    throw lastError || new Error('failed to insert problem');
+    throw new Error('failed to insert problem');
   }
 
   const problemId = problemData.id as number;

@@ -80,8 +80,9 @@ const ProductionReview: React.FC = () => {
   const [saveError, setSaveError] = useState('');
   const [saveOkFlash, setSaveOkFlash] = useState(false);
   const [items, setItems] = useState<ProductionProblem[]>([]);
-  const [itemSummaryMap, setItemSummaryMap] = useState<Record<number, ProductionValidationSummary>>({});
+  const [itemSummaryMap, setItemSummaryMap] = useState<Record<string, ProductionValidationSummary>>({});
   const [selectedProblemId, setSelectedProblemId] = useState<number | null>(null);
+  const [selectedProblemMode, setSelectedProblemMode] = useState<ProductionProblemMode | null>(null);
   const [detail, setDetail] = useState<ProductionProblemDetail | null>(null);
   const [detailDraft, setDetailDraft] = useState<ProductionProblemDetail | null>(null);
   const [mode, setMode] = useState<'all' | ProductionProblemMode>('all');
@@ -108,31 +109,37 @@ const ProductionReview: React.FC = () => {
         setItems([]);
         setItemSummaryMap({});
         setSelectedProblemId(null);
+        setSelectedProblemMode(null);
         return;
       }
 
-      const choices = await listProductionChoicesByProblemIds(rows.map((row) => row.problemId));
+      const choices = await listProductionChoicesByProblemIds(rows.map((row) => row.problemId), mode);
       const groupedChoices = groupByProblemId(choices);
-      const nextSummaryMap: Record<number, ProductionValidationSummary> = {};
+      const nextSummaryMap: Record<string, ProductionValidationSummary> = {};
 
       for (const row of rows) {
-        nextSummaryMap[row.problemId] = getProductionValidationSummary(
+        nextSummaryMap[productionItemKey(row)] = getProductionValidationSummary(
           row,
-          groupedChoices.get(row.problemId) ?? [],
+          groupedChoices.get(productionItemKey(row)) ?? [],
         );
       }
 
       setItems(rows);
       setItemSummaryMap(nextSummaryMap);
-      setSelectedProblemId((current) => {
-        if (current != null && rows.some((row) => row.problemId === current)) return current;
-        return rows[0].problemId;
-      });
+      const currentKey = selectedProblemId == null || selectedProblemMode == null
+        ? null
+        : `${selectedProblemMode}:${selectedProblemId}`;
+      const nextSelected = currentKey
+        ? rows.find((row) => productionItemKey(row) === currentKey) ?? rows[0]
+        : rows[0];
+      setSelectedProblemId(nextSelected.problemId);
+      setSelectedProblemMode(nextSelected.mode);
     } catch (nextError: any) {
       setListError(nextError?.message ?? '本番問題一覧の取得に失敗しました');
       setItems([]);
       setItemSummaryMap({});
       setSelectedProblemId(null);
+      setSelectedProblemMode(null);
     } finally {
       setLoadingList(false);
     }
@@ -147,7 +154,7 @@ const ProductionReview: React.FC = () => {
     let cancelled = false;
 
     async function loadDetail() {
-      if (selectedProblemId == null) {
+      if (selectedProblemId == null || selectedProblemMode == null) {
         setDetail(null);
         setDetailDraft(null);
         return;
@@ -159,7 +166,7 @@ const ProductionReview: React.FC = () => {
         setSaveError('');
         setDetail(null);
         setDetailDraft(null);
-        const nextDetail = await getProductionProblemById(selectedProblemId);
+        const nextDetail = await getProductionProblemById(selectedProblemId, selectedProblemMode);
         if (!cancelled) {
           setDetail(nextDetail);
           setDetailDraft(nextDetail);
@@ -187,16 +194,16 @@ const ProductionReview: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [selectedProblemId]);
+  }, [selectedProblemId, selectedProblemMode]);
 
   const selectedRow = useMemo(
-    () => items.find((item) => item.problemId === selectedProblemId) ?? null,
-    [items, selectedProblemId],
+    () => items.find((item) => item.problemId === selectedProblemId && item.mode === selectedProblemMode) ?? null,
+    [items, selectedProblemId, selectedProblemMode],
   );
 
   const selectedSummary = useMemo(() => {
     if (detailDraft) return getProductionDetailValidationSummary(detailDraft);
-    if (selectedRow) return itemSummaryMap[selectedRow.problemId] ?? summarizeProductionIssues([]);
+    if (selectedRow) return itemSummaryMap[productionItemKey(selectedRow)] ?? summarizeProductionIssues([]);
     return summarizeProductionIssues([]);
   }, [detailDraft, itemSummaryMap, selectedRow]);
 
@@ -269,6 +276,7 @@ const ProductionReview: React.FC = () => {
     try {
       const updated = await updateProductionProblemById(
         detailDraft.problemId,
+        detailDraft.mode,
         {
           prompt: detailDraft.prompt,
           rootSfen: detailDraft.rootSfen,
@@ -378,14 +386,17 @@ const ProductionReview: React.FC = () => {
             ) : (
               <div className="space-y-2">
                 {items.map((item) => {
-                  const selected = item.problemId === selectedProblemId;
-                  const summary = itemSummaryMap[item.problemId] ?? summarizeProductionIssues([]);
+                  const selected = item.problemId === selectedProblemId && item.mode === selectedProblemMode;
+                  const summary = itemSummaryMap[productionItemKey(item)] ?? summarizeProductionIssues([]);
 
                   return (
                     <button
-                      key={item.problemId}
+                      key={productionItemKey(item)}
                       type="button"
-                      onClick={() => setSelectedProblemId(item.problemId)}
+                      onClick={() => {
+                        setSelectedProblemId(item.problemId);
+                        setSelectedProblemMode(item.mode);
+                      }}
                       className={`w-full rounded-lg border p-3 text-left ${
                         selected
                           ? 'border-sky-400 bg-sky-100/70 shadow-[0_8px_26px_rgba(2,132,199,0.15)]'
@@ -912,12 +923,17 @@ function TagEditor({
   );
 }
 
-function groupByProblemId(choices: ProductionChoice[]): Map<number, ProductionChoice[]> {
-  const grouped = new Map<number, ProductionChoice[]>();
+function productionItemKey(item: Pick<ProductionProblem, 'mode' | 'problemId'>): string {
+  return `${item.mode}:${item.problemId}`;
+}
+
+function groupByProblemId(choices: ProductionChoice[]): Map<string, ProductionChoice[]> {
+  const grouped = new Map<string, ProductionChoice[]>();
   for (const choice of choices) {
-    const current = grouped.get(choice.problem_id) ?? [];
+    const key = `${choice.mode}:${choice.problem_id}`;
+    const current = grouped.get(key) ?? [];
     current.push(choice);
-    grouped.set(choice.problem_id, current);
+    grouped.set(key, current);
   }
   return grouped;
 }

@@ -19,6 +19,7 @@ export interface ProductionProblem {
 }
 
 export interface ProductionChoice {
+  mode: ProductionProblemMode;
   problem_id: number;
   choice_id: number;
   usi: string;
