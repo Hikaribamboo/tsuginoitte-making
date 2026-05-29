@@ -266,10 +266,6 @@ function computeUserCpFromGathered(args: { gathered: PvInfo[]; questionTurn: Col
   return userCp;
 }
 
-function formatNullableNumber(value: number | null): string {
-  return value == null ? "-" : String(value);
-}
-
 export async function scanGame(args: {
   engine: EngineClient;
   initialSfen: string;
@@ -282,9 +278,7 @@ export async function scanGame(args: {
   const minT = 2;
   const maxT = moves.length - 1;
 
-  console.log("pass1開始");
   const candidates: Candidate[] = [];
-  let previousAfterSente: number | null = null;
 
   for (let t = minT; t <= maxT; t++) {
     const introMoveUsi = moves[t - 1];
@@ -333,48 +327,19 @@ export async function scanGame(args: {
     const diff = Math.abs(signedDiff);
 
     const isCandidate = diff >= config.suspiciousMinDiff;
-    let afterSente: number | null = null;
-    let afterDelta: number | null = null;
-    if (isCandidate || config.scan.debugComparePass1) {
-      const turnAfterActual = getTurnAtS(initialTurn, t + 1);
-      const afterActual = await engine.analyze({
-        positionCommand: buildPositionCommand(initialSfen, moves.slice(0, t + 1)),
-        depth: config.scan.depth,
-        pvPlies: 2,
-        label: `scan-pass1-after-t${t}`,
-      });
-      const after = pickBestCpInfo(afterActual.infos);
-      afterSente = after ? normalizeCpToSentePerspective(after.eval, turnAfterActual) : null;
-      afterDelta = afterSente == null || previousAfterSente == null ? null : afterSente - previousAfterSente;
-    }
-
     if (isCandidate || config.scan.debugAllPass1) {
       console.log(
-        `pass1${isCandidate ? "候補" : "確認"}: row ${t + 1} actual ${actualMoveUsi} imageEval=${formatNullableNumber(afterSente)} appActualEval=${actualEvalSente} imageDelta=${formatNullableNumber(afterDelta)} best ${best.pv[0] ?? "-"} signedLoss=${signedDiff} absLoss=${diff}`
+        `pass1${isCandidate ? "候補" : "確認"}: row ${t + 1} actual ${actualMoveUsi} best ${best.pv[0] ?? "-"} appActualEval=${actualEvalSente} signedLoss=${signedDiff} absLoss=${diff}`
       );
     }
 
     if (isCandidate) {
       candidates.push({ t, diff, introMoveUsi, actualMoveUsi });
     }
-    if (afterSente != null) {
-      previousAfterSente = afterSente;
-    } else if (config.scan.debugComparePass1) {
-      previousAfterSente = null;
-    }
   }
 
   const pass2Targets = candidates.slice().sort((a, b) => a.t - b.t);
   const acceptedGap = config.finalize.minCandidateGapPlies ?? 30;
-
-  console.log(`pass1候補t一覧: ${candidates
-         .slice()
-         .sort((a, b) => a.t - b.t)
-         .map((x) => x.t)
-         .join(",")}`);
-
-  console.log(`pass1結果: 候補手 ${candidates.length}，pass2候補手 ${pass2Targets.length}`);
-  console.log("pass2開始");
 
   const results: ScanResult[] = [];
   const acceptedTs: number[] = [];
@@ -385,7 +350,6 @@ export async function scanGame(args: {
     if (attemptedPass2 >= config.maxCandidates) break;
     const skippedByAcceptedGap = acceptedTs.some((acceptedT) => c.t > acceptedT && c.t - acceptedT < acceptedGap);
     if (skippedByAcceptedGap) {
-      console.log(`pass2候補: skip t ${c.t}，採用済み候補から${acceptedGap}手以内`);
       continue;
     }
     attemptedPass2 += 1;
@@ -411,7 +375,7 @@ export async function scanGame(args: {
     let giveUpReason: string | null = null;
     let ok = false;
 
-    console.log(`pass2候補: start t ${t} d${finalDepth} actual ${actualMoveUsi} turn ${turnAtS}`);
+    console.log(`pass2解析SFEN: t ${t} row ${t + 1} d${finalDepth} actual ${actualMoveUsi} ${positionCommandS}`);
 
     await engine.setMultiPv(1);
     const bestAnalysis = await engine.analyze({
@@ -467,7 +431,6 @@ export async function scanGame(args: {
           turnAtS,
           randomSeed: t * 1000 + mp,
         });
-        console.log(`pass2候補: 悪手探索 t ${t} d${wrongProbeDepth} mp${mp} 候補${candidatesForWrong2.length}`);
 
         for (const candidate of candidatesForWrong2) {
           const wrongUsi = candidate.info.pv[0];
@@ -490,10 +453,6 @@ export async function scanGame(args: {
             threshold,
             turnAtS,
           });
-          console.log(
-            `pass2候補: 悪手再評価 t ${t} move ${wrongUsi} d${finalDepth} found=${summary.foundWrong2 ? "true" : "false"} worstLoss=${summary.worstLoss}`
-          );
-
           if (summary.foundWrong2) {
             ok = true;
             break;
@@ -524,10 +483,6 @@ export async function scanGame(args: {
     if (ok) {
       results.push({ t, rootSfen, introMoveUsi, actualMoveUsi, infos: gathered });
       acceptedTs.push(t);
-      console.log(`pass2候補: OK，t ${t}`);
-    } else {
-      const reason = giveUpReason ?? "条件未達";
-      console.log(`pass2候補: NG，t ${t}，理由 ${reason}`);
     }
   }
 

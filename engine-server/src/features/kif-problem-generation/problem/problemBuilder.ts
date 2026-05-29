@@ -189,7 +189,6 @@ export async function buildProblemOutFromScan(args: {
   if (!infos.length) return null;
   if (hasMate(infos)) return null;
 
-  const rootTurn = getRootTurnFromSfen(rootSfen);
   const questionTurn = questionTurnFromRootSfenAndIntro(rootSfen, introMoveUsi);
 
   const normalizedCpInfos = normalizeInfosToSenteCp(infos, questionTurn);
@@ -206,16 +205,10 @@ export async function buildProblemOutFromScan(args: {
   const userCp = userColor === "b" ? rootEvalCp : -rootEvalCp;
 
   if (rejectIfBestTooBadCp != null && userCp < -rejectIfBestTooBadCp) {
-    console.log(
-      `pass2問題作成 破棄: 理由 ユーザー不利，t ${t}，root評価 ${rootEvalCp}，下限 ${rejectIfBestTooBadCp}`
-    );
     return null;
   }
 
   if (rejectIfBestTooGoodCp != null && userCp > rejectIfBestTooGoodCp) {
-    console.log(
-      `pass2問題作成 破棄: 理由 ユーザー有利すぎ，t ${t}，root評価 ${rootEvalCp}，上限 ${rejectIfBestTooGoodCp}`
-    );
     return null;
   }
 
@@ -236,9 +229,6 @@ export async function buildProblemOutFromScan(args: {
   });
 
   if (!wrong2) {
-    console.log(
-      `pass2問題作成 破棄: 理由 悪手不足，t ${t}，閾値 ${blunderThreshold}，正解 ${correctUsi}，実戦手 ${actualMoveUsi}，最善評価 ${bestEval}`
-    );
     return null;
   }
 
@@ -247,11 +237,6 @@ export async function buildProblemOutFromScan(args: {
   const wrong2Line = pvLineUpTo8(wrong2);
 
   if (!bestLine || !wrong1Line || !wrong2Line) {
-    const w1 = wrong1.pv[0] ?? "-";
-    const w2 = wrong2.pv[0] ?? "-";
-    console.log(
-      `pass2問題作成 破棄: 理由 読み筋なし，t ${t}，正解 ${correctUsi}，実戦手 ${w1}，悪手 ${w2}，pv長 正解 ${best.pv.length}，実戦手 ${wrong1.pv.length}，悪手 ${wrong2.pv.length}`
-    );
     return null;
   }
 
@@ -261,7 +246,6 @@ export async function buildProblemOutFromScan(args: {
 
   if (!u1 || !u2) return null;
   if (u0 === u1 || u0 === u2 || u1 === u2) {
-    console.log(`pass2問題作成 破棄: 理由 重複選択肢，t ${t}，手1 ${u0}，手2 ${u1}，手3 ${u2}`);
     return null;
   }
 
@@ -338,10 +322,6 @@ export async function buildProblemOutFromScan(args: {
     candidateEval: wrong2.eval,
     questionTurn,
   });
-
-  console.log(
-    `問題作成 成功: t ${t}，root手番 ${rootTurn}`
-  );
 
   return {
     id: problemId,
