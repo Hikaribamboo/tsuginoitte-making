@@ -14,6 +14,24 @@ type Candidate = {
   diff: number;
   introMoveUsi: string;
   actualMoveUsi: string;
+  bestMoveUsi: string;
+};
+
+type Pass1LogItem = {
+  t: number;
+  actualMoveUsi: string;
+  bestMoveUsi: string;
+  diff: number;
+};
+
+type Pass2LogItem = {
+  t: number;
+  depth: number;
+  positionCommand: string;
+  turnAtS: Color;
+  best: PvInfo;
+  actual: PvInfo;
+  wrong: PvInfo;
 };
 
 function pickBestCpInfo(infos: PvInfo[]) {
@@ -97,6 +115,25 @@ function bestLossCp(args: {
 
   if (turnAtS === "b") return bestEvalSente - candidateEvalSente;
   return candidateEvalSente - bestEvalSente;
+}
+
+function formatMoveEval(info: PvInfo, turnAtS: Color): string {
+  const move = info.pv[0] ?? "-";
+  if (info.evalType === "mate") return `${move} mate=${info.eval}`;
+
+  const senteEval = normalizeCpToSentePerspective(info.eval, turnAtS);
+  return `${move} eval=${senteEval} raw=${info.eval}`;
+}
+
+function formatLoss(args: { best: PvInfo; candidate: PvInfo; turnAtS: Color }): number | null {
+  const { best, candidate, turnAtS } = args;
+  if (best.evalType !== "cp" || candidate.evalType !== "cp") return null;
+
+  return bestLossCp({
+    bestEvalSente: normalizeCpToSentePerspective(best.eval, turnAtS),
+    candidateEvalSente: normalizeCpToSentePerspective(candidate.eval, turnAtS),
+    turnAtS,
+  });
 }
 
 async function analyzeMove(args: {
@@ -279,6 +316,7 @@ export async function scanGame(args: {
   const maxT = moves.length - 1;
 
   const candidates: Candidate[] = [];
+  const pass1LogItems: Pass1LogItem[] = [];
 
   for (let t = minT; t <= maxT; t++) {
     const introMoveUsi = moves[t - 1];
@@ -327,22 +365,30 @@ export async function scanGame(args: {
     const diff = Math.abs(signedDiff);
 
     const isCandidate = diff >= config.suspiciousMinDiff;
-    if (isCandidate || config.scan.debugAllPass1) {
+    if (config.scan.debugAllPass1) {
       console.log(
         `pass1${isCandidate ? "候補" : "確認"}: row ${t + 1} actual ${actualMoveUsi} best ${best.pv[0] ?? "-"} appBestEval=${bestEvalSente} appActualEval=${actualEvalSente} signedLoss=${signedDiff} absLoss=${diff}`
       );
     }
 
     if (isCandidate) {
-      candidates.push({ t, diff, introMoveUsi, actualMoveUsi });
+      const bestMoveUsi = best.pv[0] ?? "-";
+      candidates.push({ t, diff, introMoveUsi, actualMoveUsi, bestMoveUsi });
+      pass1LogItems.push({ t, actualMoveUsi, bestMoveUsi, diff });
     }
   }
+
+  const pass1Summary = pass1LogItems
+    .map((x) => `row${x.t + 1} ${x.actualMoveUsi}->${x.bestMoveUsi} loss${x.diff}`)
+    .join(", ");
+  console.log(`pass1候補まとめ: ${pass1LogItems.length}件${pass1Summary ? ` ${pass1Summary}` : ""}`);
 
   const pass2Targets = candidates.slice().sort((a, b) => a.t - b.t);
   const acceptedGap = config.finalize.minCandidateGapPlies ?? 30;
 
   const results: ScanResult[] = [];
   const acceptedTs: number[] = [];
+  const pass2LogItems: Pass2LogItem[] = [];
   let attemptedPass2 = 0;
 
   for (const c of pass2Targets) {
@@ -374,8 +420,8 @@ export async function scanGame(args: {
     let gathered: PvInfo[] = [];
     let giveUpReason: string | null = null;
     let ok = false;
-
-    console.log(`pass2解析SFEN: t ${t} row ${t + 1} d${finalDepth} actual ${actualMoveUsi} ${positionCommandS}`);
+    let actualInfo: PvInfo | null = null;
+    let selectedWrongInfo: PvInfo | null = null;
 
     await engine.setMultiPv(1);
     const bestAnalysis = await engine.analyze({
@@ -400,7 +446,7 @@ export async function scanGame(args: {
     }
 
     if (!giveUpReason) {
-      const actualInfo = await analyzeMove({
+      actualInfo = await analyzeMove({
         engine,
         positionCommand: positionCommandS,
         depth: finalDepth,
@@ -454,6 +500,7 @@ export async function scanGame(args: {
             turnAtS,
           });
           if (summary.foundWrong2) {
+            selectedWrongInfo = wrongFinal;
             ok = true;
             break;
           }
@@ -483,7 +530,30 @@ export async function scanGame(args: {
     if (ok) {
       results.push({ t, rootSfen, introMoveUsi, actualMoveUsi, infos: gathered });
       acceptedTs.push(t);
+      if (finalBest && actualInfo && selectedWrongInfo) {
+        pass2LogItems.push({
+          t,
+          depth: finalDepth,
+          positionCommand: positionCommandS,
+          turnAtS,
+          best: finalBest,
+          actual: actualInfo,
+          wrong: selectedWrongInfo,
+        });
+      }
     }
+  }
+
+  console.log(`pass2結果まとめ: ${pass2LogItems.length}件`);
+  for (const item of pass2LogItems) {
+    const actualLoss = formatLoss({ best: item.best, candidate: item.actual, turnAtS: item.turnAtS });
+    const wrongLoss = formatLoss({ best: item.best, candidate: item.wrong, turnAtS: item.turnAtS });
+    const actualLossText = actualLoss == null ? "" : ` loss=${actualLoss}`;
+    const wrongLossText = wrongLoss == null ? "" : ` loss=${wrongLoss}`;
+    console.log(
+      `pass2結果: row ${item.t + 1} t ${item.t} d${item.depth} 最善 ${formatMoveEval(item.best, item.turnAtS)} / 実戦悪手 ${formatMoveEval(item.actual, item.turnAtS)}${actualLossText} / 悪手 ${formatMoveEval(item.wrong, item.turnAtS)}${wrongLossText}`
+    );
+    console.log(`pass2解析SFEN: row ${item.t + 1} ${item.positionCommand}`);
   }
 
   return results;
