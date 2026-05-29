@@ -9,6 +9,7 @@
     "dev:windows-tailscale": "cross-env ENABLE_SHOGI_ENGINE=1 HOST=100.65.146.62 PORT=8765 AMTS_ENGINE_THREADS=4 AMTS_ENGINE_HASH_MB=1024 AMTS_ENGINE_OWN_BOOK=false FV_SCALE=40 AMTS_FINALIZE_DEPTH=24 tsx watch --no-cache src/index.ts",
     "start:windows-tailscale": "cross-env ENABLE_SHOGI_ENGINE=1 HOST=100.65.146.62 PORT=8765 AMTS_ENGINE_THREADS=4 AMTS_ENGINE_HASH_MB=1024 AMTS_ENGINE_OWN_BOOK=false FV_SCALE=40 AMTS_FINALIZE_DEPTH=24 tsx --no-cache src/index.ts",
     "kif-problem:batch": "tsx --no-cache src/features/kif-problem-generation/tools/batchGenerate.ts",
+    "kif-problem:compare": "tsx --no-cache src/features/kif-problem-generation/tools/compareKifuAnalysis.ts",
     "dev:with-web-build": "cd ../web && npm run build && cd ../engine-server && npm run dev"
   },
   "dependencies": {

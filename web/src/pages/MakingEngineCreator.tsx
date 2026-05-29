@@ -72,6 +72,21 @@ type GeneratedDraftProblemRow = {
   source_ref: string | null;
 };
 
+type CompareRow = {
+  row: number;
+  move: string;
+  turnBefore: 'b' | 'w';
+  bestMoveBefore: string;
+  rawBestBefore: number | null;
+  senteBestBefore: number | null;
+  rawActualSearch: number | null;
+  senteActualSearch: number | null;
+  pass1Loss: number | null;
+  rawAfterMove: number | null;
+  senteAfterMove: number | null;
+  afterDelta: number | null;
+};
+
 const DEFAULT_BOOK_FORM: BookFormState = {
   bookPath: '',
   bookType: 'petashock',
@@ -88,7 +103,7 @@ const DEFAULT_KIFS_FORM: KifsFormState = {
   batchSize: '10',
   maxProblemsPerGame: '3',
   maxScanResultsPerGame: '12',
-  scanDepth: '12',
+  scanDepth: '16',
   finalizeDepth: '26',
   suspiciousMinDiff: '300',
   suspiciousMaxDiff: '1600',
@@ -96,6 +111,9 @@ const DEFAULT_KIFS_FORM: KifsFormState = {
 
 const DEFAULT_ENGINE_TEST_SFEN =
   'ln3g2l/1r4k2/p2psgns1/2p2bppp/1p2pp3/2PPP1PSP/PP1S1GNP1/3B1GK2/LN1R4L w P 46';
+
+const DEFAULT_COMPARE_POSITION =
+  'position sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1 moves 2g2f 3c3d 7g7f 4c4d 3i4h 3a3b 2f2e 2b3c 5i6h 3b4c 4i5h 8b4b 5g5f 5a6b 6h7h 6b7b 3g3f 7b8b 6g6f 9a9b 8h7g 8b9a 5h6g 7a8b 7h8h 6a7a 2i3g 4a5b 9i9h 4c5d 6i7h 6c6d 8h9i 6d6e 6f6e 5d6e P*6f 6e7d 7i8h 5b6b 1g1f 4d4e 4h5g 3d3e 2h2f 3c4d 2e2d 2c2d 2f2d 4b2b 2d4d 3e3f 3g4e 3f3g+ 4d4a+ 2b2h+ B*5e 2h7h 6g6h 7h7g 6h7g 3g4g 4e5c+ 6b5c 4a4g N*8e 7g7h B*6i 4g3h G*4g 3h6h 6i5h+ R*5a 4g5g 6h5h 5g5h 5a5c+ 5h5g G*7i P*6g 5e4f R*5h B*3f P*4g 5c5a S*6b 3f8a+ 9a8a 5a2a 6g6h+ 7h6h 5g6h 7i6h 5h5f+ N*6d P*6a G*5b 7d6c 5b6a 7a6a 2a6a G*7a G*7b 8a9a 7b7a 8b7a N*7e G*7b 7e6c 6b6c 6d7b+';
 
 const MakingEngineCreator: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -112,6 +130,12 @@ const MakingEngineCreator: React.FC = () => {
   const [testDepth, setTestDepth] = useState('29');
   const [testResult, setTestResult] = useState<EngineEvalResult | null>(null);
   const [testingEngine, setTestingEngine] = useState(false);
+  const [comparePosition, setComparePosition] = useState(DEFAULT_COMPARE_POSITION);
+  const [compareDepth, setCompareDepth] = useState('16');
+  const [compareStartRow, setCompareStartRow] = useState('40');
+  const [compareEndRow, setCompareEndRow] = useState('100');
+  const [compareRows, setCompareRows] = useState<CompareRow[]>([]);
+  const [comparingKifu, setComparingKifu] = useState(false);
   const importedJobIdsRef = useRef<Set<string>>(new Set());
   const hydratedInitialJobsRef = useRef(false);
 
@@ -262,6 +286,66 @@ const MakingEngineCreator: React.FC = () => {
     }
   };
 
+  const runKifuCompare = async () => {
+    setComparingKifu(true);
+    setError('');
+    setMessage('');
+    setCompareRows([]);
+    try {
+      const parsed = parsePositionCommand(comparePosition);
+      const depth = parseRequiredInt(compareDepth, 'depth', 1);
+      const startRow = parseRequiredInt(compareStartRow, 'startRow', 1);
+      const endRow = Math.min(parseRequiredInt(compareEndRow, 'endRow', startRow), parsed.moves.length);
+      const initialTurn = getInitialTurn(parsed.initialSfen);
+      const rows: CompareRow[] = [];
+      let previousAfterSente: number | null = null;
+
+      const startEval = await evaluatePosition(parsed.initialSfen, [], { depth });
+      previousAfterSente = normalizeCpToSente(startEval.eval_cp, initialTurn);
+
+      for (let row = startRow; row <= endRow; row += 1) {
+        const move = parsed.moves[row - 1];
+        if (!move) break;
+        const beforeMoves = parsed.moves.slice(0, row - 1);
+        const afterMoves = parsed.moves.slice(0, row);
+        const turnBefore = turnAfterPlies(initialTurn, row - 1);
+        const turnAfter = turnAfterPlies(initialTurn, row);
+
+        const bestBefore = await evaluatePosition(parsed.initialSfen, beforeMoves, { depth });
+        const actualSearch = await evaluatePosition(parsed.initialSfen, beforeMoves, {
+          depth,
+          searchMoves: [move],
+        });
+        const afterMove = await evaluatePosition(parsed.initialSfen, afterMoves, { depth });
+
+        const senteBestBefore = normalizeCpToSente(bestBefore.eval_cp, turnBefore);
+        const senteActualSearch = normalizeCpToSente(actualSearch.eval_cp, turnBefore);
+        const senteAfterMove = normalizeCpToSente(afterMove.eval_cp, turnAfter);
+        rows.push({
+          row,
+          move,
+          turnBefore,
+          bestMoveBefore: bestBefore.bestmove ?? bestBefore.pv[0] ?? '',
+          rawBestBefore: bestBefore.eval_cp,
+          senteBestBefore,
+          rawActualSearch: actualSearch.eval_cp,
+          senteActualSearch,
+          pass1Loss: lossFromBest(senteBestBefore, senteActualSearch, turnBefore),
+          rawAfterMove: afterMove.eval_cp,
+          senteAfterMove,
+          afterDelta: senteAfterMove == null || previousAfterSente == null ? null : senteAfterMove - previousAfterSente,
+        });
+        setCompareRows([...rows]);
+        previousAfterSente = senteAfterMove;
+      }
+      setMessage('棋譜比較が完了しました。');
+    } catch (nextError: any) {
+      setError(nextError?.message ?? '棋譜比較に失敗しました');
+    } finally {
+      setComparingKifu(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
@@ -399,6 +483,61 @@ const MakingEngineCreator: React.FC = () => {
                 </div>
               </div>
             ) : null}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-base font-semibold text-slate-900">棋譜比較</h3>
+        <div className="grid gap-3 lg:grid-cols-[1fr_90px_90px_90px_auto]">
+          <FieldInput label="position" value={comparePosition} onChange={setComparePosition} />
+          <FieldInput label="depth" value={compareDepth} onChange={setCompareDepth} />
+          <FieldInput label="start row" value={compareStartRow} onChange={setCompareStartRow} />
+          <FieldInput label="end row" value={compareEndRow} onChange={setCompareEndRow} />
+          <div className="flex items-end">
+            <button
+              type="button"
+              className="h-9 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              onClick={runKifuCompare}
+              disabled={comparingKifu}
+            >
+              {comparingKifu ? '比較中...' : '比較'}
+            </button>
+          </div>
+        </div>
+
+        {compareRows.length > 0 ? (
+          <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200">
+            <table className="min-w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr>
+                  <th className="px-2 py-2">row</th>
+                  <th className="px-2 py-2">move</th>
+                  <th className="px-2 py-2">評価値候補</th>
+                  <th className="px-2 py-2">差候補</th>
+                  <th className="px-2 py-2">pass1Loss</th>
+                  <th className="px-2 py-2">best</th>
+                  <th className="px-2 py-2">rawAfter</th>
+                  <th className="px-2 py-2">rawActual</th>
+                  <th className="px-2 py-2">turn</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {compareRows.map((row) => (
+                  <tr key={row.row} className="font-mono text-slate-700">
+                    <td className="px-2 py-1">{row.row}</td>
+                    <td className="px-2 py-1">{row.move}</td>
+                    <td className="px-2 py-1">{formatMaybeNumber(row.senteAfterMove)}</td>
+                    <td className="px-2 py-1">{formatMaybeNumber(row.afterDelta)}</td>
+                    <td className="px-2 py-1">{formatMaybeNumber(row.pass1Loss)}</td>
+                    <td className="px-2 py-1">{row.bestMoveBefore}</td>
+                    <td className="px-2 py-1">{formatMaybeNumber(row.rawAfterMove)}</td>
+                    <td className="px-2 py-1">{formatMaybeNumber(row.rawActualSearch)}</td>
+                    <td className="px-2 py-1">{row.turnBefore}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : null}
       </section>
@@ -685,6 +824,50 @@ function buildAutoWorkspaceName(nextNumber: number, suffix: string) {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   return `#${nextNumber} ${pad(now.getMonth() + 1)}/${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())} ${suffix}`;
+}
+
+function parsePositionCommand(command: string): { initialSfen: string; moves: string[] } {
+  const trimmed = command.trim();
+  const prefix = 'position sfen ';
+  if (!trimmed.startsWith(prefix)) {
+    throw new Error('position は "position sfen ..." 形式で入力してください');
+  }
+  const body = trimmed.slice(prefix.length);
+  const marker = ' moves ';
+  const markerIndex = body.indexOf(marker);
+  if (markerIndex < 0) {
+    return { initialSfen: body.trim(), moves: [] };
+  }
+  return {
+    initialSfen: body.slice(0, markerIndex).trim(),
+    moves: body.slice(markerIndex + marker.length).trim().split(/\s+/).filter(Boolean),
+  };
+}
+
+function getInitialTurn(initialSfen: string): 'b' | 'w' {
+  const turn = initialSfen.trim().split(/\s+/)[1];
+  if (turn !== 'b' && turn !== 'w') {
+    throw new Error('SFEN の手番が不正です');
+  }
+  return turn;
+}
+
+function turnAfterPlies(initialTurn: 'b' | 'w', plies: number): 'b' | 'w' {
+  return plies % 2 === 0 ? initialTurn : initialTurn === 'b' ? 'w' : 'b';
+}
+
+function normalizeCpToSente(cp: number | null, turn: 'b' | 'w'): number | null {
+  if (cp == null) return null;
+  return turn === 'b' ? cp : -cp;
+}
+
+function lossFromBest(bestSente: number | null, actualSente: number | null, turn: 'b' | 'w'): number | null {
+  if (bestSente == null || actualSente == null) return null;
+  return turn === 'b' ? bestSente - actualSente : actualSente - bestSente;
+}
+
+function formatMaybeNumber(value: number | null): string {
+  return value == null ? '-' : String(value);
 }
 
 function formatDate(iso: string): string {

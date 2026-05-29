@@ -326,7 +326,14 @@ export async function scanGame(args: {
       turnAtS,
     });
 
-    if (diff >= config.suspiciousMinDiff && diff <= config.suspiciousMaxDiff) {
+    const isCandidate = diff >= config.suspiciousMinDiff && diff <= config.suspiciousMaxDiff;
+    if (isCandidate || config.scan.debugAllPass1) {
+      console.log(
+        `pass1${isCandidate ? "候補" : "確認"}: t ${t} row ${t + 1} turn ${turnAtS} actual ${actualMoveUsi} best ${best.pv[0] ?? "-"} rawBest=${best.eval} rawActual=${actual.eval} senteBest=${bestEvalSente} senteActual=${actualEvalSente} loss=${diff}`
+      );
+    }
+
+    if (isCandidate) {
       candidates.push({ t, diff, introMoveUsi, actualMoveUsi });
     }
   }
