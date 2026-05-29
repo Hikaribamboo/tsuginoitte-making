@@ -54,9 +54,10 @@ function pickBestCp(infos: PvInfo[]): PvInfo | null {
   return best;
 }
 
-function lossFromBest(bestSente: number | null, actualSente: number | null, turn: Color): number | null {
+function absLossFromBest(bestSente: number | null, actualSente: number | null, turn: Color): number | null {
   if (bestSente == null || actualSente == null) return null;
-  return turn === "b" ? bestSente - actualSente : actualSente - bestSente;
+  const signed = turn === "b" ? bestSente - actualSente : actualSente - bestSente;
+  return Math.abs(signed);
 }
 
 function intEnv(name: string, fallback: number): number {
@@ -182,7 +183,7 @@ async function main() {
           bestBeforeSente,
           actualSearch?.eval ?? "",
           actualSearchSente,
-          lossFromBest(bestBeforeSente, actualSearchSente, turnBefore),
+          absLossFromBest(bestBeforeSente, actualSearchSente, turnBefore),
           after?.eval ?? "",
           afterSente,
           afterDelta,

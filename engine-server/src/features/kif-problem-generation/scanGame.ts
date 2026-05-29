@@ -266,6 +266,10 @@ function computeUserCpFromGathered(args: { gathered: PvInfo[]; questionTurn: Col
   return userCp;
 }
 
+function formatNullableNumber(value: number | null): string {
+  return value == null ? "-" : String(value);
+}
+
 export async function scanGame(args: {
   engine: EngineClient;
   initialSfen: string;
@@ -280,6 +284,7 @@ export async function scanGame(args: {
 
   console.log("pass1開始");
   const candidates: Candidate[] = [];
+  let previousAfterSente: number | null = null;
 
   for (let t = minT; t <= maxT; t++) {
     const introMoveUsi = moves[t - 1];
@@ -320,21 +325,42 @@ export async function scanGame(args: {
     const bestEvalSente = normalizeCpToSentePerspective(best.eval, turnAtS);
     const actualEvalSente = normalizeCpToSentePerspective(actual.eval, turnAtS);
 
-    const diff = bestLossCp({
+    const signedDiff = bestLossCp({
       bestEvalSente,
       candidateEvalSente: actualEvalSente,
       turnAtS,
     });
+    const diff = Math.abs(signedDiff);
 
-    const isCandidate = diff >= config.suspiciousMinDiff && diff <= config.suspiciousMaxDiff;
+    const isCandidate = diff >= config.suspiciousMinDiff;
+    let afterSente: number | null = null;
+    let afterDelta: number | null = null;
+    if (isCandidate || config.scan.debugComparePass1) {
+      const turnAfterActual = getTurnAtS(initialTurn, t + 1);
+      const afterActual = await engine.analyze({
+        positionCommand: buildPositionCommand(initialSfen, moves.slice(0, t + 1)),
+        depth: config.scan.depth,
+        pvPlies: 2,
+        label: `scan-pass1-after-t${t}`,
+      });
+      const after = pickBestCpInfo(afterActual.infos);
+      afterSente = after ? normalizeCpToSentePerspective(after.eval, turnAfterActual) : null;
+      afterDelta = afterSente == null || previousAfterSente == null ? null : afterSente - previousAfterSente;
+    }
+
     if (isCandidate || config.scan.debugAllPass1) {
       console.log(
-        `pass1${isCandidate ? "候補" : "確認"}: t ${t} row ${t + 1} turn ${turnAtS} actual ${actualMoveUsi} best ${best.pv[0] ?? "-"} rawBest=${best.eval} rawActual=${actual.eval} senteBest=${bestEvalSente} senteActual=${actualEvalSente} loss=${diff}`
+        `pass1${isCandidate ? "候補" : "確認"}: row ${t + 1} actual ${actualMoveUsi} imageEval=${formatNullableNumber(afterSente)} appActualEval=${actualEvalSente} imageDelta=${formatNullableNumber(afterDelta)} best ${best.pv[0] ?? "-"} signedLoss=${signedDiff} absLoss=${diff}`
       );
     }
 
     if (isCandidate) {
       candidates.push({ t, diff, introMoveUsi, actualMoveUsi });
+    }
+    if (afterSente != null) {
+      previousAfterSente = afterSente;
+    } else if (config.scan.debugComparePass1) {
+      previousAfterSente = null;
     }
   }
 

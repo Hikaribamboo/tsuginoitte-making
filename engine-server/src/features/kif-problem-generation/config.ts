@@ -31,6 +31,7 @@ export const config = {
     depth: envInt("AMTS_SCAN_DEPTH", 12, 1, 50),
     multipv: 1,
     debugAllPass1: envBool("AMTS_DEBUG_PASS1_ALL", false),
+    debugComparePass1: envBool("AMTS_DEBUG_PASS1_COMPARE", false),
   },
 
   finalize: {

@@ -330,7 +330,7 @@ const MakingEngineCreator: React.FC = () => {
           senteBestBefore,
           rawActualSearch: actualSearch.eval_cp,
           senteActualSearch,
-          pass1Loss: lossFromBest(senteBestBefore, senteActualSearch, turnBefore),
+          pass1Loss: absLossFromBest(senteBestBefore, senteActualSearch, turnBefore),
           rawAfterMove: afterMove.eval_cp,
           senteAfterMove,
           afterDelta: senteAfterMove == null || previousAfterSente == null ? null : senteAfterMove - previousAfterSente,
@@ -513,13 +513,10 @@ const MakingEngineCreator: React.FC = () => {
                 <tr>
                   <th className="px-2 py-2">row</th>
                   <th className="px-2 py-2">move</th>
-                  <th className="px-2 py-2">評価値候補</th>
-                  <th className="px-2 py-2">差候補</th>
-                  <th className="px-2 py-2">pass1Loss</th>
-                  <th className="px-2 py-2">best</th>
-                  <th className="px-2 py-2">rawAfter</th>
-                  <th className="px-2 py-2">rawActual</th>
-                  <th className="px-2 py-2">turn</th>
+                  <th className="px-2 py-2">アプリpass1差</th>
+                  <th className="px-2 py-2">アプリ実戦評価値</th>
+                  <th className="px-2 py-2">アプリ最善手</th>
+                  <th className="px-2 py-2">画像の評価値</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -527,13 +524,10 @@ const MakingEngineCreator: React.FC = () => {
                   <tr key={row.row} className="font-mono text-slate-700">
                     <td className="px-2 py-1">{row.row}</td>
                     <td className="px-2 py-1">{row.move}</td>
-                    <td className="px-2 py-1">{formatMaybeNumber(row.senteAfterMove)}</td>
-                    <td className="px-2 py-1">{formatMaybeNumber(row.afterDelta)}</td>
                     <td className="px-2 py-1">{formatMaybeNumber(row.pass1Loss)}</td>
+                    <td className="px-2 py-1">{formatMaybeNumber(row.senteActualSearch)}</td>
                     <td className="px-2 py-1">{row.bestMoveBefore}</td>
-                    <td className="px-2 py-1">{formatMaybeNumber(row.rawAfterMove)}</td>
-                    <td className="px-2 py-1">{formatMaybeNumber(row.rawActualSearch)}</td>
-                    <td className="px-2 py-1">{row.turnBefore}</td>
+                    <td className="px-2 py-1">{formatMaybeNumber(row.senteAfterMove)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -861,9 +855,10 @@ function normalizeCpToSente(cp: number | null, turn: 'b' | 'w'): number | null {
   return turn === 'b' ? cp : -cp;
 }
 
-function lossFromBest(bestSente: number | null, actualSente: number | null, turn: 'b' | 'w'): number | null {
+function absLossFromBest(bestSente: number | null, actualSente: number | null, turn: 'b' | 'w'): number | null {
   if (bestSente == null || actualSente == null) return null;
-  return turn === 'b' ? bestSente - actualSente : actualSente - bestSente;
+  const signed = turn === 'b' ? bestSente - actualSente : actualSente - bestSente;
+  return Math.abs(signed);
 }
 
 function formatMaybeNumber(value: number | null): string {
