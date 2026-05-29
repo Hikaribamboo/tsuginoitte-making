@@ -207,6 +207,7 @@ async function runCommand(
         line.startsWith('pass2結果:') ||
         line.startsWith('pass2 row') ||
         line.startsWith('pass2 sfen') ||
+        line.startsWith('kifu sfen:') ||
         line.startsWith('致命的エラー:')
       );
     };
