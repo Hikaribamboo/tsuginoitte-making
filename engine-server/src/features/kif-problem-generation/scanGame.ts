@@ -329,7 +329,7 @@ export async function scanGame(args: {
     const isCandidate = diff >= config.suspiciousMinDiff;
     if (isCandidate || config.scan.debugAllPass1) {
       console.log(
-        `pass1${isCandidate ? "候補" : "確認"}: row ${t + 1} actual ${actualMoveUsi} best ${best.pv[0] ?? "-"} appActualEval=${actualEvalSente} signedLoss=${signedDiff} absLoss=${diff}`
+        `pass1${isCandidate ? "候補" : "確認"}: row ${t + 1} actual ${actualMoveUsi} best ${best.pv[0] ?? "-"} appBestEval=${bestEvalSente} appActualEval=${actualEvalSente} signedLoss=${signedDiff} absLoss=${diff}`
       );
     }
 
