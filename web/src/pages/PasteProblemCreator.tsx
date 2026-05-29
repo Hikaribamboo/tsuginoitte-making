@@ -18,7 +18,7 @@ import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches, extractBr
 import type { KifBranch, KifTreeNode } from '../lib/kif-parser';
 import { saveProblem, getNextDisplayNo, saveMultipleProblems, saveLearningProblem } from '../api/problems';
 import { getWorkspace, saveWorkspaceDraft, deleteWorkspace } from '../api/workspaces';
-import { generateExplanations } from '../api/backend';
+import { evaluatePosition, generateExplanations } from '../api/backend';
 import { DEFAULT_PROMPT } from '../lib/constants';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
 import type { ChoiceDraft } from '../types/problem';
@@ -29,6 +29,7 @@ import { useNavigationPrompt } from '../hooks/useNavigationPrompt';
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 type BoardCell = { row: number; col: number };
 const WINRATE_SCALE = 800;
+const CHOICE_EVAL_DEPTH = 26;
 const BOARD_SCALE = 0.72;
 const SLOT_ORDER: SlotKey[] = ['correct', 'incorrect1', 'incorrect2'];
 
@@ -233,6 +234,7 @@ const PasteProblemCreator: React.FC = () => {
   const [replaySlot, setReplaySlot] = useState<SlotKey | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [keyboardSlot, setKeyboardSlot] = useState<SlotKey | null>(null);
+  const [evaluatingSlot, setEvaluatingSlot] = useState<SlotKey | null>(null);
 
   const explanationInputRefs = React.useRef<Record<SlotKey, HTMLTextAreaElement | null>>({
     correct: null,
@@ -720,6 +722,86 @@ const PasteProblemCreator: React.FC = () => {
       }
     },
     [choices, parsed],
+  );
+
+  const handleEvaluateChoice = useCallback(
+    async (slot: SlotKey) => {
+      if (!rootSfen) {
+        setMessage('先に棋譜を読み込んでください');
+        return;
+      }
+
+      const choice = choices[slot];
+      if (!choice.usi) {
+        setMessage('先に選択肢の手を登録してください');
+        return;
+      }
+
+      const introMoves = introMoveUsi.trim() ? [introMoveUsi.trim()] : [];
+      const validation = validateMoveSequence(rootSfen, [...introMoves, choice.usi]);
+      if (!validation.ok) {
+        setReadingLineErrors((prev) => ({
+          ...prev,
+          [slot]: formatMoveValidationError('検討する手が非合法です', validation),
+        }));
+        return;
+      }
+
+      setEvaluatingSlot(slot);
+      setReadingLineErrors((prev) => ({ ...prev, [slot]: '' }));
+      setMessage('');
+
+      try {
+        const result = await evaluatePosition(rootSfen, introMoves, {
+          depth: CHOICE_EVAL_DEPTH,
+          searchMoves: [choice.usi],
+          multipv: 1,
+          usiOptions: {
+            NumaPolicy: 'auto',
+            Stochastic_Ponder: false,
+            DepthLimit: 0,
+            NodesLimit: 0,
+            FV_SCALE: 40,
+            USI_AnalyseMode: true,
+            USI_OwnBook: false,
+          },
+        });
+
+        const rawCp = result.eval_cp;
+        const percent = cpToWinRatePercent({
+          cp: rawCp,
+          userColor: parsed?.sideToMove ?? 'sente',
+          scale: WINRATE_SCALE,
+        });
+        const pv = result.pv.length > 0 ? result.pv : [choice.usi];
+        const line = pv[0] === choice.usi ? pv.slice(1, 13) : pv.slice(0, 12);
+        const labels = pvToJapanese(pv, displaySfen || rootSfen, Math.min(pv.length, 13));
+        const readingText = `*検討 depth ${CHOICE_EVAL_DEPTH} 評価値 ${rawCp} 読み筋 ${labels.join(' ')}`;
+
+        setChoices((prev) => ({
+          ...prev,
+          [slot]: {
+            ...prev[slot],
+            eval_cp: rawCp,
+            eval_percent: percent,
+            line,
+          },
+        }));
+        setReadingLineInputs((prev) => ({ ...prev, [slot]: readingText }));
+
+        if (slot === 'correct') {
+          setRootEvalCp(rawCp);
+          setRootEvalPercent(percent);
+        }
+
+        setMessage(`${choice.label || choice.usi}をdepth${CHOICE_EVAL_DEPTH}で検討しました`);
+      } catch (e: any) {
+        setMessage(`検討エラー: ${e.message}`);
+      } finally {
+        setEvaluatingSlot(null);
+      }
+    },
+    [choices, displaySfen, introMoveUsi, parsed, rootSfen],
   );
 
   // ---- Move registration via board ----
@@ -1852,6 +1934,8 @@ const PasteProblemCreator: React.FC = () => {
                     setReadingLineInputs((prev) => ({ ...prev, [slot]: text }))
                   }
                   onPasteReadingLine={(text) => handleParseReadingLine(slot, text)}
+                  onEvaluate={() => handleEvaluateChoice(slot)}
+                  evalLoading={evaluatingSlot === slot}
                   onEvalCpChange={(value) => handleEvalCpChange(slot, value)}
                   onEvalPercentChange={(value) => handleEvalPercentChange(slot, value)}
                   onRecalculatePercent={() => handleRecalculatePercent(slot)}

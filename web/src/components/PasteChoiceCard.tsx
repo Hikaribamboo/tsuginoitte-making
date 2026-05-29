@@ -10,6 +10,8 @@ interface PasteChoiceCardProps {
   onActivate: () => void;
   onReadingLineChange: (text: string) => void;
   onPasteReadingLine: (text: string) => void;
+  onEvaluate: () => void;
+  evalLoading?: boolean;
   onEvalCpChange: (value: number | null) => void;
   onEvalPercentChange: (value: number | null) => void;
   onRecalculatePercent: () => void;
@@ -37,6 +39,8 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
   onActivate,
   onReadingLineChange,
   onPasteReadingLine,
+  onEvaluate,
+  evalLoading = false,
   onEvalCpChange,
   onEvalPercentChange,
   onRecalculatePercent,
@@ -103,6 +107,18 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
               disabled={replayDisabled}
             >
               ▶ 再生
+            </button>
+          )}
+          {draft.usi && (
+            <button
+              className={`text-[11px] px-2 py-0.5 text-white border-teal-700 ${
+                evalLoading ? 'bg-teal-300 cursor-wait' : 'bg-teal-700 hover:bg-teal-800'
+              }`}
+              type="button"
+              onClick={onEvaluate}
+              disabled={evalLoading}
+            >
+              {evalLoading ? '検討中...' : '検討'}
             </button>
           )}
         </div>
