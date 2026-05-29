@@ -32,6 +32,11 @@ const WINRATE_SCALE = 800;
 const CHOICE_EVAL_DEPTH = 26;
 const BOARD_SCALE = 0.72;
 const SLOT_ORDER: SlotKey[] = ['correct', 'incorrect1', 'incorrect2'];
+const SLOT_LABELS: Record<SlotKey, string> = {
+  correct: '正解手',
+  incorrect1: '不正解手1',
+  incorrect2: '不正解手2',
+};
 
 function shuffledSlots(): SlotKey[] {
   const slots = [...SLOT_ORDER];
@@ -40,6 +45,10 @@ function shuffledSlots(): SlotKey[] {
     [slots[i], slots[j]] = [slots[j], slots[i]];
   }
   return slots;
+}
+
+function normalizeCpToSentePerspective(cp: number, sideToMove: Side): number {
+  return sideToMove === 'sente' ? cp : -cp;
 }
 
 const EMPTY_CHOICE: ChoiceDraft = {
@@ -219,7 +228,7 @@ const PasteProblemCreator: React.FC = () => {
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [tags, setTags] = useState<string[]>([]);
   const [displayNo, setDisplayNo] = useState<number | null>(null);
-  const [problemRating, setProblemRating] = useState<number>(1200);
+  const [problemRating, setProblemRating] = useState<number>(1500);
   const [rootEvalCp, setRootEvalCp] = useState<number | null>(null);
   const [rootEvalPercent, setRootEvalPercent] = useState<number | null>(null);
 
@@ -235,6 +244,7 @@ const PasteProblemCreator: React.FC = () => {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [keyboardSlot, setKeyboardSlot] = useState<SlotKey | null>(null);
   const [evaluatingSlot, setEvaluatingSlot] = useState<SlotKey | null>(null);
+  const [evalQueue, setEvalQueue] = useState<SlotKey[]>([]);
 
   const explanationInputRefs = React.useRef<Record<SlotKey, HTMLTextAreaElement | null>>({
     correct: null,
@@ -399,7 +409,7 @@ const PasteProblemCreator: React.FC = () => {
             prompt: d.prompt ?? DEFAULT_PROMPT,
             tags: d.tags ?? [],
             displayNo: d.displayNo ?? null,
-            problemRating: d.problemRating ?? 1200,
+            problemRating: d.problemRating ?? 1500,
             rootEvalCp: d.rootEvalCp ?? null,
             rootEvalPercent: d.rootEvalPercent ?? null,
             imagePositionSource: d.imagePositionSource ?? null,
@@ -562,10 +572,23 @@ const PasteProblemCreator: React.FC = () => {
     }
 
     try {
-      await navigator.clipboard.writeText(text);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        throw new Error('clipboard api unavailable');
+      }
       setMessage(`${label}をコピーしました`);
     } catch {
-      setMessage(`${label}のコピーに失敗しました`);
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setMessage(ok ? `${label}をコピーしました` : `${label}のコピーに失敗しました`);
     }
   }, []);
 
@@ -601,8 +624,6 @@ const PasteProblemCreator: React.FC = () => {
       const result = parseReadingLine(text, {
         initialPrevDest,
       });
-      console.log('[handleParseReadingLine] text:', text);
-      console.log('[handleParseReadingLine] parseReadingLine result:', result);
       if (!result || result.moves.length === 0) {
         setReadingLineErrors((prev) => ({
           ...prev,
@@ -613,7 +634,6 @@ const PasteProblemCreator: React.FC = () => {
 
       const firstMoveSide = result.labels.length > 0 ? markerSide(result.labels[0]) : null;
       const rootSide = parsed?.sideToMove ?? 'sente';
-      console.log('[handleParseReadingLine] firstMoveSide:', firstMoveSide, 'rootSide:', rootSide);
 
       // Support three formats:
       // 1) candidate move is included at the head of PV
@@ -642,8 +662,6 @@ const PasteProblemCreator: React.FC = () => {
         }));
         return;
       }
-      console.log('[handleParseReadingLine] includesChoiceMove:', includesChoiceMove, 'choiceUsi:', choiceUsi, 'continuationMoves:', continuationMoves);
-
       const validationMoves = [
         ...(currentIntroMoveUsi ? [currentIntroMoveUsi] : []),
         choiceUsi,
@@ -724,7 +742,7 @@ const PasteProblemCreator: React.FC = () => {
     [choices, parsed],
   );
 
-  const handleEvaluateChoice = useCallback(
+  const performEvaluateChoice = useCallback(
     async (slot: SlotKey) => {
       if (!rootSfen) {
         setMessage('先に棋譜を読み込んでください');
@@ -752,31 +770,81 @@ const PasteProblemCreator: React.FC = () => {
       setMessage('');
 
       try {
-        const result = await evaluatePosition(rootSfen, introMoves, {
-          depth: CHOICE_EVAL_DEPTH,
-          searchMoves: [choice.usi],
-          multipv: 1,
-          usiOptions: {
-            NumaPolicy: 'auto',
-            Stochastic_Ponder: false,
-            DepthLimit: 0,
-            NodesLimit: 0,
-            FV_SCALE: 40,
-            USI_AnalyseMode: true,
-            USI_OwnBook: false,
+        const choiceMoves = [...introMoves, choice.usi];
+        const afterChoiceSfen = buildSfenAfterMoves(rootSfen, choiceMoves);
+        const afterChoiceSide = parseSfen(afterChoiceSfen).sideToMove;
+        const evaluatePayload = {
+          sfen: rootSfen,
+          moves: choiceMoves,
+          options: {
+            depth: CHOICE_EVAL_DEPTH,
+            multipv: 1,
+            usiOptions: {
+              NumaPolicy: 'auto',
+              Stochastic_Ponder: false,
+              DepthLimit: 0,
+              NodesLimit: 0,
+              FV_SCALE: 40,
+              USI_AnalyseMode: true,
+              USI_OwnBook: false,
+            },
           },
+        };
+        console.log('[choice-eval] request', {
+          slot,
+          choiceUsi: choice.usi,
+          positionCommand: `position sfen ${rootSfen} moves ${choiceMoves.join(' ')}`,
+          afterChoiceSfen,
+          ...evaluatePayload,
         });
 
-        const rawCp = result.eval_cp;
+        const result = await evaluatePosition(rootSfen, choiceMoves, {
+          ...evaluatePayload.options,
+        });
+        console.log('[choice-eval] response', {
+          slot,
+          evalCpRawFromEngine: result.eval_cp,
+          bestmove: result.bestmove,
+          pv: result.pv,
+          lines: result.lines,
+          rawLines: result.rawLines,
+        });
+
+        const rawCp = normalizeCpToSentePerspective(
+          result.eval_cp,
+          afterChoiceSide,
+        );
         const percent = cpToWinRatePercent({
           cp: rawCp,
           userColor: parsed?.sideToMove ?? 'sente',
           scale: WINRATE_SCALE,
         });
-        const pv = result.pv.length > 0 ? result.pv : [choice.usi];
-        const line = pv[0] === choice.usi ? pv.slice(1, 13) : pv.slice(0, 12);
-        const labels = pvToJapanese(pv, displaySfen || rootSfen, Math.min(pv.length, 13));
+        const fullPv = buildLegalChoicePv({
+          rootSfen,
+          introMoves,
+          choiceUsi: choice.usi,
+          enginePv: result.pv,
+          maxMoves: 13,
+        });
+        const line = fullPv.slice(1, 13);
+        const labels = pvToJapanese(fullPv, displaySfen || rootSfen, Math.min(fullPv.length, 13));
         const readingText = `*検討 depth ${CHOICE_EVAL_DEPTH} 評価値 ${rawCp} 読み筋 ${labels.join(' ')}`;
+        console.log('[choice-eval] formatted', {
+          slot,
+          evalCpSente: rawCp,
+          evalPercent: percent,
+          displaySfen,
+          afterChoiceSfen,
+          rootSfen,
+          introMoves,
+          choiceMoves,
+          choiceUsi: choice.usi,
+          enginePv: result.pv,
+          fullPv,
+          storedLine: line,
+          labels,
+          readingText,
+        });
 
         setChoices((prev) => ({
           ...prev,
@@ -804,6 +872,26 @@ const PasteProblemCreator: React.FC = () => {
     [choices, displaySfen, introMoveUsi, parsed, rootSfen],
   );
 
+  const enqueueEvaluateChoice = useCallback((slot: SlotKey) => {
+    if (!choices[slot].usi) {
+      setMessage('先に選択肢の手を登録してください');
+      return;
+    }
+
+    if (evaluatingSlot === slot) return;
+    setEvalQueue((current) => (current.includes(slot) ? current : [...current, slot]));
+  }, [choices, evaluatingSlot]);
+
+  React.useEffect(() => {
+    if (evaluatingSlot || evalQueue.length === 0) return;
+
+    const [nextSlot] = evalQueue;
+    if (!nextSlot) return;
+
+    setEvalQueue((current) => current.slice(1));
+    void performEvaluateChoice(nextSlot);
+  }, [evalQueue, evaluatingSlot, performEvaluateChoice]);
+
   // ---- Move registration via board ----
 
   const clearBoardSelection = useCallback(() => {
@@ -820,22 +908,13 @@ const PasteProblemCreator: React.FC = () => {
   }, [clearBoardSelection]);
 
   const handleActivateIntroMove = useCallback(() => {
-    console.log('[intro-debug] intro card clicked handler entered', {
-      introMoveActiveBefore: introMoveActive,
-      introDestinationBefore: introDestination,
-      introMoveUsi,
-      rootSfen,
-    });
-    console.log('[intro-move] activate');
     setActiveSlot(null);
     setIntroMoveActive(true);
-    console.log('[intro-debug] setIntroMoveActive(true) called');
     setIntroDestinationBoth(null);
     clearBoardSelection();
-  }, [clearBoardSelection, introDestination, introMoveActive, introMoveUsi, rootSfen, setIntroDestinationBoth]);
+  }, [clearBoardSelection, setIntroDestinationBoth]);
 
   const handleClearIntroMove = useCallback(() => {
-    console.log('[intro-move] clear');
     setIntroMoveUsi('');
     setIntroMoveActive(false);
     setIntroDestinationBoth(null);
@@ -843,10 +922,8 @@ const PasteProblemCreator: React.FC = () => {
   }, [clearBoardSelection, setIntroDestinationBoth]);
 
   const registerIntroMove = useCallback((usi: string, newRootSfen?: string) => {
-    console.log('[intro-move] register', { usi, newRootSfen });
     setIntroMoveUsi(usi);
     if (newRootSfen) {
-      console.log('[intro-move] updating rootSfen to rewound position', { newRootSfen });
       setRootSfen(newRootSfen);
     }
     setIntroMoveActive(false);
@@ -877,119 +954,39 @@ const PasteProblemCreator: React.FC = () => {
 
   const handleCellClick = useCallback(
     (row: number, col: number) => {
-      console.log('[intro-debug] board click handler entered', {
-        row,
-        col,
-        introMoveActive,
-        introDestinationState: introDestination,
-        introDestinationRef: introDestinationRef.current,
-        introMoveUsi,
-        rootSfen,
-      });
       if (promotionChoice) return;
 
       if (introMoveActive) {
         const currentIntroDestination = introDestinationRef.current;
-        console.log('[intro-debug] introMoveActive branch entered', {
-          row,
-          col,
-          introMoveActive,
-          introDestinationState: introDestination,
-          introDestinationRef: introDestinationRef.current,
-          introMoveUsi,
-          rootSfen,
-        });
         if (!displayParsed || !searchParsed) return;
 
         const clickedSquareUsi = toUsiSquare(row, col);
         const clickedDisplayPiece = displayParsed.board[row][col];
-        const clickedSearchPiece = searchParsed.board[row][col];
-        console.log('[intro-move] board click', {
-          row,
-          col,
-          clickedSquareUsi,
-          rootSfen,
-          displaySfen,
-          searchSfen,
-          selectedCell,
-          introDestination,
-          introDestinationRef: introDestinationRef.current,
-          selectedHandPiece,
-          clickedDisplayPiece,
-          clickedSearchPiece,
-          sideToMove: searchParsed.sideToMove,
-        });
 
         if (!currentIntroDestination) {
           if (!clickedDisplayPiece) {
-            console.log('[intro-move] first click has no destination piece, waiting');
             return;
           }
-          console.log('[intro-debug] before set intro destination', {
-            destination: { row, col },
-            introDestinationBefore: introDestination,
-          });
-          console.log('[intro-move] first click treated as destination', { row, col, clickedSquareUsi });
           setIntroDestinationBoth({ row, col });
-          console.log('[intro-debug] after set intro destination called', {
-            destination: { row, col },
-          });
           return;
         }
 
         if (currentIntroDestination.row === row && currentIntroDestination.col === col) {
-          console.log('[intro-move] same square clicked twice, clearing selection');
           setIntroDestinationBoth(null);
           return;
         }
 
-        console.log('[intro-debug] intro branch destination source', {
-          introDestinationState: introDestination,
-          introDestinationRef: introDestinationRef.current,
-        });
-
         const destination = currentIntroDestination;
-        const currentSide = searchParsed.sideToMove;
         const destinationUsi = toUsiSquare(destination.row, destination.col);
         const sourceUsi = clickedSquareUsi;
-        const sourcePieceDisplay = displayParsed.board[row][col];
-        const sourcePieceSearch = searchParsed.board[row][col];
         const destinationPieceDisplay = displayParsed.board[destination.row][destination.col];
         const destinationPieceSearch = searchParsed.board[destination.row][destination.col];
         const candidateIntroUsi = `${sourceUsi}${destinationUsi}`;
 
-        console.log('[intro-move] trying source square', {
-          sourceRow: row,
-          sourceCol: col,
-          sourceSquareUsi: clickedSquareUsi,
-          destination,
-          destinationUsi,
-          candidateIntroUsi,
-          sourcePieceDisplay,
-          sourcePieceSearch,
-          destinationPieceDisplay,
-          destinationPieceSearch,
-          currentSide,
-        });
-
         const destinationPiece = destinationPieceSearch ?? destinationPieceDisplay;
         if (!destinationPiece) {
-          console.log('[intro-move] destination has no piece, keep destination');
           return;
         }
-
-        console.log('[intro-debug] second click source branch entered', {
-          source: { row, col },
-          destination: introDestination,
-          introMoveUsi,
-          rootSfen,
-        });
-
-        console.log('[intro-move] candidate validation', {
-          candidateIntroUsi,
-          destinationUsi,
-          beforeRootSfen: rootSfen,
-        });
 
         const beforeRoot = displayParsed;
         const beforeTurn = beforeRoot.sideToMove;
@@ -1000,7 +997,6 @@ const PasteProblemCreator: React.FC = () => {
         const rewoundBoard = beforeRoot.board.map((line) => [...line]);
         const movedPiece = rewoundBoard[destination.row][destination.col];
         if (!movedPiece) {
-          console.log('[intro-move] destination piece missing at rewind time, keep destination');
           return;
         }
 
@@ -1015,33 +1011,6 @@ const PasteProblemCreator: React.FC = () => {
           afterMoveNumber,
         );
 
-        console.log('[intro-debug] before rewind rootSfen', {
-          beforeRootSfen: rootSfen,
-          source: { row, col },
-          destination,
-          candidateIntroUsi,
-        });
-
-        console.log('[intro-move] rewind result', {
-          beforeTurn,
-          afterTurn,
-          beforeMoveNumber,
-          afterMoveNumber,
-          beforeRootSfen: rootSfen,
-          rewoundRootSfen,
-          destinationCell: destination,
-          destinationUsi,
-          destinationPiece: movedPiece,
-          sourceCell: { row, col },
-          sourceUsi,
-          sourcePiece: sourcePieceSearch ?? sourcePieceDisplay,
-          candidateIntroUsi,
-        });
-
-        console.log('[intro-debug] registering intro move and rewinding rootSfen', {
-          candidateIntroUsi,
-          rewoundRootSfen,
-        });
         registerIntroMove(candidateIntroUsi, rewoundRootSfen);
         return;
       }
@@ -1211,12 +1180,6 @@ const PasteProblemCreator: React.FC = () => {
           goteHand,
           Math.max(1, displayParsed.moveNumber - 1),
         );
-        console.log('[intro-move] hand drop rewind', {
-          type,
-          destination,
-          previousSide,
-          rewoundRootSfen,
-        });
         registerIntroMove(`${type}*${toUsiSquare(destination.row, destination.col)}`, rewoundRootSfen);
         return;
       }
@@ -1383,13 +1346,6 @@ const PasteProblemCreator: React.FC = () => {
     introMovesLabels: string[];
   } => {
     const effectiveIntroMove = introMoveUsi.trim() || (kifMoves.length > 0 ? kifMoves[kifMoves.length - 1] : '');
-    console.log('[intro-move] buildSaveRootAndIntro', {
-      rootSfen,
-      kifText,
-      kifMoves,
-      introMoveUsi,
-      effectiveIntroMove,
-    });
 
     if (introMoveUsi.trim()) {
       const introMoveLabel = parsed ? usiToLabel(introMoveUsi, parsed.board, parsed.sideToMove) : introMoveUsi;
@@ -1428,18 +1384,6 @@ const PasteProblemCreator: React.FC = () => {
     }
 
     const introMoveLabel = usiToLabel(introMove, board, sideToMove);
-    console.log('[intro-move] save-time base position', {
-      sourceSfen,
-      derivedRootSfen: boardToSfen(
-        board,
-        sideToMove,
-        senteHand,
-        goteHand,
-        state.moveNumber + baseMoves.length,
-      ),
-      introMove,
-      introMoveLabel,
-    });
 
     return {
       rootSfenForSave: boardToSfen(
@@ -1566,7 +1510,6 @@ const PasteProblemCreator: React.FC = () => {
       }
     } catch (e: any) {
       setMessage(`分岐の一括保存エラー: ${e.message}`);
-      console.error('[handleSaveBranches] Error:', e);
     } finally {
       setSavingBranches(false);
     }
@@ -1702,15 +1645,6 @@ const PasteProblemCreator: React.FC = () => {
   // Render
   // ========================================
 
-  const introMoveCardRenderLog = (() => {
-    console.log('[intro-debug] render before PasteIntroMoveCard', {
-      introMoveActive,
-      introDestination,
-      introMoveUsi,
-      rootSfen,
-    });
-    return null;
-  })();
   const imagePositionMemo = imagePositionSource?.memo?.trim() ?? '';
   const imagePositionFileName = imagePositionSource?.fileName?.trim() ?? '';
   const choiceLineErrors = SLOT_ORDER.reduce<Record<SlotKey, string>>((acc, slot) => {
@@ -1763,10 +1697,15 @@ const PasteProblemCreator: React.FC = () => {
 
         <div className="mb-2 rounded-lg border border-gray-200 bg-white/70 px-3 py-2">
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <div className="flex items-center gap-1.5">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
               <span className="shrink-0 font-semibold text-gray-500">
                 root_sfen
               </span>
+              <input
+                readOnly
+                value={saveRootAndIntro.rootSfenForSave}
+                className="min-w-0 flex-1 font-mono text-[11px]"
+              />
               <button
                 type="button"
                 className="text-[10px] px-2 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
@@ -1912,7 +1851,23 @@ const PasteProblemCreator: React.FC = () => {
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(180px,240px)] gap-2 items-start min-w-0 max-w-full">
             {/* Choice cards */}
             <div className="flex flex-col gap-1.5 items-start min-w-0">
-              {introMoveCardRenderLog}
+              {(evaluatingSlot || evalQueue.length > 0) && (
+                <div className="w-full max-w-[420px] rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] text-teal-900">
+                  <div className="font-semibold">検討バッチ</div>
+                  <div className="mt-0.5 flex flex-wrap gap-1.5">
+                    {evaluatingSlot && (
+                      <span className="rounded bg-teal-700 px-1.5 py-0.5 text-white">
+                        実行中: {SLOT_LABELS[evaluatingSlot]}
+                      </span>
+                    )}
+                    {evalQueue.map((slot, index) => (
+                      <span key={`${slot}-${index}`} className="rounded bg-white px-1.5 py-0.5 text-teal-800 ring-1 ring-teal-200">
+                        待機{index + 1}: {SLOT_LABELS[slot]}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <PasteIntroMoveCard
                 draftUsi={introMoveUsi}
                 draftLabel={introMoveUsi && searchParsed ? usiToLabel(introMoveUsi, searchParsed.board, searchParsed.sideToMove) : ''}
@@ -1934,8 +1889,9 @@ const PasteProblemCreator: React.FC = () => {
                     setReadingLineInputs((prev) => ({ ...prev, [slot]: text }))
                   }
                   onPasteReadingLine={(text) => handleParseReadingLine(slot, text)}
-                  onEvaluate={() => handleEvaluateChoice(slot)}
+                  onEvaluate={() => enqueueEvaluateChoice(slot)}
                   evalLoading={evaluatingSlot === slot}
+                  evalQueued={evalQueue.includes(slot)}
                   onEvalCpChange={(value) => handleEvalCpChange(slot, value)}
                   onEvalPercentChange={(value) => handleEvalPercentChange(slot, value)}
                   onRecalculatePercent={() => handleRecalculatePercent(slot)}
@@ -2203,6 +2159,59 @@ function buildReplayLine(draft: ChoiceDraft, introMoveUsi = ''): string[] {
   if (!draft.usi) return draft.line;
   const line = draft.line[0] === draft.usi ? draft.line : [draft.usi, ...draft.line];
   return [...introMoves, ...line];
+}
+
+function buildLegalChoicePv(args: {
+  rootSfen: string;
+  introMoves: string[];
+  choiceUsi: string;
+  enginePv: string[];
+  maxMoves: number;
+}): string[] {
+  const { rootSfen, introMoves, choiceUsi, enginePv, maxMoves } = args;
+  const continuation = enginePv[0] === choiceUsi ? enginePv.slice(1) : enginePv;
+  const fullPv = [choiceUsi];
+
+  for (const move of continuation) {
+    if (fullPv.length >= maxMoves) break;
+    if (!move || move === choiceUsi) continue;
+
+    const candidate = [...introMoves, ...fullPv, move];
+    if (validateMoveSequence(rootSfen, candidate).ok) {
+      fullPv.push(move);
+    }
+  }
+
+  return fullPv;
+}
+
+function buildSfenAfterMoves(rootSfen: string, moves: string[]): string {
+  let state = parseSfen(rootSfen);
+  for (const move of moves) {
+    const applied = applyUsiMove(
+      state.board,
+      state.senteHand,
+      state.goteHand,
+      state.sideToMove,
+      move,
+    );
+    state = {
+      ...state,
+      board: applied.board,
+      senteHand: applied.senteHand,
+      goteHand: applied.goteHand,
+      sideToMove: state.sideToMove === 'sente' ? 'gote' : 'sente',
+      moveNumber: state.moveNumber + 1,
+    };
+  }
+
+  return boardToSfen(
+    state.board,
+    state.sideToMove,
+    state.senteHand,
+    state.goteHand,
+    state.moveNumber,
+  );
 }
 
 type MoveValidationResult =

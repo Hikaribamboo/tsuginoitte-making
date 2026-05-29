@@ -141,7 +141,7 @@ const ProblemCreator: React.FC = () => {
   const [tags, setTags] = useState<string[]>(state?.tags ?? []);
   const [displayNo, setDisplayNo] = useState<number | null>(null);
   const [introMoves, setIntroMoves] = useState(state?.last_move ?? "");
-  const [problemRating, setProblemRating] = useState<number>(1200);
+  const [problemRating, setProblemRating] = useState<number>(1500);
   const [rootEvalCp, setRootEvalCp] = useState<number | null>(null);
   const [rootEvalPercent, setRootEvalPercent] = useState<number | null>(null);
   const [mode, setMode] = useState<LearningMode>("next_move");

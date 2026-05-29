@@ -1079,7 +1079,7 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
         tags: [],
         mode: 'next_move',
         displayNo: null,
-        problemRating: 1200,
+        problemRating: 1500,
         rootEvalCp: null,
         rootEvalPercent: null,
         savedAt: new Date().toISOString(),

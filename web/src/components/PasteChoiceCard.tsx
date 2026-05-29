@@ -12,6 +12,7 @@ interface PasteChoiceCardProps {
   onPasteReadingLine: (text: string) => void;
   onEvaluate: () => void;
   evalLoading?: boolean;
+  evalQueued?: boolean;
   onEvalCpChange: (value: number | null) => void;
   onEvalPercentChange: (value: number | null) => void;
   onRecalculatePercent: () => void;
@@ -41,6 +42,7 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
   onPasteReadingLine,
   onEvaluate,
   evalLoading = false,
+  evalQueued = false,
   onEvalCpChange,
   onEvalPercentChange,
   onRecalculatePercent,
@@ -112,13 +114,13 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
           {draft.usi && (
             <button
               className={`text-[11px] px-2 py-0.5 text-white border-teal-700 ${
-                evalLoading ? 'bg-teal-300 cursor-wait' : 'bg-teal-700 hover:bg-teal-800'
+                evalLoading || evalQueued ? 'bg-teal-300 cursor-wait' : 'bg-teal-700 hover:bg-teal-800'
               }`}
               type="button"
               onClick={onEvaluate}
-              disabled={evalLoading}
+              disabled={evalLoading || evalQueued}
             >
-              {evalLoading ? '検討中...' : '検討'}
+              {evalLoading ? '検討中...' : evalQueued ? '待機中' : '検討'}
             </button>
           )}
         </div>

@@ -154,7 +154,7 @@ const WorkspaceList: React.FC = () => {
         // 保存モード: 'next_move' = 次の一手, 'joseki' = 定跡
         mode: pasteSaveMode,
         displayNo: null,
-        problemRating: 1200,
+        problemRating: 1500,
         rootEvalCp: null,
         rootEvalPercent: null,
         savedAt: new Date().toISOString(),
@@ -250,7 +250,7 @@ const WorkspaceList: React.FC = () => {
           tags: pasteTags,
           mode: pasteSaveMode,
           displayNo: null,
-          problemRating: 1200,
+          problemRating: 1500,
           rootEvalCp: null,
           rootEvalPercent: null,
           savedAt: new Date().toISOString(),

@@ -936,7 +936,7 @@ function normalizeWorkspaceDraft(raw: Record<string, unknown>, modeFallback: 'ne
     prompt: typeof raw.prompt === 'string' ? raw.prompt : '最善手を選んでください',
     tags: Array.isArray(raw.tags) ? raw.tags.filter((item): item is string => typeof item === 'string') : [],
     displayNo: typeof raw.displayNo === 'number' ? raw.displayNo : null,
-    problemRating: typeof raw.problemRating === 'number' ? raw.problemRating : 1200,
+    problemRating: typeof raw.problemRating === 'number' ? raw.problemRating : 1500,
     rootEvalCp: typeof raw.rootEvalCp === 'number' ? raw.rootEvalCp : null,
     rootEvalPercent: typeof raw.rootEvalPercent === 'number' ? raw.rootEvalPercent : null,
     mode: raw.mode === 'joseki' ? 'joseki' : modeFallback,
