@@ -37,7 +37,7 @@ export const config = {
     multipv: 3,
     pvPlies: 9,
 
-    blunderThresholdCp: 400,
+    blunderThresholdCp: 300,
 
     choiceDepthSteps: [FINALIZE_DEPTH, FINALIZE_DEPTH + 4],
 

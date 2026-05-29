@@ -68,6 +68,26 @@ function mergeUniqueByMove(primary: PvInfo[], extra: PvInfo[]): PvInfo[] {
   return out;
 }
 
+function mulberry32(seed: number) {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleWithSeed<T>(items: T[], seed: number): T[] {
+  const out = [...items];
+  const rnd = mulberry32(seed);
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 function bestLossCp(args: {
   bestEvalSente: number;
   candidateEvalSente: number;
@@ -174,8 +194,9 @@ function listWrong2Candidates(args: {
   actualMoveUsi: string;
   threshold: number;
   turnAtS: Color;
+  randomSeed: number;
 }): Array<{ info: PvInfo; loss: number }> {
-  const { infos, correctUsi, actualMoveUsi, threshold, turnAtS } = args;
+  const { infos, correctUsi, actualMoveUsi, threshold, turnAtS, randomSeed } = args;
   const cp = infos.filter((x) => x.evalType === "cp" && x.pv.length > 0);
   if (cp.length === 0) return [];
 
@@ -191,7 +212,7 @@ function listWrong2Candidates(args: {
   if (!best) return [];
 
   const exclude = new Set<string>([correctUsi, actualMoveUsi]);
-  return normalized
+  const filtered = normalized
     .map((info) => {
       const loss = bestLossCp({
         bestEvalSente: best.eval,
@@ -205,6 +226,12 @@ function listWrong2Candidates(args: {
       return Boolean(usi) && !exclude.has(usi) && loss >= threshold;
     })
     .sort((a, b) => b.loss - a.loss);
+
+  const strong = filtered.filter(({ loss }) => loss >= 800);
+  const normal = filtered.filter(({ loss }) => loss < 800);
+  const orderedStrong = shuffleWithSeed(strong, randomSeed + 800);
+  const orderedNormal = shuffleWithSeed(normal, randomSeed + 300);
+  return [...orderedStrong, ...orderedNormal];
 }
 
 /**
@@ -340,7 +367,8 @@ export async function scanGame(args: {
     const pvPlies = Math.max(config.finalize.pvPlies, 9);
     const finalDepth = config.finalize.depth;
     const wrongProbeDepth = Math.min(16, finalDepth);
-    const wrongProbeMps = [5, 10];
+    const shouldTryMp15 = t % 5 === 0;
+    const wrongProbeMps = shouldTryMp15 ? [5, 10, 15] : [5, 10];
     const threshold = config.finalize.blunderThresholdCp ?? 400;
 
     const rejectIfBestTooBadCp = config.finalize.rejectIfBestTooBadCp;
@@ -404,6 +432,7 @@ export async function scanGame(args: {
           actualMoveUsi,
           threshold,
           turnAtS,
+          randomSeed: t * 1000 + mp,
         });
         console.log(`pass2候補: 悪手探索 t ${t} d${wrongProbeDepth} mp${mp} 候補${candidatesForWrong2.length}`);
 
