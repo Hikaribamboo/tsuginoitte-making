@@ -131,6 +131,9 @@ export async function main() {
       try {
         const initialSfen = kifu.initial_sfen;
         const moves = splitMoves(kifu.moves);
+        console.log(
+          `[kifu] id=${kifu.id} source=${kifu.source_ref ?? "-"} initialSfen="${initialSfen}" moves=${moves.join(" ")}`
+        );
         const scans = await scanGame({ engine, initialSfen, moves });
         let built = 0;
 
