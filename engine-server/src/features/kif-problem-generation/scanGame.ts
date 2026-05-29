@@ -14,14 +14,10 @@ type Candidate = {
   diff: number;
   introMoveUsi: string;
   actualMoveUsi: string;
-  bestMoveUsi: string;
 };
 
 type Pass1LogItem = {
   t: number;
-  actualMoveUsi: string;
-  bestMoveUsi: string;
-  diff: number;
 };
 
 type Pass2LogItem = {
@@ -134,6 +130,21 @@ function formatLoss(args: { best: PvInfo; candidate: PvInfo; turnAtS: Color }): 
     candidateEvalSente: normalizeCpToSentePerspective(candidate.eval, turnAtS),
     turnAtS,
   });
+}
+
+function formatPass2LogItem(item: Pass2LogItem): string {
+  const actualLoss = formatLoss({ best: item.best, candidate: item.actual, turnAtS: item.turnAtS });
+  const wrongLoss = formatLoss({ best: item.best, candidate: item.wrong, turnAtS: item.turnAtS });
+  const actualLossText = actualLoss == null ? "" : ` loss=${actualLoss}`;
+  const wrongLossText = wrongLoss == null ? "" : ` loss=${wrongLoss}`;
+
+  return [
+    `pass2 row${item.t + 1}`,
+    `depth${item.depth}`,
+    `best=${formatMoveEval(item.best, item.turnAtS)}`,
+    `actual=${formatMoveEval(item.actual, item.turnAtS)}${actualLossText}`,
+    `wrong=${formatMoveEval(item.wrong, item.turnAtS)}${wrongLossText}`,
+  ].join(" ");
 }
 
 async function analyzeMove(args: {
@@ -372,16 +383,12 @@ export async function scanGame(args: {
     }
 
     if (isCandidate) {
-      const bestMoveUsi = best.pv[0] ?? "-";
-      candidates.push({ t, diff, introMoveUsi, actualMoveUsi, bestMoveUsi });
-      pass1LogItems.push({ t, actualMoveUsi, bestMoveUsi, diff });
+      candidates.push({ t, diff, introMoveUsi, actualMoveUsi });
+      pass1LogItems.push({ t });
     }
   }
 
-  const pass1Summary = pass1LogItems
-    .map((x) => `row${x.t + 1} ${x.actualMoveUsi}->${x.bestMoveUsi} loss${x.diff}`)
-    .join(", ");
-  console.log(`pass1候補まとめ: ${pass1LogItems.length}件${pass1Summary ? ` ${pass1Summary}` : ""}`);
+  console.log(`pass1抽出: ${pass1LogItems.map((x) => x.t + 1).join(",") || "なし"}`);
 
   const pass2Targets = candidates.slice().sort((a, b) => a.t - b.t);
   const acceptedGap = config.finalize.minCandidateGapPlies ?? 30;
@@ -544,16 +551,10 @@ export async function scanGame(args: {
     }
   }
 
-  console.log(`pass2結果まとめ: ${pass2LogItems.length}件`);
+  console.log(`pass2結果: ${pass2LogItems.length}件`);
   for (const item of pass2LogItems) {
-    const actualLoss = formatLoss({ best: item.best, candidate: item.actual, turnAtS: item.turnAtS });
-    const wrongLoss = formatLoss({ best: item.best, candidate: item.wrong, turnAtS: item.turnAtS });
-    const actualLossText = actualLoss == null ? "" : ` loss=${actualLoss}`;
-    const wrongLossText = wrongLoss == null ? "" : ` loss=${wrongLoss}`;
-    console.log(
-      `pass2結果: row ${item.t + 1} t ${item.t} d${item.depth} 最善 ${formatMoveEval(item.best, item.turnAtS)} / 実戦悪手 ${formatMoveEval(item.actual, item.turnAtS)}${actualLossText} / 悪手 ${formatMoveEval(item.wrong, item.turnAtS)}${wrongLossText}`
-    );
-    console.log(`pass2解析SFEN: row ${item.t + 1} ${item.positionCommand}`);
+    console.log(formatPass2LogItem(item));
+    console.log(`pass2 sfen row${item.t + 1}: ${item.positionCommand}`);
   }
 
   return results;

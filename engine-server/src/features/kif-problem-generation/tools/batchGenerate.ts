@@ -50,9 +50,6 @@ export async function main() {
   const enginePath = process.env.ENGINE_PATH?.trim() || getEnginePath();
   const engineEvalDir = resolveEngineEvalDir(enginePath);
 
-  console.error(`[batchGenerate] enginePath=${enginePath} exists=${existsSync(enginePath)}`);
-  console.error(`[batchGenerate] engineEvalDir=${engineEvalDir} exists=${existsSync(engineEvalDir)}`);
-
   const supabase = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false },
   });
@@ -131,8 +128,6 @@ export async function main() {
       try {
         const initialSfen = kifu.initial_sfen;
         const moves = splitMoves(kifu.moves);
-        console.log(`[kifu] id=${kifu.id} source=${kifu.source_ref ?? "-"}`);
-        console.log(`[kifu] position sfen ${initialSfen} moves ${moves.join(" ")}`);
         const scans = await scanGame({ engine, initialSfen, moves });
         let built = 0;
 

@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess } from 'child_process';
-import { existsSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { runBookProblemJob } from './features/book-problem-generation/bookProblem.service.js';
@@ -106,7 +105,9 @@ function appendLog(job: JobRecord, line: string): void {
 
 function setStep(job: JobRecord, step: string): void {
   job.step = step;
-  appendLog(job, `[step] ${step}`);
+  if (job.kind !== 'kifs') {
+    appendLog(job, `[step] ${step}`);
+  }
 }
 
 function parseJobInput(input: unknown): JobInput {
@@ -198,31 +199,17 @@ async function runCommand(
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const shell = process.platform === 'win32';
-    const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
-    const diagnosticEnv = [
-      'ENGINE_PATH',
-      'EVAL_DIR',
-      'BOOK_PATH',
-      'BOOK_INDEX_FILE',
-      'STATE_FILE',
-      'AMTS_BATCH_SIZE',
-      'AMTS_MAX_PROBLEMS_PER_GAME',
-      'AMTS_MAX_SCAN_RESULTS_PER_GAME',
-      'AMTS_SCAN_DEPTH',
-      'AMTS_DEBUG_PASS1_ALL',
-      'AMTS_FINALIZE_DEPTH',
-      'AMTS_SUSPICIOUS_MIN_DIFF',
-      'AMTS_SUSPICIOUS_MAX_DIFF',
-    ]
-      .map((key) => `${key}=${env[key] ?? '(unset)'}`)
-      .join(' ');
-
-    appendLog(job, `[command] platform=${process.platform} shell=${shell ? 'true' : 'false'}`);
-    appendLog(job, `[command] cwd=${cwd} exists=${existsSync(cwd)}`);
-    appendLog(job, `[command] cmd=${cmd} exists=${existsSync(cmd)}`);
-    appendLog(job, `[command] args=${JSON.stringify(args)}`);
-    appendLog(job, `[command] pathKey=${pathKey} pathSet=${env[pathKey] ? 'true' : 'false'}`);
-    appendLog(job, `[command] env ${diagnosticEnv}`);
+    const quietKifBatch = args.some((arg) => arg.includes('kif-problem-generation/tools/batchGenerate.ts'));
+    const shouldForwardChildLine = (line: string): boolean => {
+      if (!quietKifBatch) return true;
+      return (
+        line.startsWith('pass1抽出:') ||
+        line.startsWith('pass2結果:') ||
+        line.startsWith('pass2 row') ||
+        line.startsWith('pass2 sfen') ||
+        line.startsWith('致命的エラー:')
+      );
+    };
 
     let child: ChildProcess;
     try {
@@ -240,7 +227,9 @@ async function runCommand(
       const lines = buffer.split(/\r?\n/);
       const rest = lines.pop() ?? '';
       for (const line of lines) {
-        appendLog(job, `[${source}] ${line}`);
+        const trimmed = line.trim();
+        if (!shouldForwardChildLine(trimmed)) continue;
+        appendLog(job, quietKifBatch ? line : `[${source}] ${line}`);
       }
       return rest;
     };
@@ -261,11 +250,13 @@ async function runCommand(
     });
 
     child.on('close', (code, signal) => {
-      if (stdoutBuffer.trim()) {
-        appendLog(job, `[stdout] ${stdoutBuffer}`);
+      const trimmedStdout = stdoutBuffer.trim();
+      const trimmedStderr = stderrBuffer.trim();
+      if (trimmedStdout && shouldForwardChildLine(trimmedStdout)) {
+        appendLog(job, quietKifBatch ? stdoutBuffer : `[stdout] ${stdoutBuffer}`);
       }
-      if (stderrBuffer.trim()) {
-        appendLog(job, `[stderr] ${stderrBuffer}`);
+      if (trimmedStderr && shouldForwardChildLine(trimmedStderr)) {
+        appendLog(job, quietKifBatch ? stderrBuffer : `[stderr] ${stderrBuffer}`);
       }
       job.child = null;
 
@@ -324,8 +315,10 @@ async function runKifsJob(job: JobRecord, settings: ReturnType<typeof parseKifsJ
 async function executeJob(job: JobRecord, input: JobInput): Promise<void> {
   job.status = 'running';
   job.startedAt = new Date().toISOString();
-  appendLog(job, `[job] started (${job.kind})`);
-  appendLog(job, `[job] host hostname=${os.hostname()} platform=${process.platform} pid=${process.pid} cwd=${process.cwd()}`);
+  if (job.kind !== 'kifs') {
+    appendLog(job, `[job] started (${job.kind})`);
+    appendLog(job, `[job] host hostname=${os.hostname()} platform=${process.platform} pid=${process.pid} cwd=${process.cwd()}`);
+  }
 
   try {
     if (input.kind === 'book') {
@@ -339,7 +332,9 @@ async function executeJob(job: JobRecord, input: JobInput): Promise<void> {
     if (!isCancelled(job)) {
       job.status = 'completed';
       setStep(job, '完了');
-      appendLog(job, '[job] completed');
+      if (job.kind !== 'kifs') {
+        appendLog(job, '[job] completed');
+      }
     }
   } catch (error: any) {
     if (isCancelled(job)) {
