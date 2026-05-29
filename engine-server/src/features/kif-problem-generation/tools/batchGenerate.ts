@@ -202,6 +202,7 @@ export async function main() {
         } else {
           impossibleKifuIds.push(kifu.id);
         }
+        console.log(`作問結果: pass2=${scans.length} draft=${built}`);
       } catch (e: any) {
         ngKifus.push({ id: kifu.id, reason: String(e?.message ?? e) });
       }

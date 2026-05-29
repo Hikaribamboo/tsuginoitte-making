@@ -205,9 +205,11 @@ async function runCommand(
       return (
         line.startsWith('pass1抽出:') ||
         line.startsWith('pass2結果:') ||
+        line.startsWith('pass2 best') ||
         line.startsWith('pass2 row') ||
         line.startsWith('pass2 sfen') ||
         line.startsWith('kifu sfen:') ||
+        line.startsWith('作問結果:') ||
         line.startsWith('致命的エラー:')
       );
     };

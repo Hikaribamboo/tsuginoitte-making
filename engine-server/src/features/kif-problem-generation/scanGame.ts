@@ -25,9 +25,11 @@ type Pass2LogItem = {
   depth: number;
   positionCommand: string;
   turnAtS: Color;
-  best: PvInfo;
-  actual: PvInfo;
-  wrong: PvInfo;
+  status: "OK" | "NG";
+  reason: string | null;
+  best: PvInfo | null;
+  actual: PvInfo | null;
+  wrong: PvInfo | null;
 };
 
 function pickBestCpInfo(infos: PvInfo[]) {
@@ -133,17 +135,22 @@ function formatLoss(args: { best: PvInfo; candidate: PvInfo; turnAtS: Color }): 
 }
 
 function formatPass2LogItem(item: Pass2LogItem): string {
-  const actualLoss = formatLoss({ best: item.best, candidate: item.actual, turnAtS: item.turnAtS });
-  const wrongLoss = formatLoss({ best: item.best, candidate: item.wrong, turnAtS: item.turnAtS });
+  const actualLoss =
+    item.best && item.actual ? formatLoss({ best: item.best, candidate: item.actual, turnAtS: item.turnAtS }) : null;
+  const wrongLoss =
+    item.best && item.wrong ? formatLoss({ best: item.best, candidate: item.wrong, turnAtS: item.turnAtS }) : null;
   const actualLossText = actualLoss == null ? "" : ` loss=${actualLoss}`;
   const wrongLossText = wrongLoss == null ? "" : ` loss=${wrongLoss}`;
+  const reasonText = item.reason ? ` reason=${item.reason}` : "";
 
   return [
     `pass2 row${item.t + 1}`,
+    item.status,
     `depth${item.depth}`,
-    `best=${formatMoveEval(item.best, item.turnAtS)}`,
-    `actual=${formatMoveEval(item.actual, item.turnAtS)}${actualLossText}`,
-    `wrong=${formatMoveEval(item.wrong, item.turnAtS)}${wrongLossText}`,
+    `best=${item.best ? formatMoveEval(item.best, item.turnAtS) : "-"}`,
+    `actual=${item.actual ? formatMoveEval(item.actual, item.turnAtS) : "-"}${actualLossText}`,
+    `wrong=${item.wrong ? formatMoveEval(item.wrong, item.turnAtS) : "-"}${wrongLossText}`,
+    reasonText,
   ].join(" ");
 }
 
@@ -440,6 +447,7 @@ export async function scanGame(args: {
     gathered = mergeUniqueByMove(gathered, bestAnalysis.infos);
     const finalBest = pickBestCpInfo(bestAnalysis.infos);
     const correctUsi = finalBest?.pv[0] ?? null;
+    console.log(`pass2 best row${t + 1} d${finalDepth} ${finalBest ? formatMoveEval(finalBest, turnAtS) : "-"}`);
 
     if (!finalBest || !correctUsi) {
       giveUpReason = "最善手なし";
@@ -537,18 +545,19 @@ export async function scanGame(args: {
     if (ok) {
       results.push({ t, rootSfen, introMoveUsi, actualMoveUsi, infos: gathered });
       acceptedTs.push(t);
-      if (finalBest && actualInfo && selectedWrongInfo) {
-        pass2LogItems.push({
-          t,
-          depth: finalDepth,
-          positionCommand: positionCommandS,
-          turnAtS,
-          best: finalBest,
-          actual: actualInfo,
-          wrong: selectedWrongInfo,
-        });
-      }
     }
+
+    pass2LogItems.push({
+      t,
+      depth: finalDepth,
+      positionCommand: positionCommandS,
+      turnAtS,
+      status: ok ? "OK" : "NG",
+      reason: ok ? null : giveUpReason ?? "不採用",
+      best: finalBest,
+      actual: actualInfo,
+      wrong: selectedWrongInfo,
+    });
   }
 
   console.log(`pass2結果: ${pass2LogItems.length}件`);
