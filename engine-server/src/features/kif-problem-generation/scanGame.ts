@@ -16,14 +16,6 @@ type Candidate = {
   actualMoveUsi: string;
 };
 
-type StepSnapshot = {
-  depth: number;
-  mp: number;
-  gatheredCount: number;
-  hasActualMove: boolean;
-  foundWrong2: boolean;
-};
-
 function pickBestCpInfo(infos: PvInfo[]) {
   const sorted = [...infos].sort((a, b) => a.multipv - b.multipv);
   const best = sorted[0];
@@ -87,40 +79,40 @@ function bestLossCp(args: {
   return candidateEvalSente - bestEvalSente;
 }
 
-async function analyzeActualIfMissing(args: {
+async function analyzeMove(args: {
   engine: EngineClient;
   positionCommand: string;
   depth: number;
   pvPlies: number;
-  actualMoveUsi: string;
+  moveUsi: string;
   perfLabel?: string;
 }): Promise<PvInfo | null> {
-  const { engine, positionCommand, depth, pvPlies, actualMoveUsi, perfLabel } = args;
+  const { engine, positionCommand, depth, pvPlies, moveUsi, perfLabel } = args;
 
   const endAll = startTimer();
 
   const endSetMp = startTimer();
   await engine.setMultiPv(1);
-  perfMark(perfLabel ? `${perfLabel}|setMultiPv(1)` : "scanGame.pass2.actualIfMissing.setMultiPv", endSetMp());
+  perfMark(perfLabel ? `${perfLabel}|setMultiPv(1)` : "scanGame.pass2.analyzeMove.setMultiPv", endSetMp());
 
   const endAnalyze = startTimer();
   const res = await engine.analyze({
     positionCommand,
     depth,
     pvPlies,
-    searchMoves: [actualMoveUsi],
-    label: perfLabel ? `${perfLabel}|actualIfMissing` : "scan-pass2-actualIfMissing",
+    searchMoves: [moveUsi],
+    label: perfLabel ? `${perfLabel}|searchMove` : "scan-pass2-searchMove",
   });
   perfMark(
-    perfLabel ? `${perfLabel}|analyzeActualIfMissing` : "scanGame.pass2.actualIfMissing.analyze",
+    perfLabel ? `${perfLabel}|analyzeMove` : "scanGame.pass2.analyzeMove.analyze",
     endAnalyze()
   );
 
-  perfMark(perfLabel ? `${perfLabel}|total` : "scanGame.pass2.actualIfMissing.total", endAll());
+  perfMark(perfLabel ? `${perfLabel}|total` : "scanGame.pass2.analyzeMove.total", endAll());
 
   const best = pickBestCpInfo(res.infos);
   if (!best) return null;
-  if (best.pv[0] !== actualMoveUsi) return null;
+  if (best.pv[0] !== moveUsi) return null;
 
   return { ...best, multipv: 999 };
 }
@@ -154,31 +146,6 @@ function pickSpacedCandidates(args: { candidates: Candidate[]; maxPick: number; 
   const fallback = sorted.slice(0, maxPick);
   console.log(`pass2候補t一覧: fallback picked=${fallback.length}`);
   return fallback;
-}
-
-function shouldGiveUpPass2(args: {
-  history: StepSnapshot[];
-  currentMp: number;
-  maxMp: number;
-}): { giveUp: boolean; reason?: string } {
-  const { history, currentMp, maxMp } = args;
-
-  if (history.length < 2) return { giveUp: false };
-
-  const last = history[history.length - 1];
-  const prev = history[history.length - 2];
-
-  if (!last.hasActualMove) return { giveUp: false };
-  if (last.foundWrong2) return { giveUp: false };
-
-  const noGrowth = last.gatheredCount === prev.gatheredCount;
-  const reachedHighMp = currentMp >= 10;
-  const nearEnd = currentMp === maxMp || currentMp >= 20;
-
-  if (noGrowth && reachedHighMp) return { giveUp: true, reason: "候補増えず高mp" };
-  if (noGrowth && nearEnd) return { giveUp: true, reason: "候補増えず終盤" };
-
-  return { giveUp: false };
 }
 
 function summarizeWrong2Potential(args: {
@@ -232,16 +199,43 @@ function summarizeWrong2Potential(args: {
   return { foundWrong2, worstLoss };
 }
 
-function getDynamicMpConfig(): {
-  baseMps: readonly number[];
-  tailMp: number;
-  insert20WorstLossThreshold: number;
-} {
-  return {
-    baseMps: config.finalize.dynamicMpBaseSteps ?? [3, 10],
-    tailMp: config.finalize.dynamicMpTail ?? 30,
-    insert20WorstLossThreshold: config.finalize.dynamicMpInsert20WorstLossThreshold ?? 400,
-  };
+function listWrong2Candidates(args: {
+  infos: PvInfo[];
+  correctUsi: string;
+  actualMoveUsi: string;
+  threshold: number;
+  turnAtS: Color;
+}): Array<{ info: PvInfo; loss: number }> {
+  const { infos, correctUsi, actualMoveUsi, threshold, turnAtS } = args;
+  const cp = infos.filter((x) => x.evalType === "cp" && x.pv.length > 0);
+  if (cp.length === 0) return [];
+
+  const normalized = cp.map((x) => ({
+    ...x,
+    eval: normalizeCpToSentePerspective(x.eval, turnAtS),
+  }));
+  const sorted =
+    turnAtS === "b"
+      ? [...normalized].sort((a, b) => b.eval - a.eval)
+      : [...normalized].sort((a, b) => a.eval - b.eval);
+  const best = sorted[0];
+  if (!best) return [];
+
+  const exclude = new Set<string>([correctUsi, actualMoveUsi]);
+  return normalized
+    .map((info) => {
+      const loss = bestLossCp({
+        bestEvalSente: best.eval,
+        candidateEvalSente: info.eval,
+        turnAtS,
+      });
+      return { info, loss };
+    })
+    .filter(({ info, loss }) => {
+      const usi = info.pv[0];
+      return Boolean(usi) && !exclude.has(usi) && loss >= threshold;
+    })
+    .sort((a, b) => b.loss - a.loss);
 }
 
 /**
@@ -298,7 +292,6 @@ export async function scanGame(args: {
     const movesToS = moves.slice(0, t);
     const turnAtS = getTurnAtS(initialTurn, t);
     const positionCommandS = buildPositionCommand(initialSfen, movesToS);
-    console.log(`pass2候補: start t ${t}，actual ${actualMoveUsi}，turn ${turnAtS}`);
 
     const bestRes = await engine.analyze({
       positionCommand: positionCommandS,
@@ -370,203 +363,117 @@ export async function scanGame(args: {
     const positionCommandS = buildPositionCommand(initialSfen, movesToS);
 
     const pvPlies = Math.max(config.finalize.pvPlies, 9);
-    const depthSteps = config.finalize.choiceDepthSteps ?? [config.finalize.depth, config.finalize.depth + 2];
+    const finalDepth = config.finalize.depth;
+    const wrongProbeDepth = Math.min(16, finalDepth);
+    const wrongProbeMps = [5, 10];
     const threshold = config.finalize.blunderThresholdCp ?? 400;
-    const { baseMps, tailMp, insert20WorstLossThreshold } = getDynamicMpConfig();
 
     const rejectIfBestTooBadCp = config.finalize.rejectIfBestTooBadCp;
     const rejectIfBestTooGoodCp = config.finalize.rejectIfBestTooGoodCp;
 
     let gathered: PvInfo[] = [];
-    let gaveUp = false;
     let giveUpReason: string | null = null;
-    const stepHistory: StepSnapshot[] = [];
-
-    let summaryAtMp10: { foundWrong2: boolean; worstLoss: number } | null = null;
-
     let ok = false;
 
-    outer: for (const depth of depthSteps) {
-      for (const mp of baseMps) {
-        const endStep = startTimer();
+    console.log(`pass2候補: start t ${t} d${finalDepth} actual ${actualMoveUsi} turn ${turnAtS}`);
 
-        const endSetMp = startTimer();
+    await engine.setMultiPv(1);
+    const bestAnalysis = await engine.analyze({
+      positionCommand: positionCommandS,
+      depth: finalDepth,
+      pvPlies,
+      label: `scan-pass2-t${t}-best-d${finalDepth}`,
+    });
+    gathered = mergeUniqueByMove(gathered, bestAnalysis.infos);
+    const finalBest = pickBestCpInfo(bestAnalysis.infos);
+    const correctUsi = finalBest?.pv[0] ?? null;
+
+    if (!finalBest || !correctUsi) {
+      giveUpReason = "最善手なし";
+    } else {
+      const userCp = computeUserCpFromGathered({ gathered, questionTurn: turnAtS });
+      if (userCp != null && rejectIfBestTooBadCp != null && userCp < -rejectIfBestTooBadCp) {
+        giveUpReason = `ユーザー不利 userCp ${userCp} 下限 ${rejectIfBestTooBadCp}`;
+      } else if (userCp != null && rejectIfBestTooGoodCp != null && userCp > rejectIfBestTooGoodCp) {
+        giveUpReason = `ユーザー有利すぎ userCp ${userCp} 上限 ${rejectIfBestTooGoodCp}`;
+      }
+    }
+
+    if (!giveUpReason) {
+      const actualInfo = await analyzeMove({
+        engine,
+        positionCommand: positionCommandS,
+        depth: finalDepth,
+        pvPlies,
+        moveUsi: actualMoveUsi,
+        perfLabel: `${candidateLabel}|actual-d${finalDepth}`,
+      });
+      if (actualInfo) gathered = mergeUniqueByMove(gathered, [actualInfo]);
+      if (!actualInfo) giveUpReason = "実戦手評価なし";
+    }
+
+    if (!giveUpReason && correctUsi) {
+      const triedWrongMoves = new Set<string>();
+
+      for (const mp of wrongProbeMps) {
         await engine.setMultiPv(mp);
-        const setMpMs = endSetMp();
-        perfMark(`${candidateLabel}|setMultiPv`, setMpMs);
-        perfMark(`${candidateLabel}|depth${depth}|mp${mp}|setMultiPv`, setMpMs);
-
-        const endAnalyze = startTimer();
-        const analysis = await engine.analyze({
+        const probe = await engine.analyze({
           positionCommand: positionCommandS,
-          depth,
+          depth: wrongProbeDepth,
           pvPlies,
-          label: `scan-pass2-t${t}-d${depth}-mp${mp}`,
+          label: `scan-pass2-t${t}-wrongProbe-d${wrongProbeDepth}-mp${mp}`,
         });
-        const analyzeMs = endAnalyze();
-        perfMark(`${candidateLabel}|analyze`, analyzeMs);
-        perfMark(`${candidateLabel}|depth${depth}|mp${mp}|analyze`, analyzeMs);
+        const candidatesForWrong2 = listWrong2Candidates({
+          infos: probe.infos,
+          correctUsi,
+          actualMoveUsi,
+          threshold,
+          turnAtS,
+        });
+        console.log(`pass2候補: 悪手探索 t ${t} d${wrongProbeDepth} mp${mp} 候補${candidatesForWrong2.length}`);
 
-        gathered = mergeUniqueByMove(gathered, analysis.infos);
+        for (const candidate of candidatesForWrong2) {
+          const wrongUsi = candidate.info.pv[0];
+          if (!wrongUsi || triedWrongMoves.has(wrongUsi)) continue;
+          triedWrongMoves.add(wrongUsi);
 
-        // pass2超序盤のフィルタ：
-        // 最初の1stepで rootEval相当(bestEval)を取って，builderと同じ条件で弾く。
-        // これで「後で確実に破棄される局面」に対して mp10/tail/depth20 を回さずに済む。
-        const isFirstStep = depth === depthSteps[0] && mp === baseMps[0] && stepHistory.length === 0;
-        if (isFirstStep) {
-          const userCp = computeUserCpFromGathered({ gathered, questionTurn: turnAtS });
-
-          if (userCp != null && rejectIfBestTooBadCp != null && userCp < -rejectIfBestTooBadCp) {
-            gaveUp = true;
-            giveUpReason = `ユーザー不利(早期) userCp ${userCp} 下限 ${rejectIfBestTooBadCp}`;
-            console.log(`pass2候補: early reject t ${t}，理由 ${giveUpReason}`);
-            break outer;
-          }
-
-          if (userCp != null && rejectIfBestTooGoodCp != null && userCp > rejectIfBestTooGoodCp) {
-            gaveUp = true;
-            giveUpReason = `ユーザー有利すぎ(早期) userCp ${userCp} 上限 ${rejectIfBestTooGoodCp}`;
-            console.log(`pass2候補: early reject t ${t}，理由 ${giveUpReason}`);
-            break outer;
-          }
-        }
-
-        let hadActual = hasMove(gathered, actualMoveUsi);
-        if (!hadActual) {
-          const endActual = startTimer();
-          const actualInfo = await analyzeActualIfMissing({
+          const wrongFinal = await analyzeMove({
             engine,
             positionCommand: positionCommandS,
-            depth,
+            depth: finalDepth,
             pvPlies,
-            actualMoveUsi,
-            perfLabel: `${candidateLabel}|depth${depth}|mp${mp}|actualIfMissing`,
+            moveUsi: wrongUsi,
+            perfLabel: `${candidateLabel}|wrong2-${wrongUsi}-d${finalDepth}`,
           });
-          const actualIfMissingMs = endActual();
-          perfMark(`${candidateLabel}|actualIfMissingTotal`, actualIfMissingMs);
-          perfMark(`${candidateLabel}|depth${depth}|mp${mp}|actualIfMissingTotal`, actualIfMissingMs);
+          if (wrongFinal) gathered = mergeUniqueByMove(gathered, [wrongFinal]);
 
-          if (actualInfo) gathered = mergeUniqueByMove(gathered, [actualInfo]);
-          hadActual = hasMove(gathered, actualMoveUsi);
-          console.log(`pass2候補: actual補完 t ${t} d${depth} mp${mp} found=${actualInfo ? "true" : "false"}`);
+          const summary = summarizeWrong2Potential({
+            infos: gathered,
+            wrong1Usi: actualMoveUsi,
+            threshold,
+            turnAtS,
+          });
+          console.log(
+            `pass2候補: 悪手再評価 t ${t} move ${wrongUsi} d${finalDepth} found=${summary.foundWrong2 ? "true" : "false"} worstLoss=${summary.worstLoss}`
+          );
+
+          if (summary.foundWrong2) {
+            ok = true;
+            break;
+          }
         }
 
-        const endSumm = startTimer();
-        const summary = summarizeWrong2Potential({
-          infos: gathered,
-          wrong1Usi: actualMoveUsi,
-          threshold,
-          turnAtS,
-        });
-        const existsWrong2Ms = endSumm();
-        perfMark(`${candidateLabel}|existsWrong2`, existsWrong2Ms);
-        perfMark(`${candidateLabel}|depth${depth}|mp${mp}|existsWrong2`, existsWrong2Ms);
-
-        const stepMs = endStep();
-        perfMark(`${candidateLabel}|stepTotal`, stepMs);
-        perfMark(`${candidateLabel}|depth${depth}|mp${mp}|stepTotal`, stepMs);
-
-        stepHistory.push({
-          depth,
-          mp,
-          gatheredCount: gathered.length,
-          hasActualMove: hadActual,
-          foundWrong2: summary.foundWrong2,
-        });
-
-        console.log(`pass2候補: step t ${t} d${depth} mp${mp} 候補${gathered.length} 実戦手${hadActual ? "有" : "無"} 悪手${summary.foundWrong2 ? "有" : "無"} worstLoss=${summary.worstLoss}`);
-
-        if (mp === 10) summaryAtMp10 = summary;
-
-        if (summary.foundWrong2) {
-          ok = true;
-          break outer;
-        }
-
-        const giveUp = shouldGiveUpPass2({
-          history: stepHistory,
-          currentMp: mp,
-          maxMp: tailMp,
-        });
-
-        if (giveUp.giveUp) {
-          gaveUp = true;
-          giveUpReason = giveUp.reason ?? "見込みなし";
-          console.log(`pass2候補: giveUp t ${t} depth ${depth} mp ${mp} 理由 ${giveUpReason}`);
-          break outer;
-        }
+        if (ok) break;
       }
 
-      const worstLoss10 = summaryAtMp10?.worstLoss ?? 0;
-      const shouldInsert20 = worstLoss10 >= insert20WorstLossThreshold;
-      const nextMps = shouldInsert20 ? [20, tailMp] : [tailMp];
-
-      for (const mp of nextMps) {
-        const endStep = startTimer();
-
-        const endSetMp = startTimer();
-        await engine.setMultiPv(mp);
-        const setMpMs = endSetMp();
-        perfMark(`${candidateLabel}|setMultiPv`, setMpMs);
-        perfMark(`${candidateLabel}|depth${depth}|mp${mp}|setMultiPv`, setMpMs);
-
-        const endAnalyze = startTimer();
-        const analysis = await engine.analyze({
-          positionCommand: positionCommandS,
-          depth,
-          pvPlies,
-          label: `scan-pass2-t${t}-d${depth}-mp${mp}`,
-        });
-        const analyzeMs = endAnalyze();
-        perfMark(`${candidateLabel}|analyze`, analyzeMs);
-        perfMark(`${candidateLabel}|depth${depth}|mp${mp}|analyze`, analyzeMs);
-
-        gathered = mergeUniqueByMove(gathered, analysis.infos);
-
-        const endSumm = startTimer();
+      if (!ok) {
         const summary = summarizeWrong2Potential({
           infos: gathered,
           wrong1Usi: actualMoveUsi,
           threshold,
           turnAtS,
         });
-        const existsWrong2Ms = endSumm();
-        perfMark(`${candidateLabel}|existsWrong2`, existsWrong2Ms);
-        perfMark(`${candidateLabel}|depth${depth}|mp${mp}|existsWrong2`, existsWrong2Ms);
-
-        const stepMs = endStep();
-        perfMark(`${candidateLabel}|stepTotal`, stepMs);
-        perfMark(`${candidateLabel}|depth${depth}|mp${mp}|stepTotal`, stepMs);
-
-        stepHistory.push({
-          depth,
-          mp,
-          gatheredCount: gathered.length,
-          hasActualMove: hasMove(gathered, actualMoveUsi),
-          foundWrong2: summary.foundWrong2,
-        });
-
-        console.log(
-          `pass2候補: step t ${t} d${depth} mp${mp} 候補${gathered.length} 実戦手${hasMove(gathered, actualMoveUsi) ? "有" : "無"} 悪手${summary.foundWrong2 ? "有" : "無"} worstLoss=${summary.worstLoss}`
-        );
-
-        if (summary.foundWrong2) {
-          ok = true;
-          break outer;
-        }
-
-        const giveUp = shouldGiveUpPass2({
-          history: stepHistory,
-          currentMp: mp,
-          maxMp: tailMp,
-        });
-
-        if (giveUp.giveUp) {
-          gaveUp = true;
-          giveUpReason = giveUp.reason ?? "見込みなし";
-          console.log(`pass2候補: giveUp t ${t} depth ${depth} mp ${mp} 理由 ${giveUpReason}`);
-          break outer;
-        }
+        giveUpReason = `悪手不足 worstLoss=${summary.worstLoss}`;
       }
     }
 
@@ -577,7 +484,7 @@ export async function scanGame(args: {
       appliedPlies: t - 1,
     });
 
-    if (ok && !gaveUp) {
+    if (ok) {
       results.push({ t, rootSfen, introMoveUsi, actualMoveUsi, infos: gathered });
       console.log(`pass2候補: OK，t ${t}`);
     } else {
