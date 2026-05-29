@@ -117,37 +117,6 @@ async function analyzeMove(args: {
   return { ...best, multipv: 999 };
 }
 
-function pickSpacedCandidates(args: { candidates: Candidate[]; maxPick: number; minGap: number }): Candidate[] {
-  const { candidates, maxPick, minGap } = args;
-  const sorted = [...candidates].sort((a, b) => b.diff - a.diff);
-
-  const gapSteps = [minGap, Math.floor(minGap / 2), Math.floor(minGap / 3), 0].filter(
-    (g, i, a) => g >= 0 && a.indexOf(g) === i
-  );
-
-  for (const gap of gapSteps) {
-    const picked: Candidate[] = [];
-    for (const c of sorted) {
-      if (picked.length >= maxPick) break;
-      if (picked.every((p) => Math.abs(p.t - c.t) >= gap)) picked.push(c);
-    }
-
-    if (picked.length > 0) {
-      const ts = picked
-        .slice()
-        .sort((a, b) => a.t - b.t)
-        .map((x) => x.t)
-        .join(",");
-      console.log(`pass2候補t一覧:${ts}`);
-      return picked;
-    }
-  }
-
-  const fallback = sorted.slice(0, maxPick);
-  console.log(`pass2候補t一覧: fallback picked=${fallback.length}`);
-  return fallback;
-}
-
 function summarizeWrong2Potential(args: {
   infos: PvInfo[];
   wrong1Usi: string;
@@ -335,11 +304,8 @@ export async function scanGame(args: {
     }
   }
 
-  const pass2Targets = pickSpacedCandidates({
-    candidates,
-    maxPick: config.maxCandidates,
-    minGap: config.finalize.minCandidateGapPlies ?? 30,
-  });
+  const pass2Targets = candidates.slice().sort((a, b) => a.t - b.t);
+  const acceptedGap = config.finalize.minCandidateGapPlies ?? 30;
 
   console.log(`pass1候補t一覧: ${candidates
          .slice()
@@ -351,9 +317,18 @@ export async function scanGame(args: {
   console.log("pass2開始");
 
   const results: ScanResult[] = [];
+  const acceptedTs: number[] = [];
+  let attemptedPass2 = 0;
 
   for (const c of pass2Targets) {
     if (results.length >= (config.maxScanResultsPerGame ?? 9999)) break;
+    if (attemptedPass2 >= config.maxCandidates) break;
+    const skippedByAcceptedGap = acceptedTs.some((acceptedT) => c.t > acceptedT && c.t - acceptedT < acceptedGap);
+    if (skippedByAcceptedGap) {
+      console.log(`pass2候補: skip t ${c.t}，採用済み候補から${acceptedGap}手以内`);
+      continue;
+    }
+    attemptedPass2 += 1;
 
     const candidateLabel = `scanGame.pass2.t${c.t}`;
     const { t, introMoveUsi, actualMoveUsi } = c;
@@ -486,6 +461,7 @@ export async function scanGame(args: {
 
     if (ok) {
       results.push({ t, rootSfen, introMoveUsi, actualMoveUsi, infos: gathered });
+      acceptedTs.push(t);
       console.log(`pass2候補: OK，t ${t}`);
     } else {
       const reason = giveUpReason ?? "条件未達";
