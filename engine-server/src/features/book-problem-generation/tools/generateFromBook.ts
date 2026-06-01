@@ -226,6 +226,17 @@ function resolveEngineEvalDir(enginePath: string): string {
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
 }
 
+function isFatalEngineError(error: unknown): boolean {
+  const message = String((error as { message?: unknown } | null)?.message ?? error);
+  return (
+    message.includes("analyze timeout") ||
+    message.includes("waitFor timeout") ||
+    message.includes("engine exited") ||
+    message.includes("EPIPE") ||
+    message.includes("ERR_STREAM_DESTROYED")
+  );
+}
+
 async function analyzeSearchMove(args: {
   engine: EngineClient;
   positionCommand: string;
@@ -455,7 +466,12 @@ export async function main(): Promise<void> {
           console.log(`book row${sfenOrdinal + 1} NG reason=${result.reason} sfen=${sfen}`);
         }
       } catch (error: any) {
-        console.log(`book row${sfenOrdinal + 1} NG reason=${String(error?.message ?? error)} sfen=${sfen}`);
+        const reason = String(error?.message ?? error);
+        if (isFatalEngineError(error)) {
+          console.error(`book row${sfenOrdinal + 1} FATAL reason=${reason} sfen=${sfen}`);
+          throw new Error(`book row${sfenOrdinal + 1} engine failure: ${reason}`);
+        }
+        console.log(`book row${sfenOrdinal + 1} NG reason=${reason} sfen=${sfen}`);
       }
     }
   } finally {

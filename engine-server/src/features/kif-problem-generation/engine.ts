@@ -49,6 +49,8 @@ export class UsiEngine {
   private proc;
   private buffer = "";
   private onLine?: (line: string) => void;
+  private pendingReject?: (error: Error) => void;
+  private pendingCleanup?: () => void;
 
   private currentMultiPv: number | null = null;
   private engineEvalDir: string | null;
@@ -77,12 +79,29 @@ export class UsiEngine {
       console.error("[ENGINE-ERR]", data.toString());
     });
 
-    this.proc.on("exit", (code) => {
+    this.proc.on("exit", (code, signal) => {
+      const reason = `engine exited code=${code ?? "none"} signal=${signal ?? "none"}`;
       console.log("[ENGINE-EXIT]", code);
+      this.failPending(reason);
     });
   }
 
+  private clearPending() {
+    this.pendingCleanup?.();
+    this.pendingCleanup = undefined;
+    this.pendingReject = undefined;
+  }
+
+  private failPending(reason: string) {
+    const reject = this.pendingReject;
+    if (!reject) return;
+    this.onLine = undefined;
+    this.clearPending();
+    reject(new Error(reason));
+  }
+
   write(line: string) {
+    if (this.proc.stdin.destroyed || this.proc.stdin.writableEnded) return;
     this.proc.stdin.write(line.endsWith("\n") ? line : line + "\n");
   }
 
@@ -90,13 +109,16 @@ export class UsiEngine {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.onLine = undefined;
+        this.clearPending();
         reject(new Error("waitFor timeout"));
       }, timeoutMs);
+      this.pendingReject = reject;
+      this.pendingCleanup = () => clearTimeout(timer);
 
       this.onLine = (line) => {
         if (predicate(line)) {
-          clearTimeout(timer);
           this.onLine = undefined;
+          this.clearPending();
           resolve(line);
         }
       };
@@ -168,11 +190,14 @@ export class UsiEngine {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.onLine = undefined;
+        this.clearPending();
         const ms = end();
         const tag = args.label ? `|${args.label}` : "";
         perfMark(`engine.analyze.timeout${tag}`, ms);
         reject(new Error("analyze timeout"));
       }, 180000);
+      this.pendingReject = reject;
+      this.pendingCleanup = () => clearTimeout(timeout);
 
       this.onLine = (line) => {
         if (line.startsWith("info ")) {
@@ -184,8 +209,8 @@ export class UsiEngine {
         if (line.startsWith("bestmove ")) {
           bestmove = line.split(/\s+/)[1] ?? null;
 
-          clearTimeout(timeout);
           this.onLine = undefined;
+          this.clearPending();
 
           const infos = Array.from(latest.values()).sort((a, b) => a.multipv - b.multipv);
 
