@@ -61,7 +61,8 @@ type Summary = {
 
 const BOOK_STEP = 100;
 const FINAL_DEPTH = 26;
-const WRONG_PROBE_MULTIPV = 12;
+const WRONG_PROBE_DEPTH = 18;
+const WRONG_PROBE_MULTIPV = 16;
 const PV_PLIES = 9;
 const PROMPT = "最善手を選んでください";
 
@@ -287,9 +288,9 @@ async function buildProblemFromSfen(args: {
   await engine.setMultiPv(WRONG_PROBE_MULTIPV);
   const probe = await engine.analyze({
     positionCommand,
-    depth: FINAL_DEPTH,
+    depth: WRONG_PROBE_DEPTH,
     pvPlies: PV_PLIES,
-    label: `book-row${sfenOrdinal + 1}-wrongProbe-mp${WRONG_PROBE_MULTIPV}`,
+    label: `book-row${sfenOrdinal + 1}-wrongProbe-d${WRONG_PROBE_DEPTH}-mp${WRONG_PROBE_MULTIPV}`,
   });
 
   const candidates = uniqCpInfosByMove(probe.infos)
@@ -409,7 +410,7 @@ export async function main(): Promise<void> {
   const startSfenOrdinal = cursor.nextSfenOrdinal;
 
   console.log(
-    `book作問開始: book=${selectedBook.label} count=${count} minDiff=${minDiff} maxDiff=${maxDiff} depth=${FINAL_DEPTH} wrongMp=${WRONG_PROBE_MULTIPV}`,
+    `book作問開始: book=${selectedBook.label} count=${count} minDiff=${minDiff} maxDiff=${maxDiff} finalDepth=${FINAL_DEPTH} wrongProbeDepth=${WRONG_PROBE_DEPTH} wrongMp=${WRONG_PROBE_MULTIPV}`,
   );
   console.log(`book key: ${selectedBook.key}`);
   console.log(`book path: ${bookPath}`);
