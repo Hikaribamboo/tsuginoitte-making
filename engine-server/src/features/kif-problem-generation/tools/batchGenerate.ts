@@ -86,6 +86,10 @@ export async function main() {
     const doneKifuIds: number[] = [];
     const impossibleKifuIds: number[] = [];
     const ngKifus: Array<{ id: number; reason: string }> = [];
+    let totalScanned = 0;
+    let totalBuilt = 0;
+    let totalInsertedProblems = 0;
+    let totalRejectedByBuild = 0;
 
     let stoppedByTimeLimit = false;
     const unprocessedKifuIds: number[] = [];
@@ -104,9 +108,13 @@ export async function main() {
       try {
         const initialSfen = kifu.initial_sfen;
         const moves = splitMoves(kifu.moves);
-        console.log(`kifu sfen: position sfen ${initialSfen} moves ${moves.join(" ")}`);
+        console.log(`[kifu:${kifu.id}] start moves=${moves.length} source_ref=${kifu.source_ref ?? "null"}`);
+        console.log(`[kifu:${kifu.id}] sfen: position sfen ${initialSfen} moves ${moves.join(" ")}`);
         const scans = await scanGame({ engine, initialSfen, moves });
+        totalScanned += scans.length;
+        console.log(`[kifu:${kifu.id}] pass1抽出=${scans.length}`);
         let built = 0;
+        let rejectedByBuild = 0;
         const kifuDraftProblemsPayload: Array<{
           created_at: string;
           prompt: string;
@@ -149,7 +157,11 @@ export async function main() {
             rejectIfBestTooGoodCp: config.finalize.rejectIfBestTooGoodCp,
           });
 
-          if (!out) continue;
+          if (!out) {
+            rejectedByBuild += 1;
+            totalRejectedByBuild += 1;
+            continue;
+          }
 
           const tmpIndex = kifuDraftProblemsPayload.length;
           const sourceRef = `making_kifu:${kifu.id}:problem:${built + 1}`;
@@ -197,9 +209,11 @@ export async function main() {
           built += 1;
         }
 
+        totalBuilt += built;
+
         if (built === 0) {
           impossibleKifuIds.push(kifu.id);
-          console.log(`作問結果: pass2=${scans.length} draft=0 なので保存をスキップ`);
+          console.log(`[kifu:${kifu.id}] result pass2=${scans.length} built=0 rejectedByBuild=${rejectedByBuild} saved=0`);
           continue;
         }
 
@@ -254,11 +268,16 @@ export async function main() {
         if (choiceErr) throw choiceErr;
 
         doneKifuIds.push(kifu.id);
-        console.log(`作問結果: pass2=${scans.length} draft=${built} 1件ずつ保存しました`);
+        totalInsertedProblems += kifuDraftProblemsPayload.length;
+        console.log(`[kifu:${kifu.id}] result pass2=${scans.length} built=${built} rejectedByBuild=${rejectedByBuild} saved=${kifuDraftProblemsPayload.length}`);
       } catch (e: any) {
         ngKifus.push({ id: kifu.id, reason: String(e?.message ?? e) });
+        console.log(`[kifu:${kifu.id}] error ${String(e?.message ?? e)}`);
       }
     }
+
+    console.log(`[batch] summary kifus=${kifus.length} scanned=${totalScanned} built=${totalBuilt} inserted=${totalInsertedProblems} rejectedByBuild=${totalRejectedByBuild}`);
+    console.log(`[batch] status done=${doneKifuIds.length} impossible=${impossibleKifuIds.length} failed=${ngKifus.length} pending=${unprocessedKifuIds.length}`);
 
     if (doneKifuIds.length > 0) {
       const { error: e1 } = await supabase.from("making_kifus").update({ status: "done" }).in("id", doneKifuIds);
