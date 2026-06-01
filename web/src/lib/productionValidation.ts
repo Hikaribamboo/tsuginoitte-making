@@ -1,4 +1,10 @@
 import type { ProductionChoice, ProductionProblem, ProductionProblemDetail } from '../types/production';
+import { parseSfen } from './sfen';
+import {
+  HAND_PIECE_TYPES,
+  PIECE_KANJI,
+  type PieceType,
+} from '../types/shogi';
 
 export type ProductionValidationSeverity = 'error' | 'warning' | 'info';
 export type ProductionValidationStatus = 'ok' | 'warning' | 'error';
@@ -22,6 +28,18 @@ type ProductionLike = Pick<
   ProductionProblem,
   'displayNo' | 'status' | 'prompt' | 'rootSfen' | 'rootEvalPercent' | 'correctChoiceId'
 >;
+
+const PIECE_TYPES: PieceType[] = ['K', 'R', 'B', 'G', 'S', 'N', 'L', 'P'];
+const TOTAL_PIECES: Record<PieceType, number> = {
+  K: 2,
+  R: 2,
+  B: 2,
+  G: 4,
+  S: 4,
+  N: 4,
+  L: 4,
+  P: 18,
+};
 
 function isEmptyString(value: unknown): boolean {
   return typeof value !== 'string' || value.trim().length === 0;
@@ -64,6 +82,8 @@ export function validateProductionProblem(
 
   if (isEmptyString(problem.rootSfen)) {
     addIssue(issues, 'error', 'root_sfen_empty', 'root_sfen', 'root_sfen が空です');
+  } else {
+    addRootSfenPieceCountIssues(issues, problem.rootSfen);
   }
 
   if (problem.rootEvalPercent == null) {
@@ -142,6 +162,49 @@ export function validateProductionProblem(
   }
 
   return issues;
+}
+
+function addRootSfenPieceCountIssues(issues: ProductionValidationIssue[], rootSfen: string) {
+  try {
+    const state = parseSfen(rootSfen);
+    const counts = PIECE_TYPES.reduce((acc, type) => {
+      acc[type] = 0;
+      return acc;
+    }, {} as Record<PieceType, number>);
+
+    for (const row of state.board) {
+      for (const piece of row) {
+        if (piece) counts[piece.type] += 1;
+      }
+    }
+
+    for (const type of HAND_PIECE_TYPES) {
+      counts[type] += state.senteHand[type] + state.goteHand[type];
+    }
+
+    for (const type of PIECE_TYPES) {
+      const expected = TOTAL_PIECES[type];
+      const actual = counts[type];
+      if (actual === expected) continue;
+
+      const diff = actual - expected;
+      addIssue(
+        issues,
+        'error',
+        'root_sfen_piece_count_mismatch',
+        'root_sfen',
+        `${PIECE_KANJI[type]}の総数が不正です (${actual}/${expected}, ${diff > 0 ? `${diff}枚多い` : `${Math.abs(diff)}枚不足`})`,
+      );
+    }
+  } catch (error: any) {
+    addIssue(
+      issues,
+      'error',
+      'root_sfen_invalid',
+      'root_sfen',
+      `root_sfen を解析できません: ${error?.message ?? String(error)}`,
+    );
+  }
 }
 
 export function summarizeProductionIssues(issues: ProductionValidationIssue[]): ProductionValidationSummary {

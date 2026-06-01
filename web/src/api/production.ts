@@ -151,7 +151,7 @@ async function upsertChoices(
 
   const table = mode === 'next_move' ? 'next_move_choices' : 'problem_choices';
   const updatedAt = new Date().toISOString();
-  const payload = choices.map((choice) => ({
+  const rows = choices.map((choice) => ({
     problem_id: problemId,
     choice_id: choice.choice_id,
     usi: choice.usi,
@@ -160,22 +160,30 @@ async function upsertChoices(
     line: choice.line,
     eval_cp: choice.eval_cp,
     eval_percent: choice.eval_percent,
-    updated_at: updatedAt,
   }));
 
-  const { error } = await supabase
-    .from(table)
-    .upsert(payload, { onConflict: 'problem_id,choice_id' });
+  const updateRows = async (includeUpdatedAt: boolean) => {
+    for (const row of rows) {
+      const { problem_id: _problemId, choice_id: choiceId, ...choiceFields } = row;
+      const updatePayload = includeUpdatedAt
+        ? { ...choiceFields, updated_at: updatedAt }
+        : choiceFields;
+      const { error } = await supabase
+        .from(table)
+        .update(updatePayload)
+        .eq('problem_id', problemId)
+        .eq('choice_id', choiceId);
 
-  if (!error) return;
-  if (!isMissingColumnError(error, 'updated_at')) throw error;
+      if (error) throw error;
+    }
+  };
 
-  const payloadWithoutUpdatedAt = payload.map(({ updated_at: _updatedAt, ...row }) => row);
-  const retry = await supabase
-    .from(table)
-    .upsert(payloadWithoutUpdatedAt, { onConflict: 'problem_id,choice_id' });
-
-  if (retry.error) throw retry.error;
+  try {
+    await updateRows(true);
+  } catch (error) {
+    if (!isMissingColumnError(error, 'updated_at')) throw error;
+    await updateRows(false);
+  }
 }
 
 function searchMatches(problem: ProductionProblem, query: string): boolean {
