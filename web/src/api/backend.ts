@@ -178,6 +178,7 @@ export interface MakingJobSnapshot {
 export interface StartBookJobInput {
   kind: 'book';
   settings?: {
+    bookFile?: 'qhapaq' | 'sanken-shiken';
     count?: number;
     minDiff?: number;
     maxDiff?: number;

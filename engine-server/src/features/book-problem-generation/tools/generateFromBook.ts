@@ -27,6 +27,21 @@ type GeneratedRecord = {
   draft: Record<string, unknown>;
 };
 
+const BOOK_FILES = {
+  qhapaq: {
+    label: "Qhapaq定跡",
+    fileName: "standard_book_alora.db",
+    stateName: "qhapaq",
+  },
+  "sanken-shiken": {
+    label: "三間四間飛車",
+    fileName: "sanken-shiken.db",
+    stateName: "sanken-shiken",
+  },
+} as const;
+
+type BookFileKey = keyof typeof BOOK_FILES;
+
 type CursorState = {
   version: 1;
   bookPath: string;
@@ -51,8 +66,6 @@ const PV_PLIES = 9;
 const PROMPT = "最善手を選んでください";
 
 const featureDir = path.resolve(import.meta.dirname, "..");
-const defaultBookPath = path.join(featureDir, "books", "standard_book_alora.db");
-const defaultStatePath = path.join(featureDir, "state", "standard_book_alora.cursor.json");
 const defaultOutputPath = path.resolve(process.cwd(), "outputs", "book_generated.json");
 
 function envInt(name: string, fallback: number, min: number, max: number): number {
@@ -61,6 +74,23 @@ function envInt(name: string, fallback: number, min: number, max: number): numbe
   const parsed = Number.parseInt(raw.trim(), 10);
   if (!Number.isFinite(parsed) || Number.isNaN(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
+}
+
+function resolveBookFile(raw: string | undefined): {
+  key: BookFileKey;
+  label: string;
+  bookPath: string;
+  statePath: string;
+} {
+  const key = raw && raw in BOOK_FILES ? (raw as BookFileKey) : "qhapaq";
+  const book = BOOK_FILES[key];
+
+  return {
+    key,
+    label: book.label,
+    bookPath: path.join(featureDir, "books", book.fileName),
+    statePath: path.join(featureDir, "state", `${book.stateName}.cursor.json`),
+  };
 }
 
 function getTurnFromSfen(sfen: string): Color {
@@ -194,6 +224,17 @@ function resolveEngineEvalDir(enginePath: string): string {
     path.join(path.dirname(enginePath), "..", "eval"),
   ];
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
+function isFatalEngineError(error: unknown): boolean {
+  const message = String((error as { message?: unknown } | null)?.message ?? error);
+  return (
+    message.includes("analyze timeout") ||
+    message.includes("waitFor timeout") ||
+    message.includes("engine exited") ||
+    message.includes("EPIPE") ||
+    message.includes("ERR_STREAM_DESTROYED")
+  );
 }
 
 async function analyzeSearchMove(args: {
@@ -351,8 +392,9 @@ async function buildProblemFromSfen(args: {
 }
 
 export async function main(): Promise<void> {
-  const bookPath = path.resolve(process.env.AMTS_BOOK_PATH?.trim() || defaultBookPath);
-  const statePath = path.resolve(process.env.AMTS_BOOK_STATE_FILE?.trim() || defaultStatePath);
+  const selectedBook = resolveBookFile(process.env.AMTS_BOOK_FILE?.trim());
+  const bookPath = path.resolve(process.env.AMTS_BOOK_PATH?.trim() || selectedBook.bookPath);
+  const statePath = path.resolve(process.env.AMTS_BOOK_STATE_FILE?.trim() || selectedBook.statePath);
   const outputPath = path.resolve(process.env.AMTS_BOOK_OUTPUT_PATH?.trim() || defaultOutputPath);
   const count = envInt("AMTS_BOOK_COUNT", 10, 1, 100000);
   const minDiff = envInt("AMTS_BOOK_MIN_DIFF", 100, 1, 100000);
@@ -367,8 +409,9 @@ export async function main(): Promise<void> {
   const startSfenOrdinal = cursor.nextSfenOrdinal;
 
   console.log(
-    `book作問開始: count=${count} minDiff=${minDiff} maxDiff=${maxDiff} depth=${FINAL_DEPTH} wrongMp=${WRONG_PROBE_MULTIPV}`,
+    `book作問開始: book=${selectedBook.label} count=${count} minDiff=${minDiff} maxDiff=${maxDiff} depth=${FINAL_DEPTH} wrongMp=${WRONG_PROBE_MULTIPV}`,
   );
+  console.log(`book key: ${selectedBook.key}`);
   console.log(`book path: ${bookPath}`);
   console.log(`book sfen総数: ${sfens.length}`);
   console.log(`book cursor: start=${startSfenOrdinal} step=${BOOK_STEP} state=${statePath}`);
@@ -423,7 +466,12 @@ export async function main(): Promise<void> {
           console.log(`book row${sfenOrdinal + 1} NG reason=${result.reason} sfen=${sfen}`);
         }
       } catch (error: any) {
-        console.log(`book row${sfenOrdinal + 1} NG reason=${String(error?.message ?? error)} sfen=${sfen}`);
+        const reason = String(error?.message ?? error);
+        if (isFatalEngineError(error)) {
+          console.error(`book row${sfenOrdinal + 1} FATAL reason=${reason} sfen=${sfen}`);
+          throw new Error(`book row${sfenOrdinal + 1} engine failure: ${reason}`);
+        }
+        console.log(`book row${sfenOrdinal + 1} NG reason=${reason} sfen=${sfen}`);
       }
     }
   } finally {

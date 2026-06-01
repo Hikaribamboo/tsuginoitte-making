@@ -43,6 +43,7 @@ type WorkspaceDraft = {
 };
 
 type BookFormState = {
+  bookFile: 'qhapaq' | 'sanken-shiken';
   count: string;
   minDiff: string;
   maxDiff: string;
@@ -81,10 +82,16 @@ type CompareRow = {
 };
 
 const DEFAULT_BOOK_FORM: BookFormState = {
+  bookFile: 'qhapaq',
   count: '10',
   minDiff: '100',
   maxDiff: '600',
 };
+
+const BOOK_FILE_OPTIONS: Array<{ value: BookFormState['bookFile']; label: string }> = [
+  { value: 'qhapaq', label: 'Qhapaq定跡' },
+  { value: 'sanken-shiken', label: '三間四間飛車' },
+];
 
 const DEFAULT_KIFS_FORM: KifsFormState = {
   batchSize: '10',
@@ -468,6 +475,12 @@ function BookSettingsForm({
 
   return (
     <div className="grid gap-3 md:grid-cols-2">
+      <FieldSelect
+        label="定跡ファイル"
+        value={value.bookFile}
+        options={BOOK_FILE_OPTIONS}
+        onChange={(next) => update('bookFile', next as BookFormState['bookFile'])}
+      />
       <FieldInput label="count" value={value.count} onChange={(next) => update('count', next)} />
       <FieldInput label="minDiff" value={value.minDiff} onChange={(next) => update('minDiff', next)} />
       <FieldInput label="maxDiff" value={value.maxDiff} onChange={(next) => update('maxDiff', next)} />
@@ -533,6 +546,35 @@ function FieldInput({
   );
 }
 
+function FieldSelect<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs text-slate-600">{label}</span>
+      <select
+        className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900"
+        value={value}
+        onChange={(event) => onChange(event.target.value as T)}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function Info({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div>
@@ -568,6 +610,7 @@ function buildBookPayload(value: BookFormState) {
   return {
     kind: 'book' as const,
     settings: {
+      bookFile: value.bookFile,
       count: parseRequiredInt(value.count, 'count', 1),
       minDiff,
       maxDiff,
