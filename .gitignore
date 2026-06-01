@@ -5,3 +5,5 @@ dist/
 
 server/engines/
 engine-server/engines/windows/eval/
+engine-server/outputs/
+engine-server/src/features/book-problem-generation/state/

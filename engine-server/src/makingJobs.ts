@@ -11,25 +11,9 @@ type JobKind = 'book' | 'kifs';
 type BookJobInput = {
   kind: 'book';
   settings?: {
-    bookPath?: string;
-    bookType?: 'petashock' | 'qhapaq';
-    enginePath?: string;
     count?: number;
-    depth?: number;
-    namePrefix?: string;
-    scanMode?: 'sequential' | 'random';
-    incorrectSource?: 'book' | 'legal';
-    incorrectSelection?: 'top' | 'bottom' | 'random' | 'mixed';
     minDiff?: number;
-    maxDiff?: number | null;
-    maxLineMoves?: number;
-    minLineMoves?: number;
-    randomSeed?: number | null;
-    limitScan?: number | null;
-    buildBookIndex?: boolean;
-    bookIndexFile?: string | null;
-    stateFile?: string | null;
-    verboseSkipLog?: boolean;
+    maxDiff?: number;
   };
 };
 
@@ -83,7 +67,6 @@ export type JobSnapshot = Omit<JobRecord, 'child'>;
 const jobs = new Map<string, JobRecord>();
 const LOG_LIMIT = 800;
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
-const DRAFT_MAKING_DIR = path.join(REPO_ROOT, 'python', 'book-maker');
 
 function toSnapshot(job: JobRecord): JobSnapshot {
   const { child: _child, ...snapshot } = job;
@@ -122,38 +105,16 @@ function parseJobInput(input: unknown): JobInput {
 }
 
 function parseBookJobSettings(input: BookJobInput['settings']) {
-  const bookType: 'petashock' | 'qhapaq' = input?.bookType === 'qhapaq' ? 'qhapaq' : 'petashock';
-  const scanMode: 'sequential' | 'random' = input?.scanMode === 'random' ? 'random' : 'sequential';
-  const incorrectSource: 'book' | 'legal' = input?.incorrectSource === 'legal' ? 'legal' : 'book';
-  const incorrectSelection = input?.incorrectSelection ?? 'mixed';
-  const maxDiff =
-    typeof input?.maxDiff === 'number' && Number.isFinite(input.maxDiff) ? Math.trunc(input.maxDiff) : null;
-  const randomSeed =
-    typeof input?.randomSeed === 'number' && Number.isFinite(input.randomSeed) ? Math.trunc(input.randomSeed) : null;
-  const limitScan =
-    typeof input?.limitScan === 'number' && Number.isFinite(input.limitScan) ? Math.trunc(input.limitScan) : null;
-  const buildBookIndex = input?.buildBookIndex === true;
+  const minDiff = Number.isFinite(input?.minDiff) ? Math.max(1, Math.trunc(input!.minDiff!)) : 100;
+  const maxDiff = Number.isFinite(input?.maxDiff) ? Math.max(1, Math.trunc(input!.maxDiff!)) : 600;
+  if (maxDiff < minDiff) {
+    throw new Error('maxDiff は minDiff 以上で指定してください');
+  }
 
   return {
-    bookPath: input?.bookPath?.trim() || '',
-    bookType,
-    enginePath: input?.enginePath?.trim() || '',
     count: Number.isFinite(input?.count) ? Math.max(1, Math.trunc(input!.count!)) : 10,
-    depth: Number.isFinite(input?.depth) ? Math.max(1, Math.trunc(input!.depth!)) : 22,
-    namePrefix: input?.namePrefix?.trim() || (bookType === 'qhapaq' ? 'Qhapaq_問題' : 'PetaShock_問題'),
-    scanMode,
-    incorrectSource,
-    incorrectSelection,
-    minDiff: Number.isFinite(input?.minDiff) ? Math.max(1, Math.trunc(input!.minDiff!)) : 100,
+    minDiff,
     maxDiff,
-    maxLineMoves: Number.isFinite(input?.maxLineMoves) ? Math.max(1, Math.trunc(input!.maxLineMoves!)) : 12,
-    minLineMoves: Number.isFinite(input?.minLineMoves) ? Math.max(1, Math.trunc(input!.minLineMoves!)) : 4,
-    randomSeed,
-    limitScan,
-    buildBookIndex,
-    bookIndexFile: input?.bookIndexFile?.trim() || null,
-    stateFile: input?.stateFile?.trim() || null,
-    verboseSkipLog: input?.verboseSkipLog === true,
   };
 }
 
@@ -279,7 +240,7 @@ async function runCommand(
 async function runBookJob(job: JobRecord, settings: ReturnType<typeof parseBookJobSettings>): Promise<JobResult> {
   return runBookProblemJob({
     settings,
-    rootDir: DRAFT_MAKING_DIR,
+    rootDir: REPO_ROOT,
     runCommand: (cmd, args, cwd, env) => runCommand(job, cmd, args, cwd, env),
     setStep: (step) => setStep(job, step),
   });

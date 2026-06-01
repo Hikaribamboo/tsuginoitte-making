@@ -178,25 +178,9 @@ export interface MakingJobSnapshot {
 export interface StartBookJobInput {
   kind: 'book';
   settings?: {
-    bookPath?: string;
-    bookType?: 'petashock' | 'qhapaq';
-    enginePath?: string;
     count?: number;
-    depth?: number;
-    namePrefix?: string;
-    scanMode?: 'sequential' | 'random';
-    incorrectSource?: 'book' | 'legal';
-    incorrectSelection?: 'top' | 'bottom' | 'random' | 'mixed';
     minDiff?: number;
-    maxDiff?: number | null;
-    maxLineMoves?: number;
-    minLineMoves?: number;
-    randomSeed?: number | null;
-    limitScan?: number | null;
-    buildBookIndex?: boolean;
-    bookIndexFile?: string | null;
-    stateFile?: string | null;
-    verboseSkipLog?: boolean;
+    maxDiff?: number;
   };
 }
 

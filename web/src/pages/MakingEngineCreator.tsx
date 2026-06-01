@@ -4,7 +4,6 @@ import { supabase } from '../api/rpc';
 import {
   cancelMakingJob,
   evaluatePosition,
-  getMakingPathOptions,
   listMakingJobs,
   startMakingJob,
   type MakingJobSnapshot,
@@ -44,13 +43,7 @@ type WorkspaceDraft = {
 };
 
 type BookFormState = {
-  bookPath: string;
-  bookType: 'petashock' | 'qhapaq';
-  enginePath: string;
   count: string;
-  depth: string;
-  scanMode: 'sequential' | 'random';
-  incorrectSelection: 'top' | 'bottom' | 'random' | 'mixed';
   minDiff: string;
   maxDiff: string;
 };
@@ -88,13 +81,7 @@ type CompareRow = {
 };
 
 const DEFAULT_BOOK_FORM: BookFormState = {
-  bookPath: '',
-  bookType: 'petashock',
-  enginePath: '',
   count: '10',
-  depth: '22',
-  scanMode: 'random',
-  incorrectSelection: 'mixed',
   minDiff: '100',
   maxDiff: '600',
 };
@@ -124,8 +111,6 @@ const MakingEngineCreator: React.FC = () => {
   const [starting, setStarting] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [enginePathOptions, setEnginePathOptions] = useState<string[]>([]);
-  const [bookPathOptions, setBookPathOptions] = useState<string[]>([]);
   const [testSfen, setTestSfen] = useState(DEFAULT_ENGINE_TEST_SFEN);
   const [testDepth, setTestDepth] = useState('29');
   const [testResult, setTestResult] = useState<EngineEvalResult | null>(null);
@@ -169,20 +154,6 @@ const MakingEngineCreator: React.FC = () => {
 
   useEffect(() => {
     void refreshJobs();
-    void (async () => {
-      try {
-        const options = await getMakingPathOptions();
-        setEnginePathOptions(options.enginePaths);
-        setBookPathOptions(options.bookPaths);
-        setBookForm((prev) => ({
-          ...prev,
-          bookPath: prev.bookPath || options.bookPaths[0] || '',
-          enginePath: prev.enginePath || options.enginePaths[0] || '',
-        }));
-      } catch (nextError: any) {
-        setError(nextError?.message ?? 'パス候補の取得に失敗しました');
-      }
-    })();
   }, []);
 
   useEffect(() => {
@@ -380,8 +351,6 @@ const MakingEngineCreator: React.FC = () => {
             <BookSettingsForm
               value={bookForm}
               onChange={setBookForm}
-              enginePathOptions={enginePathOptions}
-              bookPathOptions={bookPathOptions}
             />
           ) : (
             <KifsSettingsForm value={kifsForm} onChange={setKifsForm} />
@@ -489,13 +458,9 @@ const MakingEngineCreator: React.FC = () => {
 function BookSettingsForm({
   value,
   onChange,
-  enginePathOptions,
-  bookPathOptions,
 }: {
   value: BookFormState;
   onChange: React.Dispatch<React.SetStateAction<BookFormState>>;
-  enginePathOptions: string[];
-  bookPathOptions: string[];
 }) {
   const update = <K extends keyof BookFormState>(key: K, next: BookFormState[K]) => {
     onChange((prev) => ({ ...prev, [key]: next }));
@@ -503,39 +468,9 @@ function BookSettingsForm({
 
   return (
     <div className="grid gap-3 md:grid-cols-2">
-      <FieldSelect
-        label="bookPath"
-        value={value.bookPath}
-        options={bookPathOptions}
-        onChange={(next) => update('bookPath', next)}
-      />
-      <FieldSelect
-        label="enginePath"
-        value={value.enginePath}
-        options={enginePathOptions}
-        onChange={(next) => update('enginePath', next)}
-      />
-
-      <FieldSelect
-        label="scanMode"
-        value={value.scanMode}
-        options={['sequential', 'random']}
-        onChange={(next) => update('scanMode', next as BookFormState['scanMode'])}
-      />
-
       <FieldInput label="count" value={value.count} onChange={(next) => update('count', next)} />
-      <FieldInput label="depth" value={value.depth} onChange={(next) => update('depth', next)} />
       <FieldInput label="minDiff" value={value.minDiff} onChange={(next) => update('minDiff', next)} />
-      <FieldInput label="maxDiff (optional)" value={value.maxDiff} onChange={(next) => update('maxDiff', next)} />
-      <FieldSelect
-        label="incorrectSelection"
-        value={value.incorrectSelection}
-        options={['top', 'bottom', 'random', 'mixed']}
-        onChange={(next) => update('incorrectSelection', next as BookFormState['incorrectSelection'])}
-      />
-      <div className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-        scanMode: book内の局面の走査方法（順番 or ランダム） / incorrectSelection: 不正解候補の選び方。
-      </div>
+      <FieldInput label="maxDiff" value={value.maxDiff} onChange={(next) => update('maxDiff', next)} />
     </div>
   );
 }
@@ -598,38 +533,6 @@ function FieldInput({
   );
 }
 
-function FieldSelect({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-xs text-slate-600">{label}</span>
-      <select
-        className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.length === 0 ? (
-          <option value="">候補なし</option>
-        ) : null}
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
 function Info({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div>
@@ -655,47 +558,19 @@ function parseRequiredInt(raw: string, label: string, min: number): number {
   return parsed;
 }
 
-function parseOptionalInt(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const parsed = Number.parseInt(trimmed, 10);
-  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
-    throw new Error(`数値項目が不正です: ${raw}`);
-  }
-  return parsed;
-}
-
 function buildBookPayload(value: BookFormState) {
-  const bookPath = value.bookPath.trim();
-  const enginePath = value.enginePath.trim();
-  if (!bookPath) throw new Error('bookPath は必須です');
-  if (!enginePath) throw new Error('enginePath は必須です');
-  if (enginePath.split('/').pop()?.startsWith('.')) {
-    throw new Error('enginePath が不正です（隠しファイルは選択できません）');
+  const minDiff = parseRequiredInt(value.minDiff, 'minDiff', 1);
+  const maxDiff = parseRequiredInt(value.maxDiff, 'maxDiff', 1);
+  if (maxDiff < minDiff) {
+    throw new Error('maxDiff は minDiff 以上で指定してください');
   }
 
   return {
     kind: 'book' as const,
     settings: {
-      bookPath,
-      bookType: value.bookType,
-      enginePath,
       count: parseRequiredInt(value.count, 'count', 1),
-      depth: parseRequiredInt(value.depth, 'depth', 1),
-      namePrefix: 'Book_問題',
-      scanMode: value.scanMode,
-      incorrectSource: 'book' as const,
-      incorrectSelection: value.incorrectSelection,
-      minDiff: parseRequiredInt(value.minDiff, 'minDiff', 1),
-      maxDiff: parseOptionalInt(value.maxDiff),
-      maxLineMoves: 12,
-      minLineMoves: 4,
-      randomSeed: null,
-      limitScan: null,
-      buildBookIndex: false,
-      bookIndexFile: null,
-      stateFile: null,
-      verboseSkipLog: false,
+      minDiff,
+      maxDiff,
     },
   };
 }
