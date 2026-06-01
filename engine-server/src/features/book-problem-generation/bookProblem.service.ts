@@ -2,6 +2,7 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 
 export type BookProblemSettings = {
+  bookFile: 'qhapaq' | 'sanken-shiken';
   count: number;
   minDiff: number;
   maxDiff: number;
@@ -76,6 +77,7 @@ export async function runBookProblemJob(args: BookProblemJobArgs): Promise<Probl
   const outputJsonPath = path.join(rootDir, 'outputs', 'book_generated.json');
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    AMTS_BOOK_FILE: settings.bookFile,
     AMTS_BOOK_COUNT: String(settings.count),
     AMTS_BOOK_MIN_DIFF: String(settings.minDiff),
     AMTS_BOOK_MAX_DIFF: String(settings.maxDiff),

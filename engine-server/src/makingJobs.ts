@@ -11,6 +11,7 @@ type JobKind = 'book' | 'kifs';
 type BookJobInput = {
   kind: 'book';
   settings?: {
+    bookFile?: 'qhapaq' | 'sanken-shiken';
     count?: number;
     minDiff?: number;
     maxDiff?: number;
@@ -105,6 +106,7 @@ function parseJobInput(input: unknown): JobInput {
 }
 
 function parseBookJobSettings(input: BookJobInput['settings']) {
+  const bookFile: 'qhapaq' | 'sanken-shiken' = input?.bookFile === 'sanken-shiken' ? 'sanken-shiken' : 'qhapaq';
   const minDiff = Number.isFinite(input?.minDiff) ? Math.max(1, Math.trunc(input!.minDiff!)) : 100;
   const maxDiff = Number.isFinite(input?.maxDiff) ? Math.max(1, Math.trunc(input!.maxDiff!)) : 600;
   if (maxDiff < minDiff) {
@@ -112,6 +114,7 @@ function parseBookJobSettings(input: BookJobInput['settings']) {
   }
 
   return {
+    bookFile,
     count: Number.isFinite(input?.count) ? Math.max(1, Math.trunc(input!.count!)) : 10,
     minDiff,
     maxDiff,
