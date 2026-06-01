@@ -61,20 +61,25 @@ export function createEngineApp(engine: ShogiEngine): Express {
   });
 
   app.get('/api/jobs', (_req, res) => {
+    console.log('[api] GET /api/jobs');
     res.json({ jobs: listMakingJobs() });
   });
 
   app.post('/api/jobs', (req, res) => {
     try {
+      console.log('[api] POST /api/jobs', JSON.stringify(req.body ?? {}));
       const legacyInput = mapUnifiedJobToLegacyInput(req.body ?? {});
       const job = startMakingJob(legacyInput);
+      console.log(`[api] job accepted id=${job.id} kind=${job.kind}`);
       res.status(201).json({ job });
     } catch (error: any) {
+      console.error('[api] POST /api/jobs failed:', error?.message ?? error);
       res.status(400).json({ error: error?.message ?? 'failed to start job' });
     }
   });
 
   app.get('/api/jobs/:jobId', (req, res) => {
+    console.log(`[api] GET /api/jobs/${req.params.jobId}`);
     const job = getMakingJob(req.params.jobId);
     if (!job) {
       res.status(404).json({ error: 'job not found' });
@@ -84,6 +89,7 @@ export function createEngineApp(engine: ShogiEngine): Express {
   });
 
   app.post('/api/jobs/:jobId/cancel', (req, res) => {
+    console.log(`[api] POST /api/jobs/${req.params.jobId}/cancel`);
     const job = cancelMakingJob(req.params.jobId);
     if (!job) {
       res.status(404).json({ error: 'job not found' });

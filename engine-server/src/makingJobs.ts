@@ -82,6 +82,7 @@ function appendLog(job: JobRecord, line: string): void {
   const trimmed = line.trim();
   if (!trimmed) return;
   job.logs.push(trimmed);
+  console.log(`[making:${job.id}] ${trimmed}`);
   if (job.logs.length > LOG_LIMIT) {
     job.logs.splice(0, job.logs.length - LOG_LIMIT);
   }
