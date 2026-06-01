@@ -235,9 +235,6 @@ const MakingKifusGenerator: React.FC = () => {
             <Link to="/making" className="rounded-md border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50">
               作問スタジオ
             </Link>
-            <Link to="/making/engine?source=kifs" className="rounded-md border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50">
-              kifsから作問
-            </Link>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">

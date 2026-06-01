@@ -8,16 +8,6 @@ const CARDS = [
     description: '画像認識で局面を作って、そのまま下書きへ進みます。',
   },
   {
-    to: '/making/engine?source=kifs',
-    title: 'kifsから作問',
-    description: 'auto-make-tsumeshogi を実行して問題を生成します。',
-  },
-  {
-    to: '/making/engine?source=books',
-    title: 'booksから作問',
-    description: 'tsuginoitte-draft-making を実行して問題を生成します。',
-  },
-  {
     to: '/making/kifus',
     title: 'kifs生成',
     description: '自己対局棋譜の生成とkifus集計を確認します。',
