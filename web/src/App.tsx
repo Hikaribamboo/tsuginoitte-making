@@ -7,6 +7,7 @@ import WorkspaceList from './pages/WorkspaceList';
 import ImagePositionCreator from './pages/ImagePositionCreator';
 import MakingHome from './pages/MakingHome';
 import ProductionReview from './pages/ProductionReview';
+import MakingEngineCreator from './pages/MakingEngineCreator';
 import MakingKifusGenerator from './pages/MakingKifusGenerator';
 
 const App: React.FC = () => {
@@ -20,6 +21,7 @@ const App: React.FC = () => {
           <Route path="/workspaces" element={<WorkspaceList />} />
           <Route path="/image-position" element={<ImagePositionCreator />} />
           <Route path="/making" element={<MakingHome />} />
+          <Route path="/making/engine" element={<MakingEngineCreator />} />
           <Route path="/making/kifus" element={<MakingKifusGenerator />} />
           <Route path="/making/production" element={<ProductionReview />} />
           <Route path="/production" element={<ProductionReview />} />
