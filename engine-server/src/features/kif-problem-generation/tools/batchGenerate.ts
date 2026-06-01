@@ -257,7 +257,7 @@ export async function main() {
     }
 
     if (doneKifuIds.length > 0) {
-      const { error: e1 } = await supabase.from("making_kifus").update({ status: "done" }).in("id", doneKifuIds);
+      const { error: e1 } = await supabase.from("making_kifus").delete().in("id", doneKifuIds);
       if (e1) throw e1;
     }
     if (impossibleKifuIds.length > 0) {
