@@ -16,32 +16,15 @@ export function getRootTurnFromSfen(rootSfen: string): Color {
 
 export function getUserColorFromRootSfen(rootSfen: string): Color {
   const rootTurn = getRootTurnFromSfen(rootSfen);
-  return rootTurn === "b" ? "w" : "b";
+  return rootTurn;
 }
 
 export function toUserPerspectiveCp(cp: number, userColor: Color): number {
   return userColor === "b" ? cp : -cp;
 }
 
-/**
- * Numerically-stable logistic sigmoid.
- * Returns value in (0, 1).
- */
 function sigmoid(x: number): number {
-  if (!Number.isFinite(x)) {
-    throw new Error(`[cpToWinRate] sigmoid input must be finite: ${x}`);
-  }
-
-  // Stable form to avoid overflow:
-  // if x>=0: 1/(1+exp(-x))
-  // else: exp(x)/(1+exp(x))
-  if (x >= 0) {
-    const z = Math.exp(-x);
-    return 1 / (1 + z);
-  } else {
-    const z = Math.exp(x);
-    return z / (1 + z);
-  }
+  return 1 / (1 + Math.exp(-x));
 }
 
 /**
