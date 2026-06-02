@@ -56,16 +56,20 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
 }) => {
   return (
     <div
-      className={`border-2 rounded-md px-3 py-2 bg-white transition-colors w-full max-w-[420px] ${
-        isActive ? 'border-blue-600 bg-[#f8faff]' : draft.usi ? 'border-emerald-300' : 'border-gray-200'
+      className={`w-full rounded-lg border px-3 py-2 shadow-sm backdrop-blur-sm transition-colors ${
+        isActive
+          ? 'border-sky-500 bg-sky-50/90 ring-2 ring-sky-200'
+          : draft.usi
+            ? 'border-emerald-200 bg-white/90'
+            : 'border-sky-100 bg-white/75'
       }`}
     >
       {/* Header */}
       <div className="flex justify-between items-center mb-1">
-        <span className="font-semibold text-sm">{SLOT_LABELS[slot]}</span>
+        <span className="font-semibold text-sm text-slate-900">{SLOT_LABELS[slot]}</span>
         {draft.usi && (
           <button
-            className="text-[11px] px-1.5 py-0.5 text-red-600 border-red-300 hover:bg-red-50"
+            className="rounded-md border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700 hover:bg-rose-100"
             onClick={onClear}
             type="button"
           >
@@ -77,7 +81,7 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
       {/* Reading-line paste area */}
       <div className="flex flex-col gap-1">
         <textarea
-          className="text-[11px] leading-tight font-mono"
+          className="min-h-[34px] rounded-lg border-sky-200 bg-white/90 text-[11px] leading-tight font-mono"
           rows={1}
           placeholder="*検討 ... 評価値 -7 読み筋 △８四歩(83) ▲７八金(69) ..."
           value={readingLineInput}
@@ -93,7 +97,7 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
         />
         <div className="flex gap-1.5 items-center">
           <button
-            className="text-[11px] px-2 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
+            className="rounded-md border-sky-200 bg-white/90 px-2 py-0.5 text-[11px] text-slate-700 hover:bg-sky-50"
             type="button"
             onClick={() => onPasteReadingLine(readingLineInput)}
           >
@@ -101,8 +105,8 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
           </button>
           {draft.usi && (
             <button
-              className={`text-[11px] px-2 py-0.5 text-white border-indigo-600 ${
-                replayDisabled ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
+              className={`rounded-md px-2 py-0.5 text-[11px] text-white ${
+                replayDisabled ? 'border-indigo-300 bg-indigo-300 cursor-not-allowed' : 'border-indigo-500 bg-indigo-500 hover:bg-indigo-600'
               }`}
               type="button"
               onClick={onShowReplay}
@@ -113,8 +117,8 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
           )}
           {draft.usi && (
             <button
-              className={`text-[11px] px-2 py-0.5 text-white border-teal-700 ${
-                evalLoading || evalQueued ? 'bg-teal-300 cursor-wait' : 'bg-teal-700 hover:bg-teal-800'
+              className={`rounded-md px-2 py-0.5 text-[11px] text-white ${
+                evalLoading || evalQueued ? 'border-teal-300 bg-teal-300 cursor-wait' : 'border-teal-600 bg-teal-600 hover:bg-teal-700'
               }`}
               type="button"
               onClick={onEvaluate}
@@ -125,7 +129,7 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
           )}
         </div>
         {readingLineError && (
-          <div className="text-[11px] text-red-600 bg-red-50 px-2 py-0.5 rounded">
+          <div className="rounded-md border border-rose-100 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">
             {readingLineError}
           </div>
         )}
@@ -135,10 +139,12 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
       {draft.usi ? (
         <div className="flex flex-col gap-1 mt-1">
           {/* Move title + eval values in one row */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[26px] font-bold leading-none flex-shrink-0">{draft.label}</span>
-            <span className="font-mono text-[9px] text-gray-400 flex-shrink-0">({draft.usi})</span>
-            <div className="flex items-center gap-0.5 ml-auto flex-shrink-0">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+            <div className="min-w-0">
+              <span className="break-words text-[26px] font-bold leading-none text-slate-900">{draft.label}</span>
+              <span className="ml-1 font-mono text-[9px] text-slate-400">({draft.usi})</span>
+            </div>
+            <div className="flex items-center gap-1">
               <input
                 type="number"
                 value={draft.eval_cp ?? ''}
@@ -146,7 +152,7 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
                   onEvalCpChange(e.target.value ? parseInt(e.target.value, 10) : null)
                 }
                 placeholder="cp"
-                className="h-6 !w-[82px] text-[10px] px-1 flex-shrink-0"
+                className="h-7 !w-[78px] rounded-md border-sky-200 bg-white/90 px-1 text-[11px]"
                 title="評価値 cp"
               />
               <input
@@ -158,11 +164,11 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
                   onEvalPercentChange(e.target.value ? parseInt(e.target.value, 10) : null)
                 }
                 placeholder="%"
-                className="h-6 !w-[82px] text-[10px] px-1 flex-shrink-0"
+                className="h-7 !w-[72px] rounded-md border-sky-200 bg-white/90 px-1 text-[11px]"
                 title="勝率 %"
               />
               <button
-                className="text-[9px] px-1 py-0.5 bg-teal-700 text-white border-teal-700 hover:bg-teal-800 h-6 whitespace-nowrap"
+                className="h-7 rounded-md border-teal-600 bg-teal-600 px-2 py-0.5 text-[10px] text-white hover:bg-teal-700"
                 type="button"
                 onClick={onRecalculatePercent}
                 disabled={draft.eval_cp === null}
@@ -175,7 +181,7 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
 
           {/* Explanation */}
           <textarea
-            className="leading-tight text-[13px]"
+            className="min-h-[54px] rounded-lg border-sky-200 bg-white/90 text-[13px] leading-tight"
             placeholder="解説を入力..."
             value={draft.explanation}
             onChange={(e) => onExplanationChange(e.target.value)}
@@ -188,12 +194,12 @@ const PasteChoiceCard: React.FC<PasteChoiceCardProps> = ({
       ) : (
         <>
           {!isActive && (
-            <button className="mt-1 text-xs" onClick={onActivate} type="button">
+            <button className="mt-1 h-8 rounded-lg border-sky-200 bg-white/90 text-xs font-semibold text-sky-700 hover:bg-sky-50" onClick={onActivate} type="button">
               この枠を選択
             </button>
           )}
           {isActive && (
-            <div className="text-blue-600 text-[13px] font-medium py-1 animate-pulse">
+            <div className="py-1 text-[13px] font-medium text-sky-700 animate-pulse">
               盤面で手を指してください...
             </div>
           )}

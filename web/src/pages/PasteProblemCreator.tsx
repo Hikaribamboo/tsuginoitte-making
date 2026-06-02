@@ -19,7 +19,7 @@ import type { KifBranch, KifTreeNode } from '../lib/kif-parser';
 import { saveProblem, getNextDisplayNo, saveMultipleProblems, saveLearningProblem } from '../api/problems';
 import { getWorkspace, saveWorkspaceDraft, deleteWorkspace } from '../api/workspaces';
 import { evaluatePosition, generateExplanations } from '../api/backend';
-import { DEFAULT_PROMPT } from '../lib/constants';
+import { AVAILABLE_TAGS, DEFAULT_PROMPT } from '../lib/constants';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
 import type { ChoiceDraft } from '../types/problem';
 import type { Side, HandPieceType, PieceType } from '../types/shogi';
@@ -30,7 +30,7 @@ type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 type BoardCell = { row: number; col: number };
 const WINRATE_SCALE = 800;
 const CHOICE_EVAL_DEPTH = 26;
-const BOARD_SCALE = 0.72;
+const BOARD_SCALE = 0.76;
 const SLOT_ORDER: SlotKey[] = ['correct', 'incorrect1', 'incorrect2'];
 const SLOT_LABELS: Record<SlotKey, string> = {
   correct: '正解手',
@@ -1407,6 +1407,11 @@ const PasteProblemCreator: React.FC = () => {
     () => JSON.stringify(saveRootAndIntro.introMovesLabels),
     [saveRootAndIntro.introMovesLabels],
   );
+  const selectedVisibleTagCount = useMemo(
+    () => AVAILABLE_TAGS.filter((tag) => tags.includes(tag.value)).length,
+    [tags],
+  );
+  const saveButtonLabel = selectedVisibleTagCount === 0 ? '思考モードで保存(タグなし)' : '思考モードで保存';
 
   const validate = (): string[] => {
     const errors: string[] = [];
@@ -1662,25 +1667,35 @@ const PasteProblemCreator: React.FC = () => {
 
   return (
     <>
-      <div className="w-full h-[calc(100vh-84px)] overflow-auto">
-        <div className="flex items-center gap-3 mb-2">
-          <h2 className="text-lg font-semibold">
-            問題作成（貼付）
-            {workspaceName && (
-              <span className="text-[13px] font-normal text-blue-600 ml-2">
-                📁 {workspaceName}
-              </span>
+      <div className="flex h-[calc(100vh-106px)] min-h-[680px] w-full flex-col overflow-auto rounded-xl border border-sky-200/80 bg-gradient-to-br from-sky-50 via-blue-50 to-cyan-50 shadow-sm xl:overflow-hidden">
+        <div className="shrink-0 border-b border-sky-200/75 bg-white/70 px-4 py-3 backdrop-blur-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-slate-900">
+                問題作成（貼付）
+                {workspaceName && (
+                  <span className="ml-2 text-[13px] font-normal text-sky-700">
+                    {workspaceName}
+                  </span>
+                )}
+              </h2>
+            </div>
+            {message && (
+              <div
+                className={`max-w-[720px] rounded-lg border px-3 py-2 text-[12px] shadow-sm ${
+                  message.includes('エラー')
+                    ? 'border-rose-200 bg-rose-50 text-rose-700'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}
+              >
+                {message}
+              </div>
             )}
-          </h2>
-          {workspaceId && (
-            <span className="text-[12px] text-gray-400">
-              途中保存: {hasUnsavedChanges ? '未保存' : '保存済み'}
-            </span>
-          )}
+          </div>
         </div>
 
         {imagePositionMemo && (
-          <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2">
+          <div className="mx-4 mt-3 shrink-0 rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2">
             <div className="flex items-center gap-2 text-[11px] font-semibold text-amber-800">
               <span>画像メモ</span>
               {imagePositionFileName && (
@@ -1689,193 +1704,188 @@ const PasteProblemCreator: React.FC = () => {
                 </span>
               )}
             </div>
-            <div className="mt-1 whitespace-pre-wrap text-[12px] leading-relaxed text-gray-700">
+            <div className="mt-1 whitespace-pre-wrap text-[12px] leading-relaxed text-slate-700">
               {imagePositionMemo}
             </div>
           </div>
         )}
 
-        <div className="mb-2 rounded-lg border border-gray-200 bg-white/70 px-3 py-2">
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              <span className="shrink-0 font-semibold text-gray-500">
-                root_sfen
-              </span>
-              <input
-                readOnly
-                value={saveRootAndIntro.rootSfenForSave}
-                className="min-w-0 flex-1 font-mono text-[11px]"
-              />
-              <button
-                type="button"
-                className="text-[10px] px-2 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
-                onClick={() => copyTextToClipboard(saveRootAndIntro.rootSfenForSave, 'root_sfen')}
-              >
-                コピー
-              </button>
-            </div>
-            <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              <span className="shrink-0 font-semibold text-gray-500">
-                intro_moves_usi
-              </span>
-              <input
-                readOnly
-                value={introMovesLabelText}
-                className="min-w-0 flex-1 font-mono text-[11px]"
-              />
-              <button
-                type="button"
-                className="text-[10px] px-2 py-0.5 bg-gray-100 border-gray-300 hover:bg-gray-200"
-                onClick={() => copyTextToClipboard(introMovesLabelText, 'intro_moves_usi')}
-              >
-                コピー
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex w-full h-[calc(100%-26px)] min-w-0 gap-2 items-start justify-start overflow-auto">
-          {/* ---- Left: Board ---- */}
-          <div className="flex-shrink-0 w-[320px] md:w-[350px] flex flex-col gap-1">
-            {parsed ? (
-              <div
-                className="flex-shrink-0 overflow-hidden"
-                style={{
-                  width: Math.ceil(530 * BOARD_SCALE),
-                  height: Math.ceil(400 * BOARD_SCALE),
-                }}
-              >
-                <div style={{ transform: `scale(${BOARD_SCALE})`, transformOrigin: 'top left' }}>
-                  <Board
-                    board={parsed.board}
-                    senteHand={parsed.senteHand}
-                    goteHand={parsed.goteHand}
-                    sideToMove={parsed.sideToMove}
-                    selectedCell={introMoveActive ? introDestination : selectedCell}
-                    showAllHandPieces={introMoveActive && !!introDestination}
-                    onCellClick={handleCellClick}
-                    onHandPieceClick={handleHandPieceClick}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[12px] text-gray-400">
-                局面がありません
-              </div>
-            )}
-
-            {parsed && (
-              <div className="flex gap-2 text-[11px] text-gray-500 flex-wrap items-center">
-                <span>
-                  {parsed.sideToMove === 'sente' ? '☗先手' : '☖後手'}
-                </span>
-                {selectedHandPiece && (
-                  <span className="text-blue-600 font-semibold">
-                    打: {selectedHandPiece.type}
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-4 xl:grid-cols-[minmax(390px,430px)_minmax(460px,1fr)_minmax(270px,320px)] xl:grid-rows-[auto_minmax(0,1fr)]">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-sky-200/80 bg-white/75 p-3 shadow-sm backdrop-blur-sm xl:row-span-2">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-900">盤面</div>
+              {parsed && (
+                <div className="flex flex-wrap items-center justify-end gap-1.5 text-[11px] text-slate-500">
+                  <span className="rounded-full bg-sky-50 px-2 py-[2px] text-sky-700 ring-1 ring-sky-200">
+                    {parsed.sideToMove === 'sente' ? '☗先手' : '☖後手'}
                   </span>
-                )}
-                {rootEvalCp !== null && (
-                  <span>
-                    {rootEvalCp}cp ({rootEvalPercent}%)
-                  </span>
-                )}
-                {promotionChoice && (
-                  <div className="flex items-center gap-2 px-2 py-1 bg-amber-50 border-2 border-amber-400 rounded-md text-[12px] font-semibold">
-                    <span>成?</span>
-                    <button
-                      className="w-10 h-10 text-xl font-bold flex items-center justify-center border-2 border-gray-300 rounded bg-white cursor-pointer hover:border-blue-600 hover:bg-blue-100"
-                      onClick={() => handlePromotionSelect(false)}
-                    >
-                      {pieceKanji({
-                        type: promotionChoice.pieceType,
-                        side: parsed.sideToMove,
-                        promoted: false,
-                      })}
-                    </button>
-                    <button
-                      className="w-10 h-10 text-xl font-bold flex items-center justify-center border-2 border-gray-300 rounded bg-white cursor-pointer hover:border-blue-600 hover:bg-blue-100 text-red-700"
-                      onClick={() => handlePromotionSelect(true)}
-                    >
-                      {pieceKanji({
-                        type: promotionChoice.pieceType,
-                        side: parsed.sideToMove,
-                        promoted: true,
-                      })}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flex flex-col gap-1 mt-1">
-              <div className="flex flex-col gap-0.5">
-                <label className="text-[11px] font-semibold text-gray-500">問題文</label>
-                <input
-                  type="text"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  className="h-7 text-[12px]"
-                />
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <label className="text-[11px] font-semibold text-gray-500">display_no</label>
-                <input
-                  type="number"
-                  value={displayNo ?? ''}
-                  onChange={(e) =>
-                    setDisplayNo(e.target.value ? parseInt(e.target.value, 10) : null)
-                  }
-                  className="h-7 text-[12px]"
-                />
-              </div>
-
-              <div className="flex flex-col gap-0.5">
-                <label className="text-[11px] font-semibold text-gray-500">レート</label>
-                <select
-                  value={problemRating}
-                  onChange={(e) => setProblemRating(parseInt(e.target.value, 10))}
-                  className="h-7 text-[12px]"
-                >
-                  {Array.from({ length: 19 }, (_, i) => 600 + i * 100).map((rating) => (
-                    <option key={rating} value={rating}>
-                      {rating}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* ---- Middle + Right ---- */}
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(180px,240px)] gap-2 items-start min-w-0 max-w-full">
-            {/* Choice cards */}
-            <div className="flex flex-col gap-1.5 items-start min-w-0">
-              {(evaluatingSlot || evalQueue.length > 0) && (
-                <div className="w-full max-w-[420px] rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] text-teal-900">
-                  <div className="font-semibold">検討バッチ</div>
-                  <div className="mt-0.5 flex flex-wrap gap-1.5">
-                    {evaluatingSlot && (
-                      <span className="rounded bg-teal-700 px-1.5 py-0.5 text-white">
-                        実行中: {SLOT_LABELS[evaluatingSlot]}
-                      </span>
-                    )}
-                    {evalQueue.map((slot, index) => (
-                      <span key={`${slot}-${index}`} className="rounded bg-white px-1.5 py-0.5 text-teal-800 ring-1 ring-teal-200">
-                        待機{index + 1}: {SLOT_LABELS[slot]}
-                      </span>
-                    ))}
-                  </div>
+                  {rootEvalCp !== null && (
+                    <span className="rounded-full bg-white/80 px-2 py-[2px] ring-1 ring-sky-100">
+                      {rootEvalCp}cp ({rootEvalPercent}%)
+                    </span>
+                  )}
                 </div>
               )}
-              <PasteIntroMoveCard
-                draftUsi={introMoveUsi}
-                draftLabel={introMoveUsi && searchParsed ? usiToLabel(introMoveUsi, searchParsed.board, searchParsed.sideToMove) : ''}
-                isActive={introMoveActive}
-                error={introMoveError}
-                onActivate={handleActivateIntroMove}
-                onClear={handleClearIntroMove}
-              />
+            </div>
+            <div className="min-h-0 overflow-y-auto pr-1">
+              {parsed ? (
+                <div className="flex justify-center rounded-lg border border-sky-100 bg-sky-50/50 py-3">
+                  <div
+                    className="shrink-0 overflow-hidden"
+                    style={{
+                      width: Math.ceil(530 * BOARD_SCALE),
+                      height: Math.ceil(400 * BOARD_SCALE),
+                    }}
+                  >
+                    <div style={{ transform: `scale(${BOARD_SCALE})`, transformOrigin: 'top left' }}>
+                      <Board
+                        board={parsed.board}
+                        senteHand={parsed.senteHand}
+                        goteHand={parsed.goteHand}
+                        sideToMove={parsed.sideToMove}
+                        selectedCell={introMoveActive ? introDestination : selectedCell}
+                        showAllHandPieces={introMoveActive && !!introDestination}
+                        onCellClick={handleCellClick}
+                        onHandPieceClick={handleHandPieceClick}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-sky-100 bg-white/80 px-3 py-2 text-[12px] text-slate-400">
+                  局面がありません
+                </div>
+              )}
+
+              {parsed && (selectedHandPiece || promotionChoice) && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                  {selectedHandPiece && (
+                    <span className="rounded-full bg-sky-100 px-2 py-1 font-semibold text-sky-700">
+                      打: {selectedHandPiece.type}
+                    </span>
+                  )}
+                  {promotionChoice && (
+                    <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[12px] font-semibold text-amber-900">
+                      <span>成?</span>
+                      <button
+                        className="flex h-9 w-9 items-center justify-center rounded-lg border-2 border-slate-300 bg-white text-xl font-bold hover:border-sky-500 hover:bg-sky-50"
+                        onClick={() => handlePromotionSelect(false)}
+                      >
+                        {pieceKanji({
+                          type: promotionChoice.pieceType,
+                          side: parsed.sideToMove,
+                          promoted: false,
+                        })}
+                      </button>
+                      <button
+                        className="flex h-9 w-9 items-center justify-center rounded-lg border-2 border-slate-300 bg-white text-xl font-bold text-rose-700 hover:border-sky-500 hover:bg-sky-50"
+                        onClick={() => handlePromotionSelect(true)}
+                      >
+                        {pieceKanji({
+                          type: promotionChoice.pieceType,
+                          side: parsed.sideToMove,
+                          promoted: true,
+                        })}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-3 grid gap-2">
+                <label className="grid gap-1 text-[11px] font-semibold uppercase text-slate-500">
+                  問題文
+                  <input
+                    type="text"
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    className="h-9 rounded-lg border-sky-200 bg-white/90 text-[13px] normal-case text-slate-900"
+                  />
+                </label>
+
+                <div className="grid gap-1">
+                  <div className="text-[11px] font-semibold uppercase text-slate-500">レート</div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {Array.from({ length: 8 }, (_, i) => 1200 + i * 100).map((rating) => {
+                      const selected = problemRating === rating;
+                      return (
+                        <button
+                          key={rating}
+                          type="button"
+                          onClick={() => setProblemRating(rating)}
+                          className={`h-6 rounded-lg px-1 text-[10px] font-semibold ${
+                            selected
+                              ? 'border-sky-500 bg-sky-500 text-white shadow-sm'
+                              : 'border-sky-200 bg-white/90 text-slate-700 hover:bg-sky-50'
+                          }`}
+                        >
+                          {rating}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div className="rounded-xl border border-sky-200/80 bg-white/75 px-3 py-1.5 shadow-sm backdrop-blur-sm xl:col-span-2">
+            <div className="flex flex-col gap-1.5 text-[11px] xl:flex-row xl:items-center">
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="shrink-0 font-semibold uppercase text-slate-500">
+                  root_sfen
+                </span>
+                <button
+                  type="button"
+                  className="h-7 rounded-lg border-sky-200 bg-sky-50 px-3 text-[11px] font-semibold text-sky-700 hover:bg-sky-100"
+                  onClick={() => copyTextToClipboard(saveRootAndIntro.rootSfenForSave, 'root_sfen')}
+                >
+                  コピー
+                </button>
+              </div>
+              <div className="flex min-w-0 items-center gap-2 xl:w-[430px]">
+                <span className="shrink-0 font-semibold uppercase text-slate-500">
+                  intro_moves
+                </span>
+                <input
+                  readOnly
+                  value={introMovesLabelText}
+                  className="h-7 min-w-0 flex-1 rounded-lg border-sky-200 bg-white/80 font-mono text-[11px]"
+                />
+                <button
+                  type="button"
+                  className="h-7 rounded-lg border-sky-200 bg-sky-50 px-3 text-[11px] font-semibold text-sky-700 hover:bg-sky-100"
+                  onClick={() => copyTextToClipboard(introMovesLabelText, 'intro_moves_usi')}
+                >
+                  コピー
+                </button>
+              </div>
+              <div className="min-w-0 xl:ml-auto xl:w-[430px]">
+                <PasteIntroMoveCard
+                  draftUsi={introMoveUsi}
+                  draftLabel={introMoveUsi && searchParsed ? usiToLabel(introMoveUsi, searchParsed.board, searchParsed.sideToMove) : ''}
+                  isActive={introMoveActive}
+                  compact
+                  error={introMoveError}
+                  onActivate={handleActivateIntroMove}
+                  onClear={handleClearIntroMove}
+                />
+              </div>
+            </div>
+          </div>
+
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-sky-200/80 bg-white/75 p-3 shadow-sm backdrop-blur-sm">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-slate-900">選択肢</div>
+              {(evaluatingSlot || evalQueue.length > 0) && (
+                <div className="min-w-0 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] text-teal-900">
+                  <span className="font-semibold">検討</span>
+                  {evaluatingSlot && <span className="ml-1">実行中: {SLOT_LABELS[evaluatingSlot]}</span>}
+                  {evalQueue.length > 0 && <span className="ml-1">待機: {evalQueue.length}</span>}
+                </div>
+              )}
+            </div>
+            <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
               {(['correct', 'incorrect1', 'incorrect2'] as SlotKey[]).map((slot) => (
                 <PasteChoiceCard
                   key={slot}
@@ -1907,18 +1917,19 @@ const PasteProblemCreator: React.FC = () => {
                 />
               ))}
             </div>
+          </section>
 
-            {/* Settings (narrower) */}
-            <div className="min-w-[180px] max-w-[240px] flex flex-col gap-1">
+          <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-sky-200/80 bg-white/75 p-3 shadow-sm backdrop-blur-sm">
+            <div className="min-h-0 overflow-y-auto pr-1">
               <TagSelector selected={tags} onChange={setTags} />
 
-              <div className="flex flex-wrap gap-1.5 mt-1">
+              <div className="mt-3 grid grid-cols-2 gap-2">
                 {workspaceId && (
                   <button
                     onClick={handleSaveDraftToDb}
                     disabled={draftSaving}
                     type="button"
-                    className="bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 text-[11px]"
+                    className="h-10 rounded-lg border-emerald-500 bg-emerald-500 px-3 text-[13px] font-semibold text-white hover:bg-emerald-600"
                   >
                     {draftSaving ? '保存中...' : 'DBに途中保存'}
                   </button>
@@ -1927,51 +1938,43 @@ const PasteProblemCreator: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setShowDeleteWorkspaceConfirm(true)}
-                    className="bg-red-50 text-red-700 border-red-300 hover:bg-red-100 text-[11px]"
+                    className="h-10 rounded-lg border-rose-300 bg-rose-50 px-3 text-[13px] font-semibold text-rose-700 hover:bg-rose-100"
                   >
                     下書き削除
                   </button>
                 )}
-                <button onClick={() => setShowPreview(true)} type="button" className="text-[11px]">
-                  プレビュー
-                </button>
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="bg-blue-600 text-white border-blue-600 hover:bg-blue-700 text-[11px]"
+                  className="col-span-2 h-10 rounded-lg border-sky-500 bg-sky-500 px-3 text-[13px] font-semibold text-white hover:bg-sky-600"
                 >
-                  {saving ? '保存中...' : 'Supabaseに保存'}
+                  {saving ? '保存中...' : saveButtonLabel}
                 </button>
                 <button
                   onClick={handleRegisterJoseki}
                   disabled={registeringJoseki}
-                  className="bg-yellow-600 text-white border-yellow-600 hover:bg-yellow-700 text-[11px]"
+                  className="col-span-2 h-10 rounded-lg border-amber-500 bg-amber-500 px-3 text-[13px] font-semibold text-white hover:bg-amber-600"
                 >
-                  {registeringJoseki ? '登録中...' : '定跡として登録'}
+                  {registeringJoseki ? '登録中...' : '定跡モードで保存'}
+                </button>
+                <button
+                  onClick={() => setShowPreview(true)}
+                  type="button"
+                  className="h-10 rounded-lg border-sky-200 bg-white/90 px-3 text-[13px] font-semibold text-slate-700 hover:bg-sky-50"
+                >
+                  プレビュー
                 </button>
                 <button
                   onClick={handleGenerateExplanations}
                   disabled={generating}
                   type="button"
-                  className="bg-purple-600 text-white border-purple-600 hover:bg-purple-700 text-[11px]"
+                  className="h-10 rounded-lg border-violet-500 bg-violet-500 px-3 text-[13px] font-semibold text-white hover:bg-violet-600"
                 >
                   {generating ? '生成中...' : 'AI解説'}
                 </button>
               </div>
             </div>
-
-            {message && (
-              <div
-                className={`px-2 py-1.5 rounded text-[12px] whitespace-pre-wrap lg:col-span-2 ${
-                  message.includes('エラー')
-                    ? 'bg-red-50 border border-red-300 text-red-700'
-                    : 'bg-emerald-50 border border-emerald-300 text-emerald-800'
-                }`}
-              >
-                {message}
-              </div>
-            )}
-          </div>
+          </aside>
         </div>
       </div>
 
@@ -2032,7 +2035,7 @@ const PasteProblemCreator: React.FC = () => {
                 disabled={saving}
                 className="bg-blue-600 text-white border-blue-600 hover:bg-blue-700 px-4"
               >
-                {saving ? '保存中...' : 'Supabaseに保存'}
+                {saving ? '保存中...' : saveButtonLabel}
               </button>
             </div>
           </div>

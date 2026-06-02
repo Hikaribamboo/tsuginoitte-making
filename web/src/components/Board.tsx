@@ -73,7 +73,7 @@ const Board: React.FC<BoardProps> = ({
         <div className="flex items-start gap-0.5">
           <div className="relative">
             <div
-              className="grid border-2 border-blue-700/70 bg-blue-100/65 backdrop-blur-[1px]"
+              className="grid border-2 border-sky-600/70 bg-gradient-to-br from-sky-100/80 via-blue-100/70 to-cyan-100/75 shadow-[0_12px_32px_rgba(14,116,144,0.16)] backdrop-blur-[1px]"
               style={{
                 gridTemplateColumns: `repeat(9, ${BOARD_CELL_SIZE}px)`,
                 gridTemplateRows: `repeat(9, ${BOARD_CELL_SIZE}px)`,
@@ -85,7 +85,7 @@ const Board: React.FC<BoardProps> = ({
                   return (
                     <div
                       key={`${ri}-${ci}`}
-                      className={`border border-blue-700/35 flex items-center justify-center cursor-pointer relative select-none hover:bg-cyan-100/80 ${isSelected ? 'bg-sky-500/45' : ''}`}
+                      className={`border border-sky-700/30 flex items-center justify-center cursor-pointer relative select-none hover:bg-cyan-100/80 ${isSelected ? 'bg-sky-500/50 ring-2 ring-inset ring-sky-500/40' : ''}`}
                       style={{ width: BOARD_CELL_SIZE, height: BOARD_CELL_SIZE }}
                       onClick={() => onCellClick?.(ri, ci)}
                       onDoubleClick={() => onCellDoubleClick?.(ri, ci)}
@@ -162,14 +162,14 @@ interface HandDisplayProps {
 const HandDisplay: React.FC<HandDisplayProps> = ({ side, hand, onClick, label, selectedType = null, showAll = false }) => {
   const pieces = showAll ? HAND_ORDER : HAND_ORDER.filter((t) => hand[t] > 0);
   return (
-    <div className={`min-w-[58px] p-2 bg-sky-100/70 border border-sky-400/45 rounded backdrop-blur-[1px] ${side === 'sente' ? 'self-end' : 'self-start'}`}>
-      <div className="text-[11px] text-gray-500 mb-1 whitespace-nowrap leading-none">{label}</div>
+    <div className={`min-w-[58px] rounded-lg border border-sky-300/50 bg-sky-50/75 p-2 shadow-sm backdrop-blur-[1px] ${side === 'sente' ? 'self-end' : 'self-start'}`}>
+      <div className="text-[11px] text-slate-500 mb-1 whitespace-nowrap leading-none">{label}</div>
       <div className="flex flex-col gap-0.5">
         {pieces.length === 0 && <span className="text-[11px] text-gray-400">なし</span>}
         {pieces.map((t) => (
           <span
             key={t}
-            className={`flex items-baseline justify-between gap-1 text-[19px] font-bold leading-none cursor-pointer px-1 py-0.5 rounded hover:bg-blue-500/20 ${hand[t] === 0 ? 'text-gray-300' : 'text-slate-800'} ${selectedType === t ? 'bg-blue-500/35 ring-2 ring-blue-500/40' : ''}`}
+            className={`flex items-baseline justify-between gap-1 rounded px-1 py-0.5 text-[19px] font-bold leading-none cursor-pointer hover:bg-sky-500/20 ${hand[t] === 0 ? 'text-slate-300' : 'text-slate-800'} ${selectedType === t ? 'bg-sky-500/40 ring-2 ring-sky-500/40' : ''}`}
             onClick={() => onClick?.(side, t)}
           >
             <span>{HAND_KANJI[t]}</span>
