@@ -67,9 +67,18 @@ function resolvePythonInvocations(): PythonInvocation[] {
   const root = engineServerRoot();
   const candidates: PythonInvocation[] = [];
   if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA ?? '';
+    const programFiles = process.env.ProgramFiles ?? '';
+    const programFilesX86 = process.env['ProgramFiles(x86)'] ?? '';
+    const pythonVersions = ['313', '312', '311', '310'];
     for (const candidate of [
       path.join(root, '.venv', 'Scripts', 'python.exe'),
       path.join(resolveShogiDatasetRoot(), '.venv', 'Scripts', 'python.exe'),
+      ...pythonVersions.flatMap((version) => [
+        localAppData ? path.join(localAppData, 'Programs', 'Python', `Python${version}`, 'python.exe') : '',
+        programFiles ? path.join(programFiles, `Python${version}`, 'python.exe') : '',
+        programFilesX86 ? path.join(programFilesX86, `Python${version}`, 'python.exe') : '',
+      ]),
     ]) {
       if (existsSync(candidate)) candidates.push({ command: candidate, prefixArgs: [] });
     }
@@ -110,6 +119,20 @@ function formatExecError(error: unknown): string {
   return parts.join('\n');
 }
 
+function isPythonNotFoundError(error: unknown): boolean {
+  const err = error as { code?: unknown; stderr?: unknown; stdout?: unknown } | null;
+  const code = err?.code;
+  const stderr = typeof err?.stderr === 'string' ? err.stderr.trim() : '';
+  const stdout = typeof err?.stdout === 'string' ? err.stdout.trim() : '';
+  return (
+    code === 'ENOENT' ||
+    code === 9009 ||
+    code === '9009' ||
+    stderr === 'Python' ||
+    stdout === 'Python'
+  );
+}
+
 async function runPython(args: string[]): Promise<{ stdout: string; stderr: string; commandLine: string }> {
   const attempts: string[] = [];
   let lastError = '';
@@ -124,8 +147,7 @@ async function runPython(args: string[]): Promise<{ stdout: string; stderr: stri
       return { stdout: result.stdout, stderr: result.stderr, commandLine };
     } catch (error) {
       lastError = formatExecError(error);
-      const code = (error as { code?: unknown } | null)?.code;
-      if (code !== 'ENOENT') {
+      if (!isPythonNotFoundError(error)) {
         throw new Error(`prediction command failed: ${commandLine}\n${lastError}`);
       }
     }
