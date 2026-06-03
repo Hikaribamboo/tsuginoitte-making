@@ -70,12 +70,13 @@ function resolvePythonInvocations(): PythonInvocation[] {
     const localAppData = process.env.LOCALAPPDATA ?? '';
     const programFiles = process.env.ProgramFiles ?? '';
     const programFilesX86 = process.env['ProgramFiles(x86)'] ?? '';
-    const pythonVersions = ['313', '312', '311', '310'];
+    const pythonVersions = ['314', '313', '312', '311', '310'];
     for (const candidate of [
       path.join(root, '.venv', 'Scripts', 'python.exe'),
       path.join(resolveShogiDatasetRoot(), '.venv', 'Scripts', 'python.exe'),
       ...pythonVersions.flatMap((version) => [
         localAppData ? path.join(localAppData, 'Programs', 'Python', `Python${version}`, 'python.exe') : '',
+        localAppData ? path.join(localAppData, 'Python', `pythoncore-${version.slice(0, 1)}.${version.slice(1)}-64`, 'python.exe') : '',
         programFiles ? path.join(programFiles, `Python${version}`, 'python.exe') : '',
         programFilesX86 ? path.join(programFilesX86, `Python${version}`, 'python.exe') : '',
       ]),
