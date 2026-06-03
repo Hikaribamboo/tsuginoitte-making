@@ -56,11 +56,38 @@ function extractJsonObject(text: string): any | null {
   }
 }
 
-function resolvePythonInvocation(): PythonInvocation {
+function engineServerRoot(): string {
+  return path.resolve(import.meta.dirname, '..', '..', '..');
+}
+
+function resolvePythonInvocations(): PythonInvocation[] {
   const fromEnv = process.env.PYTHON_BIN?.trim();
-  if (fromEnv) return { command: fromEnv, prefixArgs: [] };
-  if (process.platform === 'win32') return { command: 'py', prefixArgs: ['-3'] };
-  return { command: 'python3', prefixArgs: [] };
+  if (fromEnv) return [{ command: fromEnv, prefixArgs: [] }];
+
+  const root = engineServerRoot();
+  const candidates: PythonInvocation[] = [];
+  if (process.platform === 'win32') {
+    for (const candidate of [
+      path.join(root, '.venv', 'Scripts', 'python.exe'),
+      path.join(resolveShogiDatasetRoot(), '.venv', 'Scripts', 'python.exe'),
+    ]) {
+      if (existsSync(candidate)) candidates.push({ command: candidate, prefixArgs: [] });
+    }
+    candidates.push({ command: 'python', prefixArgs: [] });
+    candidates.push({ command: 'python3', prefixArgs: [] });
+    candidates.push({ command: 'py', prefixArgs: ['-3'] });
+    return candidates;
+  }
+
+  for (const candidate of [
+    path.join(root, '.venv', 'bin', 'python'),
+    path.join(resolveShogiDatasetRoot(), '.venv', 'bin', 'python'),
+  ]) {
+    if (existsSync(candidate)) candidates.push({ command: candidate, prefixArgs: [] });
+  }
+  candidates.push({ command: 'python3', prefixArgs: [] });
+  candidates.push({ command: 'python', prefixArgs: [] });
+  return candidates;
 }
 
 function formatExecError(error: unknown): string {
@@ -83,6 +110,37 @@ function formatExecError(error: unknown): string {
   return parts.join('\n');
 }
 
+async function runPython(args: string[]): Promise<{ stdout: string; stderr: string; commandLine: string }> {
+  const attempts: string[] = [];
+  let lastError = '';
+
+  for (const python of resolvePythonInvocations()) {
+    const fullArgs = [...python.prefixArgs, ...args];
+    const commandLine = `${python.command} ${fullArgs.join(' ')}`;
+    attempts.push(commandLine);
+
+    try {
+      const result = await execFileAsync(python.command, fullArgs, { maxBuffer: 10 * 1024 * 1024 });
+      return { stdout: result.stdout, stderr: result.stderr, commandLine };
+    } catch (error) {
+      lastError = formatExecError(error);
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code !== 'ENOENT') {
+        throw new Error(`prediction command failed: ${commandLine}\n${lastError}`);
+      }
+    }
+  }
+
+  throw new Error(
+    [
+      'prediction command failed: no Python executable was found',
+      `attempted:\n${attempts.map((attempt) => `- ${attempt}`).join('\n')}`,
+      lastError ? `last error:\n${lastError}` : '',
+      'Set PYTHON_BIN to the full path of python.exe if Python is installed in a custom location.',
+    ].filter(Boolean).join('\n'),
+  );
+}
+
 export async function runLocalShogiPrediction(imageDataUrl: string): Promise<any> {
   const scriptPath = resolvePredictionScriptPath();
   const modelPath = resolvePredictionModelPath();
@@ -98,7 +156,6 @@ export async function runLocalShogiPrediction(imageDataUrl: string): Promise<any
   try {
     const imageBuffer = decodeDataUrlImage(imageDataUrl);
     await writeFile(imagePath, imageBuffer);
-    const python = resolvePythonInvocation();
     const args = [scriptPath, '--image', imagePath, '--model', modelPath];
     const fallbackSourceId = process.env.SHOGI_PREDICTION_FALLBACK_SOURCE_ID ?? '002';
     const fallbackMetadataPath = path.join(resolveShogiDatasetRoot(), 'metadata', `${fallbackSourceId}.json`);
@@ -106,15 +163,8 @@ export async function runLocalShogiPrediction(imageDataUrl: string): Promise<any
       args.push('--fallback-source-id', fallbackSourceId);
     }
 
-    let stdout = '';
-    let stderr = '';
-    try {
-      const result = await execFileAsync(python.command, [...python.prefixArgs, ...args], { maxBuffer: 10 * 1024 * 1024 });
-      stdout = result.stdout;
-      stderr = result.stderr;
-    } catch (error) {
-      throw new Error(`prediction command failed: ${python.command} ${[...python.prefixArgs, ...args].join(' ')}\n${formatExecError(error)}`);
-    }
+    const { stdout, stderr, commandLine } = await runPython(args);
+    console.log(`[recognize] predictor command: ${commandLine}`);
     if (stderr.trim()) {
       console.warn('[recognize] predictor stderr:', stderr.trim());
     }
