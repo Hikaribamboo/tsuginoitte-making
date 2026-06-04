@@ -204,6 +204,7 @@ const PasteProblemCreator: React.FC = () => {
   const [showDeleteWorkspaceConfirm, setShowDeleteWorkspaceConfirm] = useState(false);
   const [savedProblemId, setSavedProblemId] = useState<number | null>(null);
   const [imagePositionSource, setImagePositionSource] = useState<PasteDraft['imagePositionSource']>(null);
+  const [preferredSaveMode, setPreferredSaveMode] = useState<'next_move' | 'joseki'>('next_move');
 
   // ---- Choice drafts ----
   const [choices, setChoices] = useState<Record<SlotKey, ChoiceDraft>>(
@@ -398,6 +399,8 @@ const PasteProblemCreator: React.FC = () => {
           setRootEvalCp(d.rootEvalCp ?? null);
           setRootEvalPercent(d.rootEvalPercent ?? null);
           setImagePositionSource(d.imagePositionSource ?? null);
+          // If this draft was created from an image, prefer joseki mode by default
+          if (d.imagePositionSource) setPreferredSaveMode('joseki');
           const sig = draftSignature({
             ...d,
             choices: d.choices ?? {
@@ -424,6 +427,7 @@ const PasteProblemCreator: React.FC = () => {
           setMessage('下書きの下書きを復元しました');
         } else {
           setImagePositionSource(null);
+          setPreferredSaveMode('next_move');
           const sig = draftSignature({ ...buildDraft(), imagePositionSource: null });
           lastSavedRef.current = sig;
           setHasUnsavedChanges(false);
@@ -1411,7 +1415,10 @@ const PasteProblemCreator: React.FC = () => {
     () => AVAILABLE_TAGS.filter((tag) => tags.includes(tag.value)).length,
     [tags],
   );
-  const saveButtonLabel = selectedVisibleTagCount === 0 ? '思考モードで保存(タグなし)' : '思考モードで保存';
+  const saveButtonLabel = useMemo(() => {
+    const base = preferredSaveMode === 'joseki' ? '定跡モードで保存' : '思考モードで保存';
+    return selectedVisibleTagCount === 0 ? `${base}(タグなし)` : base;
+  }, [preferredSaveMode, selectedVisibleTagCount]);
 
   const validate = (): string[] => {
     const errors: string[] = [];
@@ -1639,6 +1646,9 @@ const PasteProblemCreator: React.FC = () => {
       const { problemId } = await saveLearningProblem(problem as any, choiceData as any);
       setSavedProblemId(problemId);
       setMessage(`定跡として登録しました (problem_id: ${problemId})`);
+
+      // Show delete-workspace modal if opened from workspace
+      if (workspaceId) setShowDeleteWsModal(true);
     } catch (e: any) {
       setMessage(`定跡登録エラー: ${e.message}`);
     } finally {
@@ -1955,7 +1965,7 @@ const PasteProblemCreator: React.FC = () => {
                   disabled={registeringJoseki}
                   className="col-span-2 h-10 rounded-lg border-amber-500 bg-amber-500 px-3 text-[13px] font-semibold text-white hover:bg-amber-600"
                 >
-                  {registeringJoseki ? '登録中...' : '定跡モードで保存'}
+                  {registeringJoseki ? '登録中...' : (selectedVisibleTagCount === 0 ? '定跡モードで保存(タグなし)' : '定跡モードで保存')}
                 </button>
                 <button
                   onClick={() => setShowPreview(true)}

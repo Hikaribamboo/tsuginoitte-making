@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +80,11 @@ def _debug_paths(dataset_root: Path) -> dict[str, Path]:
     }
 
 
+def should_write_prediction_artifacts() -> bool:
+    value = os.getenv("SHOGI_RECOGNITION_WRITE_ARTIFACTS", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _draw_grid(image: np.ndarray, color: tuple[int, int, int] = (0, 200, 255), thickness: int = 1) -> np.ndarray:
     output = image.copy()
     height, width = output.shape[:2]
@@ -96,7 +102,11 @@ def _write_debug_crop_images(
     crop_rect: dict[str, int],
     crop_raw: np.ndarray,
     board_resized: np.ndarray,
+    write_artifacts: bool,
 ) -> dict[str, str]:
+    if not write_artifacts:
+        return {}
+
     paths = _debug_paths(dataset_root)
     if not cv2.imwrite(str(paths["inputOriginal"]), image):
         raise IOError(f"failed to write debug image: {paths['inputOriginal']}")
@@ -235,7 +245,53 @@ def _crop_debug_payload(
     }
 
 
-def crop_board_image(dataset_root: Path, image_path: Path, image_id: str, fallback_source_id: str | None = None) -> tuple[np.ndarray, dict[str, Any], str | None]:
+def _build_crop_result(
+    *,
+    method: str,
+    metadata_source_id: str | None,
+    metadata_source_image_size: dict[str, int] | None,
+    crop_rect: dict[str, int],
+    input_size: dict[str, int],
+    cropped_size: dict[str, int],
+    resized_size: dict[str, int],
+    debug_images: dict[str, str],
+    debug_log: dict[str, Any],
+    write_artifacts: bool,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "method": method,
+        "metadataSource": metadata_source_id,
+        "metadataSourceImageSize": metadata_source_image_size,
+        "cropRect": crop_rect,
+        "inputSize": input_size,
+        "croppedSize": cropped_size,
+        "resizedSize": resized_size,
+        "gridImageSize": resized_size,
+        "debugImages": debug_images if write_artifacts else {},
+        "debugLog": debug_log if write_artifacts else {},
+    }
+    if write_artifacts:
+        result.update(
+            {
+                "rawGridCellWidth": debug_log["rawGridCellWidth"],
+                "rawGridCellHeight": debug_log["rawGridCellHeight"],
+                "resizedGridCellWidth": debug_log["resizedGridCellWidth"],
+                "resizedGridCellHeight": debug_log["resizedGridCellHeight"],
+                "modelInputCellSize": debug_log["modelInputCellSize"],
+                "cellRectsRaw": debug_log["cellRectsRaw"],
+                "cellRectsResized": debug_log["cellRectsResized"],
+            }
+        )
+    return result
+
+
+def crop_board_image(
+    dataset_root: Path,
+    image_path: Path,
+    image_id: str,
+    fallback_source_id: str | None = None,
+    write_artifacts: bool = False,
+) -> tuple[np.ndarray, dict[str, Any], str | None]:
     metadata, metadata_source_id = _load_board_metadata(dataset_root, image_id, fallback_source_id=fallback_source_id)
     image = _load_image(image_path)
     input_size = _image_size(image)
@@ -253,7 +309,6 @@ def crop_board_image(dataset_root: Path, image_path: Path, image_id: str, fallba
         height = min(equivalent["height"], image.shape[0] - y)
         raw_crop = image[y : y + height, x : x + width]
         crop_rect = {"x": x, "y": y, "width": width, "height": height}
-        debug_images = _write_debug_crop_images(dataset_root, image, crop_rect, raw_crop, board)
         debug_log = _crop_debug_payload(
             image_path=image_path,
             input_size=input_size,
@@ -264,25 +319,22 @@ def crop_board_image(dataset_root: Path, image_path: Path, image_id: str, fallba
             resized_size=_image_size(board),
             metadata_source_image_size=metadata_image_size,
         )
-        return board, {
-            "method": "boardCorners",
-            "metadataSource": metadata_source_id,
-            "metadataSourceImageSize": metadata_image_size,
-            "cropRect": crop_rect,
-            "inputSize": input_size,
-            "croppedSize": _image_size(raw_crop),
-            "resizedSize": _image_size(board),
-            "gridImageSize": _image_size(board),
-            "rawGridCellWidth": debug_log["rawGridCellWidth"],
-            "rawGridCellHeight": debug_log["rawGridCellHeight"],
-            "resizedGridCellWidth": debug_log["resizedGridCellWidth"],
-            "resizedGridCellHeight": debug_log["resizedGridCellHeight"],
-            "modelInputCellSize": debug_log["modelInputCellSize"],
-            "cellRectsRaw": debug_log["cellRectsRaw"],
-            "cellRectsResized": debug_log["cellRectsResized"],
-            "debugImages": debug_images,
-            "debugLog": debug_log,
-        }, metadata_source_id
+        return (
+            board,
+            _build_crop_result(
+                method="boardCorners",
+                metadata_source_id=metadata_source_id,
+                metadata_source_image_size=metadata_image_size,
+                crop_rect=crop_rect,
+                input_size=input_size,
+                cropped_size=_image_size(raw_crop),
+                resized_size=_image_size(board),
+                debug_images=_write_debug_crop_images(dataset_root, image, crop_rect, raw_crop, board, write_artifacts),
+                debug_log=debug_log,
+                write_artifacts=write_artifacts,
+            ),
+            metadata_source_id,
+        )
 
     if metadata and metadata.cropRect:
         normalized = _normalize_crop_rect(metadata.cropRect)
@@ -297,7 +349,6 @@ def crop_board_image(dataset_root: Path, image_path: Path, image_id: str, fallba
             raise ValueError("cropRect produced an empty crop")
         crop_rect = {"x": x, "y": y, "width": width, "height": height}
         board = cv2.resize(crop, (DEFAULT_BOARD_OUTPUT_SIZE, DEFAULT_BOARD_OUTPUT_SIZE), interpolation=cv2.INTER_CUBIC)
-        debug_images = _write_debug_crop_images(dataset_root, image, crop_rect, crop, board)
         debug_log = _crop_debug_payload(
             image_path=image_path,
             input_size=input_size,
@@ -308,25 +359,22 @@ def crop_board_image(dataset_root: Path, image_path: Path, image_id: str, fallba
             resized_size=_image_size(board),
             metadata_source_image_size=metadata_image_size,
         )
-        return board, {
-            "method": "cropRect",
-            "metadataSource": metadata_source_id,
-            "metadataSourceImageSize": metadata_image_size,
-            "cropRect": crop_rect,
-            "inputSize": input_size,
-            "croppedSize": _image_size(crop),
-            "resizedSize": _image_size(board),
-            "gridImageSize": _image_size(board),
-            "rawGridCellWidth": debug_log["rawGridCellWidth"],
-            "rawGridCellHeight": debug_log["rawGridCellHeight"],
-            "resizedGridCellWidth": debug_log["resizedGridCellWidth"],
-            "resizedGridCellHeight": debug_log["resizedGridCellHeight"],
-            "modelInputCellSize": debug_log["modelInputCellSize"],
-            "cellRectsRaw": debug_log["cellRectsRaw"],
-            "cellRectsResized": debug_log["cellRectsResized"],
-            "debugImages": debug_images,
-            "debugLog": debug_log,
-        }, metadata_source_id
+        return (
+            board,
+            _build_crop_result(
+                method="cropRect",
+                metadata_source_id=metadata_source_id,
+                metadata_source_image_size=metadata_image_size,
+                crop_rect=crop_rect,
+                input_size=input_size,
+                cropped_size=_image_size(crop),
+                resized_size=_image_size(board),
+                debug_images=_write_debug_crop_images(dataset_root, image, crop_rect, crop, board, write_artifacts),
+                debug_log=debug_log,
+                write_artifacts=write_artifacts,
+            ),
+            metadata_source_id,
+        )
 
     corners = _detect_board_corners(image)
     if corners is not None:
@@ -339,7 +387,6 @@ def crop_board_image(dataset_root: Path, image_path: Path, image_id: str, fallba
             height = min(equivalent["height"], image.shape[0] - y)
             raw_crop = image[y : y + height, x : x + width]
             crop_rect = {"x": x, "y": y, "width": width, "height": height}
-            debug_images = _write_debug_crop_images(dataset_root, image, crop_rect, raw_crop, board)
             debug_log = _crop_debug_payload(
                 image_path=image_path,
                 input_size=input_size,
@@ -350,29 +397,25 @@ def crop_board_image(dataset_root: Path, image_path: Path, image_id: str, fallba
                 resized_size=_image_size(board),
                 metadata_source_image_size=metadata_image_size,
             )
-            return board, {
-                "method": "autoDetectedCorners",
-                "metadataSource": metadata_source_id,
-                "metadataSourceImageSize": metadata_image_size,
-                "cropRect": crop_rect,
-                "inputSize": input_size,
-                "croppedSize": _image_size(raw_crop),
-                "resizedSize": _image_size(board),
-                "gridImageSize": _image_size(board),
-                "rawGridCellWidth": debug_log["rawGridCellWidth"],
-                "rawGridCellHeight": debug_log["rawGridCellHeight"],
-                "resizedGridCellWidth": debug_log["resizedGridCellWidth"],
-                "resizedGridCellHeight": debug_log["resizedGridCellHeight"],
-                "modelInputCellSize": debug_log["modelInputCellSize"],
-                "cellRectsRaw": debug_log["cellRectsRaw"],
-                "cellRectsResized": debug_log["cellRectsResized"],
-                "debugImages": debug_images,
-                "debugLog": debug_log,
-            }, metadata_source_id
+            return (
+                board,
+                _build_crop_result(
+                    method="autoDetectedCorners",
+                    metadata_source_id=metadata_source_id,
+                    metadata_source_image_size=metadata_image_size,
+                    crop_rect=crop_rect,
+                    input_size=input_size,
+                    cropped_size=_image_size(raw_crop),
+                    resized_size=_image_size(board),
+                    debug_images=_write_debug_crop_images(dataset_root, image, crop_rect, raw_crop, board, write_artifacts),
+                    debug_log=debug_log,
+                    write_artifacts=write_artifacts,
+                ),
+                metadata_source_id,
+            )
 
     crop, crop_rect = _center_square_crop_raw(image)
     board = cv2.resize(crop, (DEFAULT_BOARD_OUTPUT_SIZE, DEFAULT_BOARD_OUTPUT_SIZE), interpolation=cv2.INTER_CUBIC)
-    debug_images = _write_debug_crop_images(dataset_root, image, crop_rect, crop, board)
     debug_log = _crop_debug_payload(
         image_path=image_path,
         input_size=input_size,
@@ -383,25 +426,22 @@ def crop_board_image(dataset_root: Path, image_path: Path, image_id: str, fallba
         resized_size=_image_size(board),
         metadata_source_image_size=metadata_image_size,
     )
-    return board, {
-        "method": "centerSquare",
-        "metadataSource": metadata_source_id,
-        "metadataSourceImageSize": metadata_image_size,
-        "cropRect": crop_rect,
-        "inputSize": input_size,
-        "croppedSize": _image_size(crop),
-        "resizedSize": _image_size(board),
-        "gridImageSize": _image_size(board),
-        "rawGridCellWidth": debug_log["rawGridCellWidth"],
-        "rawGridCellHeight": debug_log["rawGridCellHeight"],
-        "resizedGridCellWidth": debug_log["resizedGridCellWidth"],
-        "resizedGridCellHeight": debug_log["resizedGridCellHeight"],
-        "modelInputCellSize": debug_log["modelInputCellSize"],
-        "cellRectsRaw": debug_log["cellRectsRaw"],
-        "cellRectsResized": debug_log["cellRectsResized"],
-        "debugImages": debug_images,
-        "debugLog": debug_log,
-    }, metadata_source_id
+    return (
+        board,
+        _build_crop_result(
+            method="centerSquare",
+            metadata_source_id=metadata_source_id,
+            metadata_source_image_size=metadata_image_size,
+            crop_rect=crop_rect,
+            input_size=input_size,
+            cropped_size=_image_size(crop),
+            resized_size=_image_size(board),
+            debug_images=_write_debug_crop_images(dataset_root, image, crop_rect, crop, board, write_artifacts),
+            debug_log=debug_log,
+            write_artifacts=write_artifacts,
+        ),
+        metadata_source_id,
+    )
 
 
 def split_board_cells(board_image: np.ndarray, margin_ratio: float = CELL_MARGIN) -> list[dict[str, Any]]:
@@ -504,6 +544,7 @@ def run_prediction(
     model_path: Path,
     fallback_source_id: str | None = None,
     thresholds: Thresholds | None = None,
+    write_artifacts: bool = False,
 ) -> dict[str, Any]:
     loaded_model = load_model(model_path)
     board_image, crop_info, metadata_source_id = crop_board_image(
@@ -511,12 +552,14 @@ def run_prediction(
         image_path,
         image_id,
         fallback_source_id=fallback_source_id,
+        write_artifacts=write_artifacts,
     )
 
     board_crop_path = dataset_root / "board_crops" / f"{image_id}_board.png"
-    board_crop_path.parent.mkdir(parents=True, exist_ok=True)
-    if not cv2.imwrite(str(board_crop_path), board_image):
-        raise IOError(f"failed to write board crop: {board_crop_path}")
+    if write_artifacts:
+        board_crop_path.parent.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(board_crop_path), board_image):
+            raise IOError(f"failed to write board crop: {board_crop_path}")
 
     board_cells = split_board_cells(board_image)
     predictions = predict_cells(loaded_model.model, loaded_model.class_names, board_cells, loaded_model.device)
@@ -527,7 +570,7 @@ def run_prediction(
         "imageId": image_id,
         "imagePath": str(image_path),
         "modelPath": str(model_path),
-        "boardCropPath": str(board_crop_path),
+        "boardCropPath": str(board_crop_path) if write_artifacts else None,
         "cropInfo": crop_info,
         "inputSize": crop_info.get("inputSize"),
         "croppedSize": crop_info.get("croppedSize"),

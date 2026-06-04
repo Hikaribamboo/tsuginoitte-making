@@ -43,4 +43,6 @@ If the Windows machine owns the Tailscale IP `100.65.146.62`, start the backend 
 npm run start:windows-tailscale
 ```
 
-Then point the Mac frontend at `http://100.65.146.62:8765`. If Windows refuses to bind to that address, use `HOST=0.0.0.0` and keep accessing it from the Mac through the same Tailscale IP.
+Then point the Mac frontend at `http://100.65.146.62:8765`. If you move to another Windows PC, rewrite the hardcoded Tailscale IP in `engine-server/package.json` and the proxy target in `web/.env`.
+
+If Windows refuses to bind to that address, use `HOST=0.0.0.0` and keep accessing it from the Mac through the same Tailscale IP.
