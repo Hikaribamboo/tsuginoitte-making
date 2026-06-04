@@ -18,7 +18,7 @@ import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches, extractBr
 import type { KifBranch, KifTreeNode } from '../lib/kif-parser';
 import { saveProblem, getNextDisplayNo, saveMultipleProblems, saveLearningProblem } from '../api/problems';
 import { getWorkspace, saveWorkspaceDraft, deleteWorkspace } from '../api/workspaces';
-import { evaluatePosition, generateExplanations } from '../api/backend';
+import { evaluatePosition, generateExplanations, startAnalysisStream, stopAnalysis, type AnalysisLine } from '../api/backend';
 import { AVAILABLE_TAGS, DEFAULT_PROMPT } from '../lib/constants';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
 import type { ChoiceDraft } from '../types/problem';
@@ -30,6 +30,8 @@ type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 type BoardCell = { row: number; col: number };
 const WINRATE_SCALE = 800;
 const CHOICE_EVAL_DEPTH = 26;
+const BOARD_ANALYSIS_MIN_DISPLAY_DEPTH = 22;
+const BOARD_ANALYSIS_MAX_DEPTH = 28;
 const BOARD_SCALE = 0.76;
 const SLOT_ORDER: SlotKey[] = ['correct', 'incorrect1', 'incorrect2'];
 const SLOT_LABELS: Record<SlotKey, string> = {
@@ -314,6 +316,99 @@ const PasteProblemCreator: React.FC = () => {
   const displayParsed = useMemo(() => (displaySfen ? parseSfen(displaySfen) : null), [displaySfen]);
   const searchParsed = useMemo(() => (searchSfen ? parseSfen(searchSfen) : null), [searchSfen]);
   const parsed = displayParsed;
+  const [boardAnalysisMp, setBoardAnalysisMp] = useState(1);
+  const [boardAnalyzing, setBoardAnalyzing] = useState(false);
+  const [boardAnalysisDepth, setBoardAnalysisDepth] = useState(0);
+  const [boardAnalysisLines, setBoardAnalysisLines] = useState<Map<number, AnalysisLine>>(new Map());
+  const [boardAnalysisError, setBoardAnalysisError] = useState('');
+  const boardAnalysisEventSourceRef = useRef<EventSource | null>(null);
+  const boardAnalysisStoppingRef = useRef(false);
+
+  const stopBoardAnalysis = useCallback(async (clearResults = false) => {
+    boardAnalysisStoppingRef.current = true;
+    boardAnalysisEventSourceRef.current?.close();
+    boardAnalysisEventSourceRef.current = null;
+    setBoardAnalyzing(false);
+    if (clearResults) {
+      setBoardAnalysisDepth(0);
+      setBoardAnalysisLines(new Map());
+      setBoardAnalysisError('');
+    }
+    try {
+      await stopAnalysis();
+    } catch {
+      /* ignore */
+    } finally {
+      boardAnalysisStoppingRef.current = false;
+    }
+  }, []);
+
+  const startBoardAnalysis = useCallback(() => {
+    if (!displaySfen) {
+      setBoardAnalysisError('局面がありません');
+      return;
+    }
+
+    boardAnalysisStoppingRef.current = false;
+    boardAnalysisEventSourceRef.current?.close();
+    setBoardAnalysisError('');
+    setBoardAnalysisDepth(0);
+    setBoardAnalysisLines(new Map());
+
+    const es = startAnalysisStream(
+      displaySfen,
+      boardAnalysisMp,
+      (info) => {
+        setBoardAnalysisDepth((prev) => Math.max(prev, info.depth));
+        if (info.depth >= BOARD_ANALYSIS_MIN_DISPLAY_DEPTH) {
+          setBoardAnalysisLines((prev) => {
+            const next = new Map(prev);
+            next.set(info.multipv, info);
+            return next;
+          });
+        }
+        if (info.depth >= BOARD_ANALYSIS_MAX_DEPTH && !boardAnalysisStoppingRef.current) {
+          void stopBoardAnalysis(false);
+        }
+      },
+      (err) => {
+        setBoardAnalysisError(err);
+        void stopBoardAnalysis(false);
+      },
+    );
+    boardAnalysisEventSourceRef.current = es;
+    setBoardAnalyzing(true);
+  }, [boardAnalysisMp, displaySfen, stopBoardAnalysis]);
+
+  const toggleBoardAnalysis = useCallback(() => {
+    if (boardAnalyzing) {
+      void stopBoardAnalysis(false);
+    } else {
+      startBoardAnalysis();
+    }
+  }, [boardAnalyzing, startBoardAnalysis, stopBoardAnalysis]);
+
+  React.useEffect(() => {
+    return () => {
+      boardAnalysisEventSourceRef.current?.close();
+      void stopAnalysis();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (boardAnalyzing) {
+      void stopBoardAnalysis(true);
+    }
+  }, [displaySfen]);
+
+  const sortedBoardAnalysisLines = useMemo(
+    () => Array.from(boardAnalysisLines.values()).sort((a, b) => a.multipv - b.multipv),
+    [boardAnalysisLines],
+  );
+  const boardAnalysisSenteSign = useMemo(() => {
+    if (!displaySfen) return 1;
+    return parseSfen(displaySfen).sideToMove === 'sente' ? 1 : -1;
+  }, [displaySfen]);
 
   const setIntroDestinationBoth = useCallback((cell: BoardCell | null) => {
     introDestinationRef.current = cell;
@@ -1774,6 +1869,92 @@ const PasteProblemCreator: React.FC = () => {
               ) : (
                 <div className="rounded-lg border border-sky-100 bg-white/80 px-3 py-2 text-[12px] text-slate-400">
                   局面がありません
+                </div>
+              )}
+
+              {parsed && (
+                <div className="mt-2 rounded-lg border border-sky-100 bg-white/85 px-2.5 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={toggleBoardAnalysis}
+                      className={`h-8 rounded-lg px-3 text-[12px] font-semibold ${
+                        boardAnalyzing
+                          ? 'border-rose-500 bg-rose-600 text-white hover:bg-rose-700'
+                          : 'border-teal-600 bg-teal-600 text-white hover:bg-teal-700'
+                      }`}
+                    >
+                      {boardAnalyzing ? '検討停止' : '検討'}
+                    </button>
+                    <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                      MP
+                      <select
+                        value={boardAnalysisMp}
+                        onChange={(e) => setBoardAnalysisMp(Number(e.target.value))}
+                        disabled={boardAnalyzing}
+                        className="h-8 rounded-lg border-sky-200 bg-white px-2 text-[12px] font-semibold text-slate-800"
+                      >
+                        <option value={1}>1</option>
+                        <option value={2}>2</option>
+                        <option value={3}>3</option>
+                      </select>
+                    </label>
+                    {(boardAnalyzing || boardAnalysisDepth > 0) && (
+                      <span className="text-[11px] text-slate-500">
+                        depth {Math.min(boardAnalysisDepth, BOARD_ANALYSIS_MAX_DEPTH)} / {BOARD_ANALYSIS_MAX_DEPTH}
+                      </span>
+                    )}
+                  </div>
+
+                  {boardAnalysisError && (
+                    <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">
+                      {boardAnalysisError}
+                    </div>
+                  )}
+
+                  {boardAnalyzing && boardAnalysisDepth < BOARD_ANALYSIS_MIN_DISPLAY_DEPTH && !boardAnalysisError && (
+                    <div className="mt-2 text-[12px] text-slate-500">
+                      検討中です
+                    </div>
+                  )}
+
+                  {sortedBoardAnalysisLines.length > 0 && displaySfen && (
+                    <div className="mt-2 max-h-40 overflow-y-auto">
+                      <table className="w-full table-fixed border-collapse text-[11px]">
+                        <thead>
+                          <tr className="text-slate-500">
+                            <th className="w-16 border-b border-sky-100 px-1.5 py-1 text-left font-semibold">評価値</th>
+                            <th className="w-20 border-b border-sky-100 px-1.5 py-1 text-left font-semibold">ラベル</th>
+                            <th className="border-b border-sky-100 px-1.5 py-1 text-left font-semibold">読み筋label</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedBoardAnalysisLines.map((line) => {
+                            const labels = pvToJapanese(line.pv, displaySfen, 10);
+                            const displayCp = line.eval_cp * boardAnalysisSenteSign;
+                            const displayMate = line.mate !== null ? line.mate * boardAnalysisSenteSign : null;
+                            return (
+                              <tr key={line.multipv} className={line.multipv === 1 ? 'bg-amber-50/70' : ''}>
+                                <td className="border-b border-sky-50 px-1.5 py-1 align-top font-mono">
+                                  {displayMate !== null
+                                    ? `詰${displayMate > 0 ? '+' : ''}${displayMate}`
+                                    : String(displayCp)}
+                                </td>
+                                <td className="border-b border-sky-50 px-1.5 py-1 align-top font-semibold text-slate-800">
+                                  {labels[0] ?? '-'}
+                                </td>
+                                <td className="max-w-0 border-b border-sky-50 px-1.5 py-1 align-top">
+                                  <div className="overflow-x-auto whitespace-nowrap">
+                                    {labels.join(' ')}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
 
