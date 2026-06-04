@@ -248,6 +248,8 @@ const ImagePositionCreator: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [message, setMessage] = useState('');
+  const [showDeleteImageConfirm, setShowDeleteImageConfirm] = useState(false);
+  const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -382,13 +384,70 @@ const ImagePositionCreator: React.FC = () => {
     if (activeId === id) setActiveId(null);
   }, [activeId]);
 
+  const handleConfirmDeleteImage = useCallback(async () => {
+    const id = deleteCandidateId;
+    if (!id) return;
+    try {
+      await deleteImagePositionItem(id);
+      setItems((prev) => prev.filter((candidate) => candidate.id !== id));
+      if (activeId === id) setActiveId(null);
+      setMessage('画像データを削除しました');
+    } catch (err: any) {
+      setMessage(`画像データの削除に失敗しました: ${err.message}`);
+    } finally {
+      setShowDeleteImageConfirm(false);
+      setDeleteCandidateId(null);
+    }
+  }, [deleteCandidateId, activeId]);
+
   if (activeItem) {
     return (
-      <ImagePositionDetail
-        item={activeItem}
-        patchItem={patchItem}
-        onBack={() => setActiveId(null)}
-      />
+      <>
+        <ImagePositionDetail
+          item={activeItem}
+          patchItem={patchItem}
+          onBack={() => setActiveId(null)}
+          onAskDeleteSourceImage={(id) => {
+            setDeleteCandidateId(id);
+            setShowDeleteImageConfirm(true);
+          }}
+        />
+
+        {/* Post-save: ask to delete source image data modal */}
+        {showDeleteImageConfirm && deleteCandidateId && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            onClick={() => { setShowDeleteImageConfirm(false); setDeleteCandidateId(null); }}
+          >
+            <div
+              className="bg-white rounded-xl shadow-2xl p-5 w-full max-w-[380px] mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-base font-semibold mb-2">画像データの削除</h3>
+              <p className="text-[13px] text-gray-600 mb-4">
+                この下書きは画像から作成されました。画像データを削除しますか？
+                <br />削除するとローカルの保存データ（IndexedDB）から削除されます。
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowDeleteImageConfirm(false); setDeleteCandidateId(null); }}
+                  className="text-[13px]"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void handleConfirmDeleteImage(); }}
+                  className="bg-red-600 text-white border-red-600 hover:bg-red-700 text-[13px] px-4 py-1.5 rounded"
+                >
+                  削除する
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -485,6 +544,41 @@ const ImagePositionCreator: React.FC = () => {
       {message && (
         <div className="text-[12px] bg-amber-50 border border-amber-200 text-amber-800 rounded px-3 py-2">
           {message}
+        </div>
+      )}
+
+      {/* Post-save: ask to delete source image data modal */}
+      {showDeleteImageConfirm && deleteCandidateId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => { setShowDeleteImageConfirm(false); setDeleteCandidateId(null); }}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl p-5 w-full max-w-[380px] mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold mb-2">画像データの削除</h3>
+            <p className="text-[13px] text-gray-600 mb-4">
+              この下書きは画像から作成されました。画像データを削除しますか？
+              <br />削除するとローカルの保存データ（IndexedDB）から削除されます。
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowDeleteImageConfirm(false); setDeleteCandidateId(null); }}
+                className="text-[13px]"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleConfirmDeleteImage(); }}
+                className="bg-red-600 text-white border-red-600 hover:bg-red-700 text-[13px] px-4 py-1.5 rounded"
+              >
+                削除する
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -622,12 +716,14 @@ interface ImagePositionDetailProps {
   item: ImagePositionItem;
   patchItem: (id: string, patch: Partial<ImagePositionItem>) => Promise<void>;
   onBack: () => void;
+  onAskDeleteSourceImage: (id: string) => void;
 }
 
 const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
   item,
   patchItem,
   onBack,
+  onAskDeleteSourceImage,
 }) => {
   const navigate = useNavigate();
   const parsed = useMemo(() => parseSfen(item.sfen ?? EMPTY_SFEN), [item.sfen]);
@@ -1068,7 +1164,7 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
       const latestWorkspaces = await listWorkspaces();
       const nextNumber = getNextWorkspaceNumber(latestWorkspaces);
       const ws = await createWorkspace(buildAutoWorkspaceName(nextNumber));
-      await saveWorkspaceDraft(ws.id, {
+        await saveWorkspaceDraft(ws.id, {
         kifText: '',
         rootSfen: currentSfen,
         kifMoves: [],
@@ -1077,7 +1173,8 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
         readingLineInputs: { correct: '', incorrect1: '', incorrect2: '' },
         prompt: '',
         tags: [],
-        mode: 'next_move',
+          // Image-origin drafts should default to joseki mode
+          mode: 'joseki',
         displayNo: null,
         problemRating: 1500,
         rootEvalCp: null,
@@ -1097,6 +1194,8 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
         },
       });
       setMessage(`下書き「${ws.name}」に追加しました`);
+      // Ask whether to delete the source image data
+      onAskDeleteSourceImage(item.id);
     } catch (err: any) {
       setMessage(`下書き追加に失敗しました: ${err.message}`);
     } finally {

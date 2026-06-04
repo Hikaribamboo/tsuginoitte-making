@@ -154,6 +154,42 @@ def _metadata_source_image_size(dataset_root: Path, metadata_source_id: str | No
     return _image_size(_load_image(source_image_path))
 
 
+def _metadata_scale(
+    input_size: dict[str, int],
+    metadata_source_image_size: dict[str, int] | None,
+) -> tuple[float, float] | None:
+    if not metadata_source_image_size:
+        return None
+
+    source_width = metadata_source_image_size["width"]
+    source_height = metadata_source_image_size["height"]
+    if source_width <= 0 or source_height <= 0:
+        return None
+
+    scale_x = input_size["width"] / source_width
+    scale_y = input_size["height"] / source_height
+    if abs(scale_x - 1.0) < 0.001 and abs(scale_y - 1.0) < 0.001:
+        return None
+
+    return scale_x, scale_y
+
+
+def _scale_crop_rect(crop_rect: dict[str, int], scale_x: float, scale_y: float) -> dict[str, int]:
+    return {
+        "x": int(round(crop_rect["x"] * scale_x)),
+        "y": int(round(crop_rect["y"] * scale_y)),
+        "width": int(round(crop_rect["width"] * scale_x)),
+        "height": int(round(crop_rect["height"] * scale_y)),
+    }
+
+
+def _scale_board_corners(corners: np.ndarray, scale_x: float, scale_y: float) -> np.ndarray:
+    scaled = corners.astype(np.float32).copy()
+    scaled[:, 0] *= scale_x
+    scaled[:, 1] *= scale_y
+    return scaled
+
+
 def _load_board_metadata(dataset_root: Path, image_id: str, fallback_source_id: str | None = None) -> tuple[Any | None, str | None]:
     if fallback_source_id:
         fallback_metadata_path = dataset_root / "metadata" / f"{fallback_source_id}.json"
@@ -296,11 +332,14 @@ def crop_board_image(
     image = _load_image(image_path)
     input_size = _image_size(image)
     metadata_image_size = _metadata_source_image_size(dataset_root, metadata_source_id)
+    metadata_scale = _metadata_scale(input_size, metadata_image_size)
 
     if metadata and metadata.boardCorners:
         corners = np.array(metadata.boardCorners, dtype=np.float32)
         if corners.shape != (4, 2):
             raise ValueError("boardCorners must contain 4 points")
+        if metadata_scale:
+            corners = _scale_board_corners(corners, *metadata_scale)
         board = _warp_to_square(image, corners, output_size=DEFAULT_BOARD_OUTPUT_SIZE)
         equivalent = _corners_to_crop_rect(corners)
         x = max(equivalent["x"], 0)
@@ -338,6 +377,8 @@ def crop_board_image(
 
     if metadata and metadata.cropRect:
         normalized = _normalize_crop_rect(metadata.cropRect)
+        if metadata_scale:
+            normalized = _scale_crop_rect(normalized, *metadata_scale)
         x = max(int(normalized["x"]), 0)
         y = max(int(normalized["y"]), 0)
         width = int(normalized["width"])

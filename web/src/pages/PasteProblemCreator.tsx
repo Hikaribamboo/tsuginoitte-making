@@ -1224,6 +1224,11 @@ const PasteProblemCreator: React.FC = () => {
   };
   const handleExplanationBlur = (slot: SlotKey) => {
     void slot;
+    window.requestAnimationFrame(() => {
+      const focusedSlot = (Object.entries(explanationInputRefs.current) as Array<[SlotKey, HTMLTextAreaElement | null]>)
+        .find(([, textarea]) => textarea === document.activeElement)?.[0] ?? null;
+      setKeyboardSlot(focusedSlot);
+    });
   };
   const handleKeyboardInsert = useCallback((text: string) => {
     if (!keyboardSlot) return;
@@ -1416,9 +1421,9 @@ const PasteProblemCreator: React.FC = () => {
     [tags],
   );
   const saveButtonLabel = useMemo(() => {
-    const base = preferredSaveMode === 'joseki' ? '定跡モードで保存' : '思考モードで保存';
+    const base = '思考モードで保存';
     return selectedVisibleTagCount === 0 ? `${base}(タグなし)` : base;
-  }, [preferredSaveMode, selectedVisibleTagCount]);
+  }, [selectedVisibleTagCount]);
 
   const validate = (): string[] => {
     const errors: string[] = [];
@@ -1536,6 +1541,9 @@ const PasteProblemCreator: React.FC = () => {
       return;
     }
 
+    // Ensure UI reflects that user chose next-move save
+    setPreferredSaveMode('next_move');
+
     setSaving(true);
     setMessage('');
     try {
@@ -1599,6 +1607,8 @@ const PasteProblemCreator: React.FC = () => {
   const handleRegisterJoseki = async () => {
     // Register only to problems table as joseki
     // Reuse same save data construction as handleSave
+    // Ensure UI reflects that user chose joseki save
+    setPreferredSaveMode('joseki');
     setRegisteringJoseki(true);
     setMessage('');
     try {
