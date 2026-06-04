@@ -6,6 +6,7 @@ interface KeyboardModalProps {
   onClose: () => void;
   onInsert: (text: string) => void;
   onDelete: () => void;
+  onDragStateChange?: (isDragging: boolean) => void;
 }
 
 type Position = { x: number; y: number };
@@ -17,7 +18,7 @@ const KEY_ROWS = [
   ['龍', '馬', '成銀', '成桂', '成香', 'と', '成', '打'],
 ];
 
-const KeyboardModal: React.FC<KeyboardModalProps> = ({ open, title, onClose, onInsert, onDelete }) => {
+const KeyboardModal: React.FC<KeyboardModalProps> = ({ open, title, onClose, onInsert, onDelete, onDragStateChange }) => {
   const [position, setPosition] = useState<Position>({ x: 96, y: 96 });
   const dragStateRef = useRef<{
     pointerId: number;
@@ -26,6 +27,11 @@ const KeyboardModal: React.FC<KeyboardModalProps> = ({ open, title, onClose, onI
     originX: number;
     originY: number;
   } | null>(null);
+  const onDragChangeRef = useRef<((isDragging: boolean) => void) | undefined>(onDragStateChange);
+
+  useEffect(() => {
+    onDragChangeRef.current = onDragStateChange;
+  }, [onDragStateChange]);
 
   const modalStyle = useMemo(
     () => ({
@@ -60,6 +66,7 @@ const KeyboardModal: React.FC<KeyboardModalProps> = ({ open, title, onClose, onI
       const dragState = dragStateRef.current;
       if (!dragState || event.pointerId !== dragState.pointerId) return;
       dragStateRef.current = null;
+      onDragChangeRef.current?.(false);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -85,6 +92,7 @@ const KeyboardModal: React.FC<KeyboardModalProps> = ({ open, title, onClose, onI
       originY: position.y,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
+    onDragChangeRef.current?.(true);
   };
 
   return (

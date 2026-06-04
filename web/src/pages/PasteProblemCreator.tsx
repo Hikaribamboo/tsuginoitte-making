@@ -246,6 +246,7 @@ const PasteProblemCreator: React.FC = () => {
   const [replaySlot, setReplaySlot] = useState<SlotKey | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [keyboardSlot, setKeyboardSlot] = useState<SlotKey | null>(null);
+  const [keyboardDragging, setKeyboardDragging] = useState(false);
   const [evaluatingSlot, setEvaluatingSlot] = useState<SlotKey | null>(null);
   const [evalQueue, setEvalQueue] = useState<SlotKey[]>([]);
 
@@ -1322,7 +1323,13 @@ const PasteProblemCreator: React.FC = () => {
     window.requestAnimationFrame(() => {
       const focusedSlot = (Object.entries(explanationInputRefs.current) as Array<[SlotKey, HTMLTextAreaElement | null]>)
         .find(([, textarea]) => textarea === document.activeElement)?.[0] ?? null;
-      setKeyboardSlot(focusedSlot);
+      // If user is dragging the keyboard, don't close it even if focus briefly leaves the textarea.
+      if (focusedSlot !== null) {
+        setKeyboardSlot(focusedSlot);
+        return;
+      }
+      if (keyboardDragging) return;
+      setKeyboardSlot(null);
     });
   };
   const handleKeyboardInsert = useCallback((text: string) => {
@@ -2288,6 +2295,7 @@ const PasteProblemCreator: React.FC = () => {
         onClose={() => setKeyboardSlot(null)}
         onInsert={handleKeyboardInsert}
         onDelete={handleKeyboardDelete}
+        onDragStateChange={(isDragging) => setKeyboardDragging(isDragging)}
       />
 
       {/* Reading-line replay modal */}
