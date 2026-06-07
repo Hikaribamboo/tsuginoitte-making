@@ -57,6 +57,7 @@ export class ShogiEngine {
   private buffer = '';
   private resolveQueue: Array<{
     resolve: (lines: string[]) => void;
+    reject: (error: Error) => void;
     terminator: string;
   }> = [];
   private collectedLines: string[] = [];
@@ -143,8 +144,13 @@ export class ShogiEngine {
       console.error('[engine stderr]', data.toString());
     });
 
-    this.process.on('exit', (code) => {
+    this.process.on('error', (error) => {
+      this.rejectPendingWaits(error);
+    });
+
+    this.process.on('exit', (code, signal) => {
       console.log(`Engine exited with code ${code}`);
+      this.rejectPendingWaits(new Error(`Engine exited code=${code ?? 'none'} signal=${signal ?? 'none'}`));
       this.process = null;
       this.ready = false;
     });
@@ -427,10 +433,18 @@ export class ShogiEngine {
   }
 
   private sendAndWait(command: string, terminator: string): Promise<string[]> {
-    return new Promise((resolve) => {
-      this.resolveQueue.push({ resolve, terminator });
+    return new Promise((resolve, reject) => {
+      this.resolveQueue.push({ resolve, reject, terminator });
       this.send(command);
     });
+  }
+
+  private rejectPendingWaits(error: Error): void {
+    const pending = this.resolveQueue.splice(0);
+    this.collectedLines = [];
+    for (const waiter of pending) {
+      waiter.reject(error);
+    }
   }
 
   private static detectDefaultTuning(): AnalysisTuning {
