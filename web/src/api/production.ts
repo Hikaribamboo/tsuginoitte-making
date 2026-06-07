@@ -168,13 +168,28 @@ async function upsertChoices(
       const updatePayload = includeUpdatedAt
         ? { ...choiceFields, updated_at: updatedAt }
         : choiceFields;
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from(table)
         .update(updatePayload)
         .eq('problem_id', problemId)
-        .eq('choice_id', choiceId);
+        .eq('choice_id', choiceId)
+        .select('choice_id')
+        .maybeSingle();
 
       if (error) throw error;
+
+      if (!data) {
+        const { error: upsertError } = await supabase
+          .from(table)
+          .upsert(
+            includeUpdatedAt
+              ? { ...row, updated_at: updatedAt }
+              : row,
+            { onConflict: 'problem_id,choice_id' },
+          );
+
+        if (upsertError) throw upsertError;
+      }
     }
   };
 
@@ -276,43 +291,43 @@ export async function updateProductionProblemById(
 ): Promise<ProductionProblemDetail> {
   const table = mode === 'next_move' ? 'next_move_problems' : 'problems';
   const updatedAt = new Date().toISOString();
-  const query = supabase
-    .from(table)
-    .update({
-      prompt: problem.prompt,
-      root_sfen: problem.rootSfen,
-      correct_choice_id: problem.correctChoiceId,
-      intro_moves_usi: problem.introMovesUsi,
-      root_eval_cp: problem.rootEvalCp,
-      root_eval_percent: problem.rootEvalPercent,
-      problem_rating: problem.problemRating,
-      problem_rating_games: problem.problemRatingGames,
-      tags: problem.tags,
-      updated_at: updatedAt,
-    })
-    .eq('id', problemId);
+  const basePayload = {
+    prompt: problem.prompt,
+    root_sfen: problem.rootSfen,
+    correct_choice_id: problem.correctChoiceId,
+    intro_moves_usi: problem.introMovesUsi,
+    root_eval_cp: problem.rootEvalCp,
+    root_eval_percent: problem.rootEvalPercent,
+    problem_rating: problem.problemRating,
+    problem_rating_games: problem.problemRatingGames,
+    tags: problem.tags,
+  };
 
-  const { error: problemError } = await (mode === 'joseki' ? query.eq('mode', 'joseki') : query);
+  const updateProblem = async (includeUpdatedAt: boolean) => {
+    const payload = includeUpdatedAt ? { ...basePayload, updated_at: updatedAt } : basePayload;
+    const query = supabase.from(table).update(payload).eq('id', problemId);
+    const problemQuery = mode === 'joseki' ? query.eq('mode', 'joseki') : query;
+    return problemQuery.select('id').maybeSingle();
+  };
 
-  if (problemError) {
-    if (!isMissingColumnError(problemError, 'updated_at')) throw problemError;
+  let problemResult = await updateProblem(true);
+  if (problemResult.error) {
+    if (!isMissingColumnError(problemResult.error, 'updated_at')) throw problemResult.error;
+    problemResult = await updateProblem(false);
+  }
 
-    const retryQuery = supabase
+  if (problemResult.error) throw problemResult.error;
+
+  if (!problemResult.data) {
+    const upsertPayload = mode === 'joseki'
+      ? { id: problemId, mode: 'joseki', ...basePayload, updated_at: updatedAt }
+      : { id: problemId, ...basePayload, updated_at: updatedAt };
+
+    const { error: upsertError } = await supabase
       .from(table)
-      .update({
-        prompt: problem.prompt,
-        root_sfen: problem.rootSfen,
-        correct_choice_id: problem.correctChoiceId,
-        intro_moves_usi: problem.introMovesUsi,
-        root_eval_cp: problem.rootEvalCp,
-        root_eval_percent: problem.rootEvalPercent,
-        problem_rating: problem.problemRating,
-        problem_rating_games: problem.problemRatingGames,
-        tags: problem.tags,
-      })
-      .eq('id', problemId);
-    const retry = await (mode === 'joseki' ? retryQuery.eq('mode', 'joseki') : retryQuery);
-    if (retry.error) throw retry.error;
+      .upsert(upsertPayload, { onConflict: 'id' });
+
+    if (upsertError) throw upsertError;
   }
 
   await upsertChoices(problemId, mode, choices);
