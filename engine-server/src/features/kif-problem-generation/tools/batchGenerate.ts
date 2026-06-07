@@ -78,11 +78,9 @@ export async function main() {
     const createdAt = new Date().toISOString();
     const prompt = "最善手を選んでください";
 
-    const doneKifuIds: number[] = [];
-    const impossibleKifuIds: number[] = [];
-    const ngKifus: Array<{ id: number; reason: string }> = [];
     for (let i = 0; i < kifus.length; i++) {
       const kifu = kifus[i];
+      let finalized = false;
 
       try {
         const initialSfen = kifu.initial_sfen;
@@ -182,7 +180,9 @@ export async function main() {
         }
 
         if (built === 0) {
-          impossibleKifuIds.push(kifu.id);
+          const { error: impossibleErr } = await supabase.from("making_kifus").update({ status: "impossible" }).eq("id", kifu.id);
+          if (impossibleErr) throw impossibleErr;
+          finalized = true;
           continue;
         }
 
@@ -236,23 +236,18 @@ export async function main() {
         const { error: choiceErr } = await supabase.from("making_draft_choices").insert(draftChoicesPayload);
         if (choiceErr) throw choiceErr;
 
-        doneKifuIds.push(kifu.id);
+        const { error: doneErr } = await supabase.from("making_kifus").update({ status: "done" }).eq("id", kifu.id);
+        if (doneErr) throw doneErr;
+        finalized = true;
       } catch (e: any) {
-        ngKifus.push({ id: kifu.id, reason: String(e?.message ?? e) });
+        if (!finalized) {
+          const { error: failedErr } = await supabase.from("making_kifus").update({ status: "failed" }).eq("id", kifu.id);
+          if (failedErr) {
+            throw failedErr;
+          }
+        }
+        console.error(`[batchGenerate] kifu ${kifu.id} failed: ${String(e?.message ?? e)}`);
       }
-    }
-
-    if (doneKifuIds.length > 0) {
-      const { error: e1 } = await supabase.from("making_kifus").delete().in("id", doneKifuIds);
-      if (e1) throw e1;
-    }
-    if (impossibleKifuIds.length > 0) {
-      const { error: eImp } = await supabase.from("making_kifus").update({ status: "impossible" }).in("id", impossibleKifuIds);
-      if (eImp) throw eImp;
-    }
-    for (const ng of ngKifus) {
-      const { error: e2 } = await supabase.from("making_kifus").update({ status: "failed" }).eq("id", ng.id);
-      if (e2) throw e2;
     }
   } finally {
     await engine.quit();

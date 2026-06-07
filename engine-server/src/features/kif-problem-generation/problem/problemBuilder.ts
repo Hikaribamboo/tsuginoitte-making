@@ -135,7 +135,7 @@ function pickWrong2Strict(args: {
     return inRange[0].info;
   }
 
-  scored.sort((a, b) => a.diff - b.diff);
+  scored.sort((a, b) => b.diff - a.diff);
   return scored[0].info;
 }
 

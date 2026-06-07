@@ -811,28 +811,35 @@ async function importKifsJobResult(job: MakingJobSnapshot): Promise<number> {
   if (!job.result?.notes?.some((note) => note.includes('batchGenerate completed'))) {
     return 0;
   }
-  if (!job.startedAt) return 0;
 
-  const start = new Date(job.startedAt).getTime() - 2 * 60 * 1000;
-  const endBase = job.finishedAt ? new Date(job.finishedAt).getTime() : Date.now();
-  const end = endBase + 2 * 60 * 1000;
-  const windowStart = new Date(start).toISOString();
-  const windowEnd = new Date(end).toISOString();
+  const queryProblems = async (useWindow: boolean): Promise<GeneratedDraftProblemRow[]> => {
+    let query = supabase
+      .from('making_draft_problems')
+      .select('id, created_at, source_type, source_ref')
+      .eq('mode', 'next_move')
+      .eq('source_type', 'kif_problem_generation')
+      .order('id', { ascending: false })
+      .limit(300);
 
-  const { data: problemsData, error: problemsError } = await supabase
-    .from('making_draft_problems')
-    .select('id, created_at, source_type, source_ref')
-    .eq('mode', 'next_move')
-    .eq('source_type', 'kif_problem_generation')
-    .gte('created_at', windowStart)
-    .lte('created_at', windowEnd)
-    .order('id', { ascending: false })
-    .limit(300);
+    if (useWindow && job.startedAt) {
+      const start = new Date(job.startedAt).getTime() - 2 * 60 * 1000;
+      const endBase = job.finishedAt ? new Date(job.finishedAt).getTime() : Date.now();
+      const end = endBase + 2 * 60 * 1000;
+      query = query.gte('created_at', new Date(start).toISOString()).lte('created_at', new Date(end).toISOString());
+    }
 
-  if (problemsError) throw problemsError;
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []) as GeneratedDraftProblemRow[];
+  };
 
-  const problems = (problemsData ?? []) as GeneratedDraftProblemRow[];
-  return problems.length;
+  const problems = await queryProblems(true);
+  if (problems.length > 0) {
+    return problems.length;
+  }
+
+  const fallbackProblems = await queryProblems(false);
+  return fallbackProblems.length;
 }
 
 export default MakingEngineCreator;
