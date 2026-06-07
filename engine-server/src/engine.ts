@@ -62,6 +62,7 @@ export class ShogiEngine {
   }> = [];
   private collectedLines: string[] = [];
   private supportedOptions = new Set<string>();
+  private recentEngineLines: string[] = [];
 
   private tuning: AnalysisTuning;
 
@@ -141,7 +142,12 @@ export class ShogiEngine {
     });
 
     this.process.stderr!.on('data', (data: Buffer) => {
-      console.error('[engine stderr]', data.toString());
+      const text = data.toString();
+      console.error('[engine stderr]', text);
+      for (const line of text.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (trimmed) this.rememberEngineLine(`[stderr] ${trimmed}`);
+      }
     });
 
     this.process.on('error', (error) => {
@@ -150,7 +156,10 @@ export class ShogiEngine {
 
     this.process.on('exit', (code, signal) => {
       console.log(`Engine exited with code ${code}`);
-      this.rejectPendingWaits(new Error(`Engine exited code=${code ?? 'none'} signal=${signal ?? 'none'}`));
+      const recent = this.recentEngineLines.length > 0
+        ? `\nRecent engine output:\n${this.recentEngineLines.join('\n')}`
+        : '';
+      this.rejectPendingWaits(new Error(`Engine exited code=${code ?? 'none'} signal=${signal ?? 'none'}${recent}`));
       this.process = null;
       this.ready = false;
     });
@@ -447,6 +456,13 @@ export class ShogiEngine {
     }
   }
 
+  private rememberEngineLine(line: string): void {
+    this.recentEngineLines.push(line);
+    if (this.recentEngineLines.length > 40) {
+      this.recentEngineLines.shift();
+    }
+  }
+
   private static detectDefaultTuning(): AnalysisTuning {
     const logicalCpu = Math.max(1, os.cpus().length);
     const totalMemMb = Math.floor(os.totalmem() / (1024 * 1024));
@@ -530,6 +546,10 @@ export class ShogiEngine {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+      this.rememberEngineLine(trimmed);
+      if (ShogiEngine.envBool('ENGINE_LOG_STDOUT', false)) {
+        console.log(`[engine stdout] ${trimmed}`);
+      }
 
       // Emit raw line for streaming consumers
       this.analysisEmitter.emit('rawline', trimmed);
