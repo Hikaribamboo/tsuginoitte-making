@@ -146,6 +146,10 @@ export async function saveLearningProblem(
 ): Promise<SaveProblemResult> {
   const mode = problem.mode;
 
+  if (mode === 'joseki' && (problem.intro_moves_usi?.length ?? 0) === 0) {
+    throw new Error('定跡モードでは intro_moves_usi を1手以上指定してください');
+  }
+
   // Normalize before save
   const normalizedProblem = normalizeProblemForSave(problem);
   const normalizedChoices = normalizeChoicesForSave(choices);

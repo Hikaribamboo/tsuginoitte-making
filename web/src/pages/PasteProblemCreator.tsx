@@ -240,6 +240,7 @@ const PasteProblemCreator: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [registeringJoseki, setRegisteringJoseki] = useState(false);
+  const [josekiSaveWarning, setJosekiSaveWarning] = useState('');
   const [savingBranches, setSavingBranches] = useState(false);
   const [message, setMessage] = useState('');
   const [showPreview, setShowPreview] = useState(false);
@@ -1711,6 +1712,7 @@ const PasteProblemCreator: React.FC = () => {
     // Reuse same save data construction as handleSave
     // Ensure UI reflects that user chose joseki save
     setPreferredSaveMode('joseki');
+    setJosekiSaveWarning('');
     setRegisteringJoseki(true);
     setMessage('');
     try {
@@ -1722,6 +1724,10 @@ const PasteProblemCreator: React.FC = () => {
       };
 
       const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
+      if (introMovesUsi.length === 0) {
+        setJosekiSaveWarning('定跡モードでは初手を1手以上入れてください');
+        return;
+      }
       const correctEvalCp = choices.correct.eval_cp;
       const correctEvalPercent = choices.correct.eval_percent;
 
@@ -2165,6 +2171,11 @@ const PasteProblemCreator: React.FC = () => {
                 >
                   {registeringJoseki ? '登録中...' : (selectedVisibleTagCount === 0 ? '定跡モードで保存(タグなし)' : '定跡モードで保存')}
                 </button>
+                {josekiSaveWarning ? (
+                  <div className="col-span-2 -mt-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] font-medium text-amber-800">
+                    {josekiSaveWarning}
+                  </div>
+                ) : null}
                 <button
                   onClick={() => setShowPreview(true)}
                   type="button"
