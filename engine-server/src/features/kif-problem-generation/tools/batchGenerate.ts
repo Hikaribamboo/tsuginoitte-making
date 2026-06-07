@@ -64,9 +64,6 @@ export async function main() {
     ponder: config.engine.ponder,
   });
 
-  const BATCH_MAX_MS = 30 * 60 * 1000;
-  const batchStartMs = Date.now();
-
   try {
     const { data, error } = await supabase.rpc("claim_making_kifus", {
       batch_size: config.batch.generateBatchSize,
@@ -84,19 +81,8 @@ export async function main() {
     const doneKifuIds: number[] = [];
     const impossibleKifuIds: number[] = [];
     const ngKifus: Array<{ id: number; reason: string }> = [];
-    let stoppedByTimeLimit = false;
-    const unprocessedKifuIds: number[] = [];
-
     for (let i = 0; i < kifus.length; i++) {
       const kifu = kifus[i];
-      const elapsed = Date.now() - batchStartMs;
-      if (elapsed >= BATCH_MAX_MS) {
-        stoppedByTimeLimit = true;
-        for (let j = i; j < kifus.length; j++) {
-          unprocessedKifuIds.push(kifus[j]!.id);
-        }
-        break;
-      }
 
       try {
         const initialSfen = kifu.initial_sfen;
@@ -267,9 +253,6 @@ export async function main() {
     for (const ng of ngKifus) {
       const { error: e2 } = await supabase.from("making_kifus").update({ status: "failed" }).eq("id", ng.id);
       if (e2) throw e2;
-    }
-    if (stoppedByTimeLimit && unprocessedKifuIds.length > 0) {
-      await supabase.from("making_kifus").update({ status: "pending" }).in("id", unprocessedKifuIds);
     }
   } finally {
     await engine.quit();
