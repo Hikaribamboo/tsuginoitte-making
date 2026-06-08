@@ -300,10 +300,10 @@ async function buildProblemFromSfen(args: {
       const candidateEvalSente = normalizeCpToSentePerspective(info.eval, turn);
       return {
         usi: info.pv[0]!,
-        diff: lossFromBest({ bestEvalSente, candidateEvalSente, turn }),
+        probeDiff: lossFromBest({ bestEvalSente, candidateEvalSente, turn }),
       };
     })
-    .filter((candidate) => candidate.usi !== correctUsi && candidate.diff >= minDiff && candidate.diff <= maxDiff);
+    .filter((candidate) => candidate.usi !== correctUsi);
 
   shuffleInPlace(candidates);
 
@@ -400,8 +400,8 @@ export async function main(): Promise<void> {
   const statePath = path.resolve(process.env.AMTS_BOOK_STATE_FILE?.trim() || selectedBook.statePath);
   const outputPath = path.resolve(process.env.AMTS_BOOK_OUTPUT_PATH?.trim() || defaultOutputPath);
   const count = envInt("AMTS_BOOK_COUNT", 10, 1, 100000);
-  const minDiff = envInt("AMTS_BOOK_MIN_DIFF", 100, 1, 100000);
-  const maxDiff = envInt("AMTS_BOOK_MAX_DIFF", 600, 1, 100000);
+  const minDiff = envInt("AMTS_BOOK_MIN_DIFF", 200, 1, 100000);
+  const maxDiff = envInt("AMTS_BOOK_MAX_DIFF", 1000, 1, 100000);
 
   if (maxDiff < minDiff) {
     throw new Error(`maxDiff must be >= minDiff: minDiff=${minDiff} maxDiff=${maxDiff}`);

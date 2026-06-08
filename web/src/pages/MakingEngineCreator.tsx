@@ -97,8 +97,8 @@ type SampleKifuEvalRow = {
 const DEFAULT_BOOK_FORM: BookFormState = {
   bookFile: 'qhapaq',
   count: '10',
-  minDiff: '100',
-  maxDiff: '600',
+  minDiff: '200',
+  maxDiff: '1000',
 };
 
 const BOOK_FILE_OPTIONS: Array<{ value: BookFormState['bookFile']; label: string }> = [

@@ -90,9 +90,7 @@ function appendLog(job: JobRecord, line: string): void {
 
 function setStep(job: JobRecord, step: string): void {
   job.step = step;
-  if (job.kind !== 'kifs') {
-    appendLog(job, `[step] ${step}`);
-  }
+  appendLog(job, `[step] ${step}`);
 }
 
 function parseJobInput(input: unknown): JobInput {
@@ -108,8 +106,8 @@ function parseJobInput(input: unknown): JobInput {
 
 function parseBookJobSettings(input: BookJobInput['settings']) {
   const bookFile: 'qhapaq' | 'sanken-shiken' = input?.bookFile === 'sanken-shiken' ? 'sanken-shiken' : 'qhapaq';
-  const minDiff = Number.isFinite(input?.minDiff) ? Math.max(1, Math.trunc(input!.minDiff!)) : 100;
-  const maxDiff = Number.isFinite(input?.maxDiff) ? Math.max(1, Math.trunc(input!.maxDiff!)) : 600;
+  const minDiff = Number.isFinite(input?.minDiff) ? Math.max(1, Math.trunc(input!.minDiff!)) : 200;
+  const maxDiff = Number.isFinite(input?.maxDiff) ? Math.max(1, Math.trunc(input!.maxDiff!)) : 1000;
   if (maxDiff < minDiff) {
     throw new Error('maxDiff は minDiff 以上で指定してください');
   }
@@ -165,9 +163,14 @@ async function runCommand(
   await new Promise<void>((resolve, reject) => {
     const shell = process.platform === 'win32';
     const quietKifBatch = args.some((arg) => arg.includes('kif-problem-generation/tools/batchGenerate.ts'));
+    const recentChildLines: string[] = [];
     const shouldForwardChildLine = (line: string): boolean => {
       if (!quietKifBatch) return true;
       return (
+        line.startsWith('設定:') ||
+        line.startsWith('Supabase') ||
+        line.startsWith('claim') ||
+        line.startsWith('対象棋譜') ||
         line.startsWith('pass1抽出:') ||
         line.startsWith('pass2結果:') ||
         line.startsWith('pass2 best') ||
@@ -196,6 +199,10 @@ async function runCommand(
       const rest = lines.pop() ?? '';
       for (const line of lines) {
         const trimmed = line.trim();
+        if (trimmed) {
+          recentChildLines.push(`[${source}] ${trimmed}`);
+          if (recentChildLines.length > 40) recentChildLines.shift();
+        }
         if (!shouldForwardChildLine(trimmed)) continue;
         appendLog(job, quietKifBatch ? line : `[${source}] ${line}`);
       }
@@ -235,6 +242,12 @@ async function runCommand(
       if (code === 0) {
         resolve();
         return;
+      }
+      if (quietKifBatch && recentChildLines.length > 0) {
+        appendLog(job, '[child recent output]');
+        for (const line of recentChildLines.slice(-20)) {
+          appendLog(job, line);
+        }
       }
       reject(new Error(`command failed: ${cmd} ${args.join(' ')} (code=${code}, signal=${signal ?? 'none'})`));
     });
@@ -283,10 +296,8 @@ async function runKifsJob(job: JobRecord, settings: ReturnType<typeof parseKifsJ
 async function executeJob(job: JobRecord, input: JobInput): Promise<void> {
   job.status = 'running';
   job.startedAt = new Date().toISOString();
-  if (job.kind !== 'kifs') {
-    appendLog(job, `[job] started (${job.kind})`);
-    appendLog(job, `[job] host hostname=${os.hostname()} platform=${process.platform} pid=${process.pid} cwd=${process.cwd()}`);
-  }
+  appendLog(job, `[job] started (${job.kind})`);
+  appendLog(job, `[job] host hostname=${os.hostname()} platform=${process.platform} pid=${process.pid} cwd=${process.cwd()}`);
 
   try {
     if (input.kind === 'book') {
@@ -300,9 +311,7 @@ async function executeJob(job: JobRecord, input: JobInput): Promise<void> {
     if (!isCancelled(job)) {
       job.status = 'completed';
       setStep(job, '完了');
-      if (job.kind !== 'kifs') {
-        appendLog(job, '[job] completed');
-      }
+      appendLog(job, '[job] completed');
     }
   } catch (error: any) {
     if (isCancelled(job)) {
