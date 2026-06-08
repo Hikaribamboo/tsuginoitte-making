@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "cross-env ENABLE_SHOGI_ENGINE=1 PORT=8765 tsx watch --no-cache src/index.ts",
     "start": "cross-env ENABLE_SHOGI_ENGINE=1 PORT=8765 tsx --no-cache src/index.ts",
+    "start:macbook": "tsx --no-cache src/startMacbook.ts",
+    "dev:macbook": "tsx watch --no-cache src/startMacbook.ts",
     "dev:windows-tailscale": "cross-env ENABLE_SHOGI_ENGINE=1 PORT=8765 AMTS_ENGINE_THREADS=4 AMTS_ENGINE_HASH_MB=1024 AMTS_ENGINE_OWN_BOOK=false FV_SCALE=40 AMTS_FINALIZE_DEPTH=24 tsx watch --no-cache src/index.ts",
     "start:windows-tailscale": "cross-env ENABLE_SHOGI_ENGINE=1 PORT=8765 AMTS_ENGINE_THREADS=4 AMTS_ENGINE_HASH_MB=1024 AMTS_ENGINE_OWN_BOOK=false FV_SCALE=40 AMTS_FINALIZE_DEPTH=24 tsx --no-cache src/index.ts",
     "kif-problem:batch": "tsx --no-cache src/features/kif-problem-generation/tools/batchGenerate.ts",

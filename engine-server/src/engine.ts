@@ -109,7 +109,9 @@ export class ShogiEngine {
         path.join(path.dirname(this.enginePath), 'eval'),
         path.join(root, 'engines', 'eval'),
       ];
-      this.evalDir = candidateEvalDirs.find((dir) => existsSync(dir)) ?? '';
+      this.evalDir = candidateEvalDirs.find((dir) => existsSync(path.join(dir, 'nn.bin')))
+        ?? candidateEvalDirs.find((dir) => existsSync(dir))
+        ?? '';
     }
 
     console.log(
@@ -500,6 +502,9 @@ export class ShogiEngine {
     this.send(`setoption name PvInterval value ${tuning.pvIntervalMs}`);
     this.setOptionIfSupported('USI_OwnBook', tuning.ownBook ? 'true' : 'false');
     this.setOptionIfSupported('Cores', String(tuning.cores));
+    for (const [name, value] of ShogiEngine.envUsiOptions('AMTS_ENGINE_USI_OPTIONS')) {
+      this.setOptionIfSupported(name, value);
+    }
     this.send(`setoption name MultiPV value ${tuning.multipv}`);
     await this.sendAndWait('isready', 'readyok');
     this.tuning = { ...tuning };
@@ -520,6 +525,22 @@ export class ShogiEngine {
     if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
     if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
     return fallback;
+  }
+
+  private static envUsiOptions(name: string): Array<[string, string]> {
+    const raw = process.env[name];
+    if (!raw || !raw.trim()) return [];
+    return raw
+      .split(/[;\n]/)
+      .map((entry): [string, string] | null => {
+        const index = entry.indexOf('=');
+        if (index <= 0) return null;
+        const optionName = entry.slice(0, index).trim();
+        const optionValue = entry.slice(index + 1).trim();
+        if (!optionName || !optionValue) return null;
+        return [optionName, optionValue];
+      })
+      .filter((entry): entry is [string, string] => Boolean(entry));
   }
 
   private setOptionIfSupported(name: string, value: string): void {

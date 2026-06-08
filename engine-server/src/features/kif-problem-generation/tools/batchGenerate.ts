@@ -41,7 +41,9 @@ function resolveEngineEvalDir(enginePath: string): string {
     path.join(path.dirname(enginePath), 'eval'),
     path.join(path.dirname(enginePath), '..', 'eval'),
   ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+  return candidates.find((candidate) => existsSync(path.join(candidate, 'nn.bin')))
+    ?? candidates.find((candidate) => existsSync(candidate))
+    ?? candidates[0];
 }
 
 export async function main() {
