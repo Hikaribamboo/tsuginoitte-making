@@ -147,6 +147,7 @@ function formatPass2LogItem(item: Pass2LogItem): string {
     `pass2 row${item.t + 1}`,
     item.status,
     `depth${item.depth}`,
+    `turn=${item.turnAtS}`,
     `best=${item.best ? formatMoveEval(item.best, item.turnAtS) : "-"}`,
     `actual=${item.actual ? formatMoveEval(item.actual, item.turnAtS) : "-"}${actualLossText}`,
     `wrong=${item.wrong ? formatMoveEval(item.wrong, item.turnAtS) : "-"}${wrongLossText}`,
@@ -454,9 +455,9 @@ export async function scanGame(args: {
     } else {
       const userCp = computeUserCpFromGathered({ gathered, questionTurn: turnAtS });
       if (userCp != null && rejectIfBestTooBadCp != null && userCp < -rejectIfBestTooBadCp) {
-        giveUpReason = `ユーザー不利 userCp ${userCp} 下限 ${rejectIfBestTooBadCp}`;
+        giveUpReason = `ユーザー不利 turn=${turnAtS} userCp ${userCp} 下限 ${rejectIfBestTooBadCp}`;
       } else if (userCp != null && rejectIfBestTooGoodCp != null && userCp > rejectIfBestTooGoodCp) {
-        giveUpReason = `ユーザー有利すぎ userCp ${userCp} 上限 ${rejectIfBestTooGoodCp}`;
+        giveUpReason = `ユーザー有利すぎ turn=${turnAtS} userCp ${userCp} 上限 ${rejectIfBestTooGoodCp}`;
       }
     }
 
