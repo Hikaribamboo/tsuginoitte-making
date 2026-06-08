@@ -20,7 +20,6 @@ type AnalyzeResult = {
 
 function parseInfoLine(line: string): PvInfo | null {
   if (!line.startsWith("info ")) return null;
-  if (!line.includes(" pv ")) return null;
   if (!line.includes(" score ")) return null;
 
   const tokens = line.trim().split(/\s+/);
@@ -28,7 +27,7 @@ function parseInfoLine(line: string): PvInfo | null {
   const mpIdx = tokens.indexOf("multipv");
   const scoreIdx = tokens.indexOf("score");
   const pvIdx = tokens.indexOf("pv");
-  if (scoreIdx < 0 || pvIdx < 0) return null;
+  if (scoreIdx < 0) return null;
 
   const multipv = mpIdx >= 0 ? Number(tokens[mpIdx + 1]) : 1;
   if (!Number.isFinite(multipv) || multipv <= 0) return null;
@@ -39,10 +38,18 @@ function parseInfoLine(line: string): PvInfo | null {
 
   if (scoreType !== "cp" && scoreType !== "mate") return null;
 
-  const pv = tokens.slice(pvIdx + 1);
-  if (pv.length === 0) return null;
+  const pv = pvIdx >= 0 ? tokens.slice(pvIdx + 1) : [];
 
   return { multipv, evalType: scoreType, eval: scoreVal, pv };
+}
+
+function withForcedSearchMove(info: PvInfo, moveUsi: string, pvPlies: number): PvInfo {
+  if (info.pv[0] === moveUsi) {
+    return { ...info, pv: info.pv.slice(0, pvPlies) };
+  }
+
+  const continuation = info.pv.length > 0 ? info.pv : [];
+  return { ...info, pv: [moveUsi, ...continuation].slice(0, pvPlies) };
 }
 
 export class UsiEngine {
@@ -158,7 +165,7 @@ export class UsiEngine {
     this.write("isready");
     await this.waitFor((l) => l === "readyok", 30000);
 
-    this.write("ucinewgame");
+    this.write("usinewgame");
     this.write("isready");
     await this.waitFor((l) => l === "readyok", 30000);
   }
@@ -182,6 +189,7 @@ export class UsiEngine {
   }): Promise<AnalyzeResult> {
     const latest: Map<number, PvInfo> = new Map();
     let bestmove: string | null = null;
+    const forcedMove = args.searchMoves?.length === 1 ? args.searchMoves[0] : null;
 
     const end = startTimer();
 
@@ -212,7 +220,13 @@ export class UsiEngine {
           this.onLine = undefined;
           this.clearPending();
 
-          const infos = Array.from(latest.values()).sort((a, b) => a.multipv - b.multipv);
+          const infos = Array.from(latest.values())
+            .map((info) =>
+              forcedMove && (!bestmove || bestmove === forcedMove)
+                ? withForcedSearchMove(info, forcedMove, args.pvPlies)
+                : { ...info, pv: info.pv.slice(0, args.pvPlies) },
+            )
+            .sort((a, b) => a.multipv - b.multipv);
 
           const ms = end();
           const tag = args.label ? `|${args.label}` : "";
