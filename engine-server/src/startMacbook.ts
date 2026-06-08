@@ -67,11 +67,12 @@ async function main() {
   process.env.AMTS_ENGINE_THREADS = process.env.AMTS_ENGINE_THREADS?.trim() || '4';
   process.env.AMTS_ENGINE_HASH_MB = process.env.AMTS_ENGINE_HASH_MB?.trim() || '1024';
   process.env.AMTS_ENGINE_OWN_BOOK = process.env.AMTS_ENGINE_OWN_BOOK?.trim() || 'false';
+  process.env.AMTS_ENGINE_FV_SCALE = process.env.AMTS_ENGINE_FV_SCALE?.trim() || '18';
   process.env.FV_SCALE = process.env.FV_SCALE?.trim() || '40';
   process.env.AMTS_FINALIZE_DEPTH = process.env.AMTS_FINALIZE_DEPTH?.trim() || '24';
   process.env.AMTS_ENGINE_USI_OPTIONS = process.env.AMTS_ENGINE_USI_OPTIONS?.trim()
     || [
-      'FV_SCALE=40',
+      `FV_SCALE=${process.env.AMTS_ENGINE_FV_SCALE}`,
       'ConsiderationMode=false',
       'OutputFailLHPV=false',
       'DrawValueBlack=0',

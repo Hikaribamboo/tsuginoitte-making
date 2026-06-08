@@ -885,7 +885,6 @@ const PasteProblemCreator: React.FC = () => {
               Stochastic_Ponder: false,
               DepthLimit: 0,
               NodesLimit: 0,
-              FV_SCALE: 40,
               USI_AnalyseMode: true,
               USI_OwnBook: false,
             },

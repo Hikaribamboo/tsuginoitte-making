@@ -154,7 +154,7 @@ export class UsiEngine {
     this.write("setoption name Stochastic_Ponder value false");
     this.write("setoption name DepthLimit value 0");
     this.write("setoption name NodesLimit value 0");
-    this.write(`setoption name FV_SCALE value ${process.env.FV_SCALE?.trim() || "40"}`);
+    this.write(`setoption name FV_SCALE value ${process.env.AMTS_ENGINE_FV_SCALE?.trim() || process.env.FV_SCALE?.trim() || "40"}`);
     this.write(`setoption name USI_AnalyseMode value true`);
 
     if (args.disableBook) this.write("setoption name USI_OwnBook value false");

@@ -272,7 +272,6 @@ const MakingEngineCreator: React.FC = () => {
           DepthLimit: 0,
           NodesLimit: 0,
           USI_OwnBook: false,
-          FV_SCALE: 40,
         },
       });
       setTestResult(result);
