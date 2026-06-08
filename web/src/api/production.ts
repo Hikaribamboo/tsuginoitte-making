@@ -270,6 +270,82 @@ export async function listProductionChoicesByProblemIds(
   return [...nextMoveChoices, ...josekiChoices];
 }
 
+export interface DailyProblemCreationCount {
+  date: string;
+  nextMoveCount: number;
+  josekiCount: number;
+}
+
+type CreatedAtRow = {
+  id: number;
+  created_at: string;
+};
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addLocalDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function localDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function countRowsByLocalDate(rows: CreatedAtRow[], counts: Map<string, number>): void {
+  for (const row of rows) {
+    const key = localDateKey(new Date(row.created_at));
+    if (!counts.has(key)) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+}
+
+export async function listDailyProblemCreationCounts(days = 20): Promise<DailyProblemCreationCount[]> {
+  const normalizedDays = Math.max(1, Math.floor(days));
+  const today = startOfLocalDay(new Date());
+  const start = addLocalDays(today, -(normalizedDays - 1));
+
+  const keys = Array.from({ length: normalizedDays }, (_, index) => localDateKey(addLocalDays(start, index)));
+  const nextMoveCounts = new Map(keys.map((key) => [key, 0]));
+  const josekiCounts = new Map(keys.map((key) => [key, 0]));
+
+  const [nextMoveResult, josekiResult] = await Promise.all([
+    supabase
+      .from('next_move_problems')
+      .select('id, created_at')
+      .gte('created_at', start.toISOString())
+      .order('created_at', { ascending: true })
+      .range(0, 9999),
+    supabase
+      .from('problems')
+      .select('id, created_at')
+      .eq('mode', 'joseki')
+      .gte('created_at', start.toISOString())
+      .order('created_at', { ascending: true })
+      .range(0, 9999),
+  ]);
+
+  if (nextMoveResult.error) throw nextMoveResult.error;
+  if (josekiResult.error) throw josekiResult.error;
+
+  countRowsByLocalDate((nextMoveResult.data ?? []) as CreatedAtRow[], nextMoveCounts);
+  countRowsByLocalDate((josekiResult.data ?? []) as CreatedAtRow[], josekiCounts);
+
+  return keys
+    .map((date) => ({
+      date,
+      nextMoveCount: nextMoveCounts.get(date) ?? 0,
+      josekiCount: josekiCounts.get(date) ?? 0,
+    }))
+    .reverse();
+}
+
 export async function getProductionProblemById(
   problemId: number,
   mode: ProductionProblemMode,
