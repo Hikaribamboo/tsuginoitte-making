@@ -62,6 +62,17 @@ const EMPTY_CHOICE: ChoiceDraft = {
   eval_percent: null,
 };
 
+function getSlotDisplayName(slot: SlotKey): string {
+  switch (slot) {
+    case "correct":
+      return "正解手";
+    case "incorrect1":
+      return "不正解手1";
+    case "incorrect2":
+      return "不正解手2";
+  }
+}
+
 const ProblemCreator: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -151,6 +162,7 @@ const ProblemCreator: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [showPreview, setShowPreview] = useState(false);
+  const [saveErrorMessages, setSaveErrorMessages] = useState<string[]>([]);
   const [analysisMode, setAnalysisMode] = useState(true);
   const [promotionChoice, setPromotionChoice] = useState<{
     fromSq: string;
@@ -668,6 +680,62 @@ const ProblemCreator: React.FC = () => {
     return w;
   };
 
+  const validateBeforeSave = (): string[] => {
+    const errors: string[] = [];
+
+    if (!rootSfen) errors.push("局面（root_sfen）が未設定です");
+
+    const slotOrder: SlotKey[] = ["correct", "incorrect1", "incorrect2"];
+    const choicePercentValues: Record<SlotKey, number | null> = {
+      correct: choices.correct.eval_percent,
+      incorrect1: choices.incorrect1.eval_percent,
+      incorrect2: choices.incorrect2.eval_percent,
+    };
+
+    slotOrder.forEach((slot) => {
+      const choice = choices[slot];
+      if (!choice.usi) return;
+
+      if (choice.eval_cp === null) {
+        errors.push(`${getSlotDisplayName(slot)}のeval_cpが未入力です`);
+        return;
+      }
+
+      if (choice.eval_percent === null) {
+        errors.push(`${getSlotDisplayName(slot)}のeval_percentが未入力です`);
+        return;
+      }
+
+      const expectedPercent = cpToWinRatePercentFromRootSfen({
+        cp: choice.eval_cp,
+        rootSfen,
+      });
+      if (choice.eval_percent !== expectedPercent) {
+        errors.push(
+          `${getSlotDisplayName(slot)}のeval_percentがeval_cpと一致していません（期待値: ${expectedPercent}%）`,
+        );
+      }
+    });
+
+    if (
+      choices.correct.usi &&
+      choicePercentValues.correct !== null &&
+      choicePercentValues.incorrect1 !== null &&
+      choicePercentValues.incorrect2 !== null
+    ) {
+      const correctPercent = choicePercentValues.correct;
+      const otherPercents = [
+        choicePercentValues.incorrect1,
+        choicePercentValues.incorrect2,
+      ] as number[];
+      if (!otherPercents.every((percent) => correctPercent > percent)) {
+        errors.push("正解手のeval_percentが他の候補手より最も高くありません");
+      }
+    }
+
+    return errors;
+  };
+
   const handleSaveDraft = async () => {
     if (!favoriteId) {
       setMessage("作問スタジオから開始した局面のみ途中保存できます");
@@ -704,11 +772,13 @@ const ProblemCreator: React.FC = () => {
   // ---- Save ----
 
   const handleSave = async () => {
-    const errors = validate();
+    const errors = [...validate(), ...validateBeforeSave()];
     if (errors.length > 0) {
-      setMessage(errors.join("\n"));
+      setSaveErrorMessages(errors);
       return;
     }
+
+    setSaveErrorMessages([]);
 
     const warns = warnings();
     if (warns.length > 0) {
@@ -1122,6 +1192,43 @@ const ProblemCreator: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {saveErrorMessages.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setSaveErrorMessages([])}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-[700px] max-h-[80vh] flex flex-col mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-red-700">
+                保存できませんでした
+              </h3>
+              <button
+                type="button"
+                className="text-gray-400 hover:text-gray-600 border-0 bg-transparent text-xl leading-none px-2 py-0.5"
+                onClick={() => setSaveErrorMessages([])}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="bg-red-50 border border-red-200 rounded p-3 overflow-auto flex-1">
+              <ul className="list-disc pl-5 space-y-1 text-sm text-red-800">
+                {saveErrorMessages.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+              <button type="button" onClick={() => setSaveErrorMessages([])}>
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPreview && (
         <div
