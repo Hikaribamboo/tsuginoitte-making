@@ -7,6 +7,7 @@ import PasteIntroMoveCard from '../components/PasteIntroMoveCard';
 import KeyboardModal from '../components/KeyboardModal';
 import ReadingLineModal from '../components/ReadingLineModal';
 import MobileExplanationEditor from '../components/MobileExplanationEditor';
+import PositionEditor from '../components/PositionEditor';
 import TagSelector from '../components/TagSelector';
 import AnalysisPanel from '../components/AnalysisPanel';
 import type { BestMove } from '../components/AnalysisPanel';
@@ -254,6 +255,7 @@ const PasteProblemCreator: React.FC = () => {
   const [evalQueue, setEvalQueue] = useState<SlotKey[]>([]);
   const [mobileReplayStep, setMobileReplayStep] = useState(0);
   const [mobileExplanationMode, setMobileExplanationMode] = useState(false);
+  const [isPositionEditing, setIsPositionEditing] = useState(false);
 
   const explanationInputRefs = React.useRef<Record<SlotKey, HTMLTextAreaElement | null>>({
     correct: null,
@@ -1057,6 +1059,12 @@ const PasteProblemCreator: React.FC = () => {
     setSelectedHandPiece(null);
     setPromotionChoice(null);
   }, [setIntroDestinationBoth]);
+
+  const handleRootSfenChange = useCallback((nextRootSfen: string) => {
+    setRootSfen(nextRootSfen);
+    // A manually edited position can no longer be reconstructed from the source KIF.
+    setKifMoves([]);
+  }, []);
 
   const handleActivateChoiceSlot = useCallback((slot: SlotKey) => {
     setActiveSlot((prev) => (prev === slot ? null : slot));
@@ -2108,6 +2116,25 @@ const PasteProblemCreator: React.FC = () => {
                 />
               </label>
               {introMoveError && <div className="text-[11px] text-rose-700">{introMoveError}</div>}
+              <label>
+                root_sfen
+                <textarea
+                  value={rootSfen}
+                  onChange={(event) => handleRootSfenChange(event.target.value)}
+                  className="font-mono"
+                  rows={3}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsPositionEditing((current) => !current)}
+                disabled={!rootSfen}
+              >
+                {isPositionEditing ? '局面編集を閉じる' : '局面を編集'}
+              </button>
+              {isPositionEditing && (
+                <PositionEditor rootSfen={rootSfen} onChange={handleRootSfenChange} />
+              )}
               <TagSelector selected={tags} onChange={setTags} defaultExpanded />
             </div>
           </details>
@@ -2188,21 +2215,43 @@ const PasteProblemCreator: React.FC = () => {
           <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-sky-200/80 bg-white/75 p-3 shadow-sm backdrop-blur-sm xl:row-span-2">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="text-sm font-semibold text-slate-900">盤面</div>
-              {parsed && (
-                <div className="flex flex-wrap items-center justify-end gap-1.5 text-[11px] text-slate-500">
-                  <span className="rounded-full bg-sky-50 px-2 py-[2px] text-sky-700 ring-1 ring-sky-200">
-                    {parsed.sideToMove === 'sente' ? '☗先手' : '☖後手'}
-                  </span>
-                  {rootEvalCp !== null && (
-                    <span className="rounded-full bg-white/80 px-2 py-[2px] ring-1 ring-sky-100">
-                      {rootEvalCp}cp ({rootEvalPercent}%)
+              <div className="flex flex-wrap items-center justify-end gap-1.5 text-[11px] text-slate-500">
+                {parsed && (
+                  <>
+                    <span className="rounded-full bg-sky-50 px-2 py-[2px] text-sky-700 ring-1 ring-sky-200">
+                      {parsed.sideToMove === 'sente' ? '☗先手' : '☖後手'}
                     </span>
-                  )}
-                </div>
-              )}
+                    {rootEvalCp !== null && (
+                      <span className="rounded-full bg-white/80 px-2 py-[2px] ring-1 ring-sky-100">
+                        {rootEvalCp}cp ({rootEvalPercent}%)
+                      </span>
+                    )}
+                  </>
+                )}
+                <button
+                  type="button"
+                  className={`h-7 rounded-lg px-2.5 text-[11px] font-semibold ${
+                    isPositionEditing
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      : 'border-sky-200 bg-white text-sky-700 hover:bg-sky-50'
+                  }`}
+                  onClick={() => {
+                    clearBoardSelection();
+                    setIntroMoveActive(false);
+                    setActiveSlot(null);
+                    setAnalysisMode(false);
+                    setIsPositionEditing((current) => !current);
+                  }}
+                  disabled={!rootSfen}
+                >
+                  {isPositionEditing ? '編集を終了' : '局面を編集'}
+                </button>
+              </div>
             </div>
             <div className="min-h-0 overflow-y-auto pr-1">
-              {parsed ? (
+              {isPositionEditing ? (
+                <PositionEditor rootSfen={rootSfen} onChange={handleRootSfenChange} />
+              ) : parsed ? (
                 <div className="flex justify-center rounded-lg border border-sky-100 bg-sky-50/50 py-3">
                   <div
                     className="shrink-0 overflow-hidden"
@@ -2231,7 +2280,7 @@ const PasteProblemCreator: React.FC = () => {
                 </div>
               )}
 
-              {parsed && (
+              {parsed && !isPositionEditing && (
                 <div className="mt-2 rounded-lg border border-sky-100 bg-white/85 px-2.5 py-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <button
@@ -2317,7 +2366,7 @@ const PasteProblemCreator: React.FC = () => {
                 </div>
               )}
 
-              {parsed && (selectedHandPiece || promotionChoice) && (
+              {parsed && !isPositionEditing && (selectedHandPiece || promotionChoice) && (
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
                   {selectedHandPiece && (
                     <span className="rounded-full bg-sky-100 px-2 py-1 font-semibold text-sky-700">
@@ -2388,51 +2437,55 @@ const PasteProblemCreator: React.FC = () => {
               </div>
             </div>
           </section>
+            <div className="rounded-xl border border-sky-200/80 bg-white/75 px-3 py-2 shadow-sm backdrop-blur-sm xl:col-span-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px]">
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 font-semibold uppercase text-slate-500">
+                      root_sfen
+                    </span>
 
-          <div className="rounded-xl border border-sky-200/80 bg-white/75 px-3 py-1.5 shadow-sm backdrop-blur-sm xl:col-span-2">
-            <div className="flex flex-col gap-1.5 text-[11px] xl:flex-row xl:items-center">
-              <div className="flex shrink-0 items-center gap-2">
-                <span className="shrink-0 font-semibold uppercase text-slate-500">
-                  root_sfen
-                </span>
-                <button
-                  type="button"
-                  className="h-7 rounded-lg border-sky-200 bg-sky-50 px-3 text-[11px] font-semibold text-sky-700 hover:bg-sky-100"
-                  onClick={() => copyTextToClipboard(saveRootAndIntro.rootSfenForSave, 'root_sfen')}
-                >
-                  コピー
-                </button>
-              </div>
-              <div className="flex min-w-0 items-center gap-2 xl:w-[430px]">
-                <span className="shrink-0 font-semibold uppercase text-slate-500">
-                  intro_moves
-                </span>
-                <input
-                  readOnly
-                  value={introMovesLabelText}
-                  className="h-7 min-w-0 flex-1 rounded-lg border-sky-200 bg-white/80 font-mono text-[11px]"
-                />
-                <button
-                  type="button"
-                  className="h-7 rounded-lg border-sky-200 bg-sky-50 px-3 text-[11px] font-semibold text-sky-700 hover:bg-sky-100"
-                  onClick={() => copyTextToClipboard(introMovesLabelText, 'intro_moves_usi')}
-                >
-                  コピー
-                </button>
-              </div>
-              <div className="min-w-0 xl:ml-auto xl:w-[430px]">
-                <PasteIntroMoveCard
-                  draftUsi={introMoveUsi}
-                  draftLabel={introMoveUsi && searchParsed ? usiToLabel(introMoveUsi, searchParsed.board, searchParsed.sideToMove) : ''}
-                  isActive={introMoveActive}
-                  compact
-                  error={introMoveError}
-                  onActivate={handleActivateIntroMove}
-                  onClear={handleClearIntroMove}
-                />
+                    <button
+                      type="button"
+                      className="h-7 shrink-0 rounded-lg border border-sky-200 bg-sky-50 px-3 text-[11px] font-semibold text-sky-700 hover:bg-sky-100"
+                      onClick={() => copyTextToClipboard(rootSfen, 'root_sfen')}
+                    >
+                      コピー
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 font-semibold uppercase text-slate-500">
+                      intro_moves
+                    </span>
+
+                    <button
+                      type="button"
+                      className="h-7 shrink-0 rounded-lg border border-sky-200 bg-sky-50 px-3 text-[11px] font-semibold text-sky-700 hover:bg-sky-100"
+                      onClick={() => copyTextToClipboard(introMovesLabelText, 'intro_moves_usi')}
+                    >
+                      コピー
+                    </button>
+                  </div>
+                </div>
+
+                <div className="min-w-[360px] max-w-[430px] flex-1 xl:ml-auto">
+                  <PasteIntroMoveCard
+                    draftUsi={introMoveUsi}
+                    draftLabel={
+                      introMoveUsi && searchParsed
+                        ? usiToLabel(introMoveUsi, searchParsed.board, searchParsed.sideToMove)
+                        : ''
+                    }
+                    isActive={introMoveActive}
+                    compact
+                    error={introMoveError}
+                    onActivate={handleActivateIntroMove}
+                    onClear={handleClearIntroMove}
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
           <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-sky-200/80 bg-white/75 p-3 shadow-sm backdrop-blur-sm">
             <div className="mb-2 flex items-center justify-between gap-2">
