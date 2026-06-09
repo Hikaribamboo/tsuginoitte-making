@@ -1,5 +1,5 @@
 // src/problem/problemBuilder.ts
-import { cpToWinRatePercentFromRootSfen } from "../evaluation/cpToWinRate";
+import { cpToWinRatePercent } from "../evaluation/cpToWinRate";
 import type { EngineClient, PvInfo } from "../../../services/engine/engineClient";
 import type { ScanResult } from "../types";
 import { buildStateAtSForLabel } from "./buildStateAtSForLabel";
@@ -257,9 +257,9 @@ export async function buildProblemOutFromScan(args: {
     {
       usi: u0,
       evalCp: best.eval,
-      evalPercent: cpToWinRatePercentFromRootSfen({
+      evalPercent: cpToWinRatePercent({
         cp: best.eval,
-        rootSfen,
+        userColor: questionTurn,
       }),
       line: bestLine,
       isCorrect: true,
@@ -267,9 +267,9 @@ export async function buildProblemOutFromScan(args: {
     {
       usi: u1,
       evalCp: wrong1.eval,
-      evalPercent: cpToWinRatePercentFromRootSfen({
+      evalPercent: cpToWinRatePercent({
         cp: wrong1.eval,
-        rootSfen,
+        userColor: questionTurn,
       }),
       line: wrong1Line,
       isCorrect: false,
@@ -277,9 +277,9 @@ export async function buildProblemOutFromScan(args: {
     {
       usi: u2,
       evalCp: wrong2.eval,
-      evalPercent: cpToWinRatePercentFromRootSfen({
+      evalPercent: cpToWinRatePercent({
         cp: wrong2.eval,
-        rootSfen,
+        userColor: questionTurn,
       }),
       line: wrong2Line,
       isCorrect: false,
@@ -301,9 +301,9 @@ export async function buildProblemOutFromScan(args: {
     line: c.line,
   }));
 
-  const rootEvalPercent = cpToWinRatePercentFromRootSfen({
+  const rootEvalPercent = cpToWinRatePercent({
     cp: rootEvalCp,
-    rootSfen,
+    userColor: questionTurn,
   });
 
   const diffWrong1 = lossFromBestCp({
