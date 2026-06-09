@@ -47,6 +47,13 @@ function mapUnifiedJobToLegacyInput(input: UnifiedJobInput): unknown {
 
 export function createEngineApp(engine: ShogiEngine): Express {
   const app = express();
+  let engineOperationQueue: Promise<void> = Promise.resolve();
+  const enqueueEngineOperation = <T>(operation: () => Promise<T> | T): Promise<T> => {
+    const result = engineOperationQueue.then(operation, operation);
+    engineOperationQueue = result.then(() => undefined, () => undefined);
+    return result;
+  };
+
   app.use(cors());
   app.use(express.json({ limit: '12mb' }));
 
@@ -156,15 +163,17 @@ export function createEngineApp(engine: ShogiEngine): Express {
         return;
       }
 
-      const result = await engine.evaluate(sfen, moves, {
-        depth,
-        nodes,
-        stable,
-        searchMoves,
-        multipv,
-        newGame,
-        usiOptions,
-      });
+      const result = await enqueueEngineOperation(() =>
+        engine.evaluate(sfen, moves, {
+          depth,
+          nodes,
+          stable,
+          searchMoves,
+          multipv,
+          newGame,
+          usiOptions,
+        }),
+      );
       res.json(result);
     } catch (error: any) {
       console.error('Evaluate error:', error);
@@ -208,10 +217,12 @@ export function createEngineApp(engine: ShogiEngine): Express {
     req.on('close', closeHandler);
 
     try {
-      if (!engine.isReady?.()) {
-        await engine.start();
-      }
-      engine.startAnalysis(sfen, [], Number.isFinite(multipv) ? multipv : 3);
+      await enqueueEngineOperation(async () => {
+        if (!engine.isReady?.()) {
+          await engine.start();
+        }
+        await engine.startAnalysis(sfen, [], Number.isFinite(multipv) ? multipv : 3);
+      });
     } catch (error: any) {
       send({ error: error?.message ?? 'failed to start analysis' });
       closeHandler();
@@ -220,7 +231,7 @@ export function createEngineApp(engine: ShogiEngine): Express {
 
   app.post('/api/analyze/stop', async (_req, res) => {
     try {
-      await engine.stopAnalysis();
+      await enqueueEngineOperation(() => engine.stopAnalysis());
       res.json({ status: 'stopped' });
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? 'failed to stop analysis' });

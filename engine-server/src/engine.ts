@@ -366,27 +366,22 @@ export class ShogiEngine {
       }, timeoutMs);
 
       this.analysisEmitter.on('info', infoHandler);
-      try {
-        this.startAnalysis(sfen, moves, tuning.multipv);
-      } catch {
+      void this.startAnalysis(sfen, moves, tuning.multipv).catch(() => {
         void finalize(false);
-      }
+      });
     });
   }
 
   /** Start infinite analysis (streaming MultiPV). Emits 'info' events. */
-  startAnalysis(sfen: string, moves: string[] = [], multipv = this.tuning.multipv): void {
+  async startAnalysis(sfen: string, moves: string[] = [], multipv = this.tuning.multipv): Promise<void> {
     if (!this.ready) throw new Error('Engine not ready');
 
-    // Stop any previous analysis first (synchronously send stop)
     if (this.analyzing) {
-      this.send('stop');
-      this.analyzing = false;
+      await this.stopAnalysis();
     }
 
     this.send(`setoption name MultiPV value ${multipv}`);
-    // Need isready after setoption
-    this.send('isready');
+    await this.sendAndWait('isready', 'readyok');
 
     let posCmd = `position sfen ${sfen}`;
     if (moves.length > 0) {
@@ -399,22 +394,24 @@ export class ShogiEngine {
 
   async stopAnalysis(): Promise<void> {
     if (!this.analyzing) return;
-    this.send('stop');
-    this.analyzing = false;
-    // Wait for bestmove to fully stop
     await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        this.analysisEmitter.removeListener('rawline', handler);
+        resolve();
+      };
       const handler = (line: string) => {
         if (line.startsWith('bestmove')) {
-          this.analysisEmitter.removeListener('rawline', handler);
-          resolve();
+          finish();
         }
       };
       this.analysisEmitter.on('rawline', handler);
-      // Timeout safety
-      setTimeout(() => {
-        this.analysisEmitter.removeListener('rawline', handler);
-        resolve();
-      }, 2000);
+      const timeoutId = setTimeout(finish, 5000);
+      this.send('stop');
+      this.analyzing = false;
     });
   }
 
@@ -445,7 +442,26 @@ export class ShogiEngine {
 
   private sendAndWait(command: string, terminator: string): Promise<string[]> {
     return new Promise((resolve, reject) => {
-      this.resolveQueue.push({ resolve, reject, terminator });
+      const timeoutMs = ShogiEngine.envInt('AMTS_ENGINE_WAIT_TIMEOUT_MS', 180000, 1000, 1800000);
+      let timeoutId: NodeJS.Timeout;
+      const waiter = {
+        resolve: (lines: string[]) => {
+          clearTimeout(timeoutId);
+          resolve(lines);
+        },
+        reject: (error: Error) => {
+          clearTimeout(timeoutId);
+          reject(error);
+        },
+        terminator,
+      };
+      timeoutId = setTimeout(() => {
+        const index = this.resolveQueue.indexOf(waiter);
+        if (index >= 0) this.resolveQueue.splice(index, 1);
+        this.collectedLines = [];
+        reject(new Error(`Engine timeout waiting for ${terminator} after command: ${command}`));
+      }, timeoutMs);
+      this.resolveQueue.push(waiter);
       this.send(command);
     });
   }
