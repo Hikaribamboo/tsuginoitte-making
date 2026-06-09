@@ -6,10 +6,13 @@ const FINALIZE_DEPTH = envInt("AMTS_FINALIZE_DEPTH", 26, 26, 80);
 export const config = {
   scan: {
     // 作問候補を探す最初の解析で使う探索深さ
-    depth: envInt("AMTS_SCAN_DEPTH", 12, 1, 50),
+    depth: 16,
 
     // 最初の解析で取得する候補手数
     multipv: 1,
+
+    // 最初の解析で作問候補として抽出する評価値差
+    minDiff: 200,
 
     // 最初の解析結果をすべてログ出力するか
     debugAllPass1: envBool("AMTS_DEBUG_PASS1_ALL", false),
@@ -22,8 +25,8 @@ export const config = {
     // 保存する読み筋の最大手数
     pvPlies: 9,
 
-    // 実戦手を悪手候補と判定する評価値差
-    blunderThresholdCp: 200,
+    // 最終解析で実戦手と不正解手に必要な評価値差
+    minDiff: envInt("AMTS_FINALIZE_MIN_DIFF", 200, 1, 10000),
 
     // 同じ棋譜から作る問題同士に必要な最小手数差
     minCandidateGapPlies: 10,
@@ -34,12 +37,6 @@ export const config = {
     // ユーザー側が有利すぎる問題を除外する評価値
     rejectIfBestTooGoodCp: 2400,
   },
-
-  // 不自然な評価値変化として扱う最小差
-  suspiciousMinDiff: envInt("AMTS_SUSPICIOUS_MIN_DIFF", 140, 1, 10000),
-
-  // 不自然な評価値変化として扱う最大差
-  suspiciousMaxDiff: envInt("AMTS_SUSPICIOUS_MAX_DIFF", 1200, 1, 10000),
 
   // 一局から検査する作問候補の最大数
   maxCandidates: envInt("AMTS_MAX_CANDIDATES", 20, 1, 300),

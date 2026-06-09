@@ -10,10 +10,8 @@ export type KifProblemSettings = {
   batchSize?: number | null;
   maxProblemsPerGame?: number | null;
   maxScanResultsPerGame?: number | null;
-  scanDepth?: number | null;
   finalizeDepth?: number | null;
-  suspiciousMinDiff?: number | null;
-  suspiciousMaxDiff?: number | null;
+  minDiff?: number | null;
   maxDiff?: number | null;
   randomSeed?: number | null;
   generateRunName?: string | null;
@@ -72,10 +70,8 @@ export async function runKifProblemJob(args: KifProblemJobArgs): Promise<KifProb
   if (settings.batchSize != null) env.AMTS_BATCH_SIZE = String(settings.batchSize);
   if (settings.maxProblemsPerGame != null) env.AMTS_MAX_PROBLEMS_PER_GAME = String(settings.maxProblemsPerGame);
   if (settings.maxScanResultsPerGame != null) env.AMTS_MAX_SCAN_RESULTS_PER_GAME = String(settings.maxScanResultsPerGame);
-  if (settings.scanDepth != null) env.AMTS_SCAN_DEPTH = String(settings.scanDepth);
   if (settings.finalizeDepth != null) env.AMTS_FINALIZE_DEPTH = String(settings.finalizeDepth);
-  if (settings.suspiciousMinDiff != null) env.AMTS_SUSPICIOUS_MIN_DIFF = String(settings.suspiciousMinDiff);
-  if (settings.suspiciousMaxDiff != null) env.AMTS_SUSPICIOUS_MAX_DIFF = String(settings.suspiciousMaxDiff);
+  if (settings.minDiff != null) env.AMTS_FINALIZE_MIN_DIFF = String(settings.minDiff);
   if (settings.generateRunName) env.AMTS_SP_RUN_NAME = settings.generateRunName;
   if (settings.gamesPerBasePosition != null) env.AMTS_SP_GAMES_PER_BASE_POSITION = String(settings.gamesPerBasePosition);
   if (settings.totalGames != null) env.AMTS_SP_TOTAL_GAMES = String(settings.totalGames);

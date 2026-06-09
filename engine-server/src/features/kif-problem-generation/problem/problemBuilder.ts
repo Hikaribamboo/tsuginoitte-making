@@ -162,7 +162,7 @@ export async function buildProblemOutFromScan(args: {
   problemId: number;
   createdAt: string;
   prompt: string;
-  blunderThreshold: number;
+  minDiff: number;
   shuffleSeed: number;
   rootEvalDepth?: number;
   rootEvalPvPlies?: number;
@@ -174,7 +174,7 @@ export async function buildProblemOutFromScan(args: {
     problemId,
     createdAt,
     prompt,
-    blunderThreshold,
+    minDiff,
     shuffleSeed,
     rootEvalDepth = 18,
     rootEvalPvPlies = 2,
@@ -220,7 +220,7 @@ export async function buildProblemOutFromScan(args: {
   const wrong2 = pickWrong2Strict({
     cpInfos,
     bestEval,
-    threshold: blunderThreshold,
+    threshold: minDiff,
     preferMax: 800,
     exclude: new Set<string>([correctUsi, wrong1.pv[0]]),
     questionTurn,

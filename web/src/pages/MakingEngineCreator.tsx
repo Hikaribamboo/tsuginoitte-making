@@ -53,10 +53,8 @@ type KifsFormState = {
   batchSize: string;
   maxProblemsPerGame: string;
   maxScanResultsPerGame: string;
-  scanDepth: string;
   finalizeDepth: string;
-  suspiciousMinDiff: string;
-  suspiciousMaxDiff: string;
+  minDiff: string;
 };
 
 type GeneratedDraftProblemRow = {
@@ -111,10 +109,8 @@ const DEFAULT_KIFS_FORM: KifsFormState = {
   batchSize: '10',
   maxProblemsPerGame: '3',
   maxScanResultsPerGame: '12',
-  scanDepth: '16',
   finalizeDepth: '26',
-  suspiciousMinDiff: '300',
-  suspiciousMaxDiff: '1600',
+  minDiff: '200',
 };
 
 const DEFAULT_ENGINE_TEST_SFEN =
@@ -632,10 +628,8 @@ function KifsSettingsForm({
           <FieldInput label="count (claim件数)" value={value.batchSize} onChange={(next) => update('batchSize', next)} />
           <FieldInput label="maxProblemsPerGame" value={value.maxProblemsPerGame} onChange={(next) => update('maxProblemsPerGame', next)} />
           <FieldInput label="maxScanResultsPerGame" value={value.maxScanResultsPerGame} onChange={(next) => update('maxScanResultsPerGame', next)} />
-          <FieldInput label="scanDepth" value={value.scanDepth} onChange={(next) => update('scanDepth', next)} />
           <FieldInput label="finalizeDepth" value={value.finalizeDepth} onChange={(next) => update('finalizeDepth', next)} />
-          <FieldInput label="suspiciousMinDiff" value={value.suspiciousMinDiff} onChange={(next) => update('suspiciousMinDiff', next)} />
-          <FieldInput label="suspiciousMaxDiff" value={value.suspiciousMaxDiff} onChange={(next) => update('suspiciousMaxDiff', next)} />
+          <FieldInput label="minDiff" value={value.minDiff} onChange={(next) => update('minDiff', next)} />
         </div>
       </div>
 
@@ -750,10 +744,8 @@ function buildKifsPayload(value: KifsFormState) {
     batchSize: parseRequiredInt(value.batchSize, 'batchSize', 1),
     maxProblemsPerGame: parseRequiredInt(value.maxProblemsPerGame, 'maxProblemsPerGame', 1),
     maxScanResultsPerGame: parseRequiredInt(value.maxScanResultsPerGame, 'maxScanResultsPerGame', 1),
-    scanDepth: parseRequiredInt(value.scanDepth, 'scanDepth', 1),
     finalizeDepth: parseRequiredInt(value.finalizeDepth, 'finalizeDepth', 26),
-    suspiciousMinDiff: parseRequiredInt(value.suspiciousMinDiff, 'suspiciousMinDiff', 1),
-    suspiciousMaxDiff: parseRequiredInt(value.suspiciousMaxDiff, 'suspiciousMaxDiff', 1),
+    minDiff: parseRequiredInt(value.minDiff, 'minDiff', 1),
   };
 }
 

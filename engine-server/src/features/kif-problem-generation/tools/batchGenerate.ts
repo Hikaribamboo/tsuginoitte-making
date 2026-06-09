@@ -59,6 +59,10 @@ export async function main() {
 
   const engine = createUsiEngineClient(enginePath, engineEvalDir);
 
+  console.log(
+    `設定: pass1 depth=${config.scan.depth} minDiff=${config.scan.minDiff} pass2 depth=${config.finalize.depth} minDiff=${config.finalize.minDiff}`,
+  );
+
   await engine.init({
     multipv: config.scan.multipv,
     disableBook: !engineConfig.ownBook,
@@ -123,7 +127,7 @@ export async function main() {
             problemId: 0,
             createdAt,
             prompt,
-            blunderThreshold: config.finalize.blunderThresholdCp,
+            minDiff: config.finalize.minDiff,
             shuffleSeed: kifu.id * 100 + built,
             rootEvalDepth: config.scan.depth,
             rootEvalPvPlies: 2,

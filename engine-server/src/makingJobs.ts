@@ -34,10 +34,8 @@ type KifsJobInput = {
     batchSize?: number;
     maxProblemsPerGame?: number;
     maxScanResultsPerGame?: number;
-    scanDepth?: number;
     finalizeDepth?: number;
-    suspiciousMinDiff?: number;
-    suspiciousMaxDiff?: number;
+    minDiff?: number;
   };
 };
 
@@ -142,10 +140,8 @@ function parseKifsJobSettings(input: KifsJobInput['settings']) {
     batchSize: numberOrNull(input?.batchSize, 1, 5000),
     maxProblemsPerGame: numberOrNull(input?.maxProblemsPerGame, 1, 50),
     maxScanResultsPerGame: numberOrNull(input?.maxScanResultsPerGame, 1, 200),
-    scanDepth: numberOrNull(input?.scanDepth, 1, 50),
     finalizeDepth: numberOrNull(input?.finalizeDepth, 1, 80),
-    suspiciousMinDiff: numberOrNull(input?.suspiciousMinDiff, 1, 10000),
-    suspiciousMaxDiff: numberOrNull(input?.suspiciousMaxDiff, 1, 10000),
+    minDiff: numberOrNull(input?.minDiff, 1, 10000),
   };
 }
 

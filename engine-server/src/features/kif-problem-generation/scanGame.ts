@@ -381,17 +381,18 @@ export async function scanGame(args: {
       candidateEvalSente: actualEvalSente,
       turnAtS,
     });
-    const diff = Math.abs(signedDiff);
 
-    const isCandidate = diff >= config.suspiciousMinDiff;
+    // 浅い解析では実戦手側の評価が最善手側を上回ることがある。
+    // その場合は悪手ではないため候補に含めない。
+    const isCandidate = signedDiff >= config.scan.minDiff;
     if (config.scan.debugAllPass1) {
       console.log(
-        `pass1${isCandidate ? "候補" : "確認"}: row ${t + 1} actual ${actualMoveUsi} best ${best.pv[0] ?? "-"} appBestEval=${bestEvalSente} appActualEval=${actualEvalSente} signedLoss=${signedDiff} absLoss=${diff}`
+        `pass1${isCandidate ? "候補" : "確認"}: row ${t + 1} actual ${actualMoveUsi} best ${best.pv[0] ?? "-"} appBestEval=${bestEvalSente} appActualEval=${actualEvalSente} loss=${signedDiff}`
       );
     }
 
     if (isCandidate) {
-      candidates.push({ t, diff, introMoveUsi, actualMoveUsi });
+      candidates.push({ t, diff: signedDiff, introMoveUsi, actualMoveUsi });
       pass1LogItems.push({ t });
     }
   }
@@ -427,7 +428,7 @@ export async function scanGame(args: {
     const wrongProbeDepth = Math.min(16, finalDepth);
     const shouldTryMp15 = t % 5 === 0;
     const wrongProbeMps = shouldTryMp15 ? [5, 10, 15] : [5, 10];
-    const threshold = config.finalize.blunderThresholdCp ?? 400;
+    const threshold = config.finalize.minDiff;
 
     const rejectIfBestTooBadCp = config.finalize.rejectIfBestTooBadCp;
     const rejectIfBestTooGoodCp = config.finalize.rejectIfBestTooGoodCp;
@@ -471,7 +472,18 @@ export async function scanGame(args: {
         perfLabel: `${candidateLabel}|actual-d${finalDepth}`,
       });
       if (actualInfo) gathered = mergeUniqueByMove(gathered, [actualInfo]);
-      if (!actualInfo) giveUpReason = "実戦手評価なし";
+      if (!actualInfo) {
+        giveUpReason = "実戦手評価なし";
+      } else if (finalBest) {
+        const actualLoss = formatLoss({
+          best: finalBest,
+          candidate: actualInfo,
+          turnAtS,
+        });
+        if (actualLoss == null || actualLoss < threshold) {
+          giveUpReason = `実戦手の悪手度不足 loss=${actualLoss ?? "none"} 下限 ${threshold}`;
+        }
+      }
     }
 
     if (!giveUpReason && correctUsi) {

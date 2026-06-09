@@ -201,10 +201,8 @@ export interface StartKifsJobInput {
     batchSize?: number;
     maxProblemsPerGame?: number;
     maxScanResultsPerGame?: number;
-    scanDepth?: number;
     finalizeDepth?: number;
-    suspiciousMinDiff?: number;
-    suspiciousMaxDiff?: number;
+    minDiff?: number;
   };
 }
 

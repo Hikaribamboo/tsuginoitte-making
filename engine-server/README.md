@@ -23,6 +23,7 @@ Required or commonly used variables:
 - `AMTS_ENGINE_HASH_MB` default `1024` on Windows
 - `AMTS_ENGINE_OWN_BOOK` default `false`
 - `AMTS_FINALIZE_DEPTH` default used by kif problem generation final pass
+- `AMTS_FINALIZE_MIN_DIFF` default `200`, overridden by the kifs job form
 - `FV_SCALE` default `16`, passed to the shogi engine
 - Win-rate conversion uses `k = 1000`
 - `ENABLE_SHOGI_ENGINE` default enabled by the scripts
