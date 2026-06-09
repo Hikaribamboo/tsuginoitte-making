@@ -332,7 +332,7 @@ const WorkspaceList: React.FC = () => {
   const hasPasteContent = pasteText.trim().length > 0;
 
   return (
-    <div className="mx-auto w-full max-w-[1600px]">
+    <div className="workspace-list-page mx-auto w-full max-w-[1600px]">
       <div className="mb-4">
         <h2 className="text-lg font-semibold">下書き一覧</h2>
       </div>
@@ -445,14 +445,14 @@ const WorkspaceList: React.FC = () => {
         )}
       </div>
 
-      <div className="flex items-center justify-between mb-2">
+      <div className="workspace-list-controls flex items-center justify-between mb-2">
         {error && (
           <div className="bg-red-50 border border-red-300 text-red-700 text-[12px] px-3 py-2 rounded mb-3">
             {error}
           </div>
         )}
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
             <label className="text-[12px] text-gray-600">並び替え:</label>
             <select

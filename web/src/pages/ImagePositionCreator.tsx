@@ -452,8 +452,8 @@ const ImagePositionCreator: React.FC = () => {
   }
 
   return (
-    <div className="max-w-[1120px] mx-auto flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="image-position-page max-w-[1120px] mx-auto flex flex-col gap-4">
+      <div className="image-position-header flex items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">画像から局面作成</h2>
         <button
           type="button"
@@ -1224,8 +1224,8 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
     : '';
 
   return (
-    <div className="min-w-[1080px] max-w-[1360px] mx-auto flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="image-position-detail min-w-[1080px] max-w-[1360px] mx-auto flex flex-col gap-4">
+      <div className="image-position-header flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button type="button" onClick={onBack}>
             一覧へ戻る

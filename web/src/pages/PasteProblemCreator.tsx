@@ -6,6 +6,7 @@ import PasteChoiceCard from '../components/PasteChoiceCard';
 import PasteIntroMoveCard from '../components/PasteIntroMoveCard';
 import KeyboardModal from '../components/KeyboardModal';
 import ReadingLineModal from '../components/ReadingLineModal';
+import MobileExplanationEditor from '../components/MobileExplanationEditor';
 import TagSelector from '../components/TagSelector';
 import AnalysisPanel from '../components/AnalysisPanel';
 import type { BestMove } from '../components/AnalysisPanel';
@@ -25,6 +26,7 @@ import type { ChoiceDraft } from '../types/problem';
 import type { Side, HandPieceType, PieceType } from '../types/shogi';
 import { CAN_PROMOTE, pieceKanji } from '../types/shogi';
 import { useNavigationPrompt } from '../hooks/useNavigationPrompt';
+import { useMobileMode } from '../components/MobileModeContext';
 
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 type BoardCell = { row: number; col: number };
@@ -182,6 +184,7 @@ const PasteProblemCreator: React.FC = () => {
   // ---- Workspace (DB-backed draft) ----
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { mobileMode } = useMobileMode();
   const workspaceId = searchParams.get('workspace');
 
   // ---- KIF state ----
@@ -249,12 +252,15 @@ const PasteProblemCreator: React.FC = () => {
   const [keyboardDragging, setKeyboardDragging] = useState(false);
   const [evaluatingSlot, setEvaluatingSlot] = useState<SlotKey | null>(null);
   const [evalQueue, setEvalQueue] = useState<SlotKey[]>([]);
+  const [mobileReplayStep, setMobileReplayStep] = useState(0);
+  const [mobileExplanationMode, setMobileExplanationMode] = useState(false);
 
   const explanationInputRefs = React.useRef<Record<SlotKey, HTMLTextAreaElement | null>>({
     correct: null,
     incorrect1: null,
     incorrect2: null,
   });
+  const mobileExplanationRef = React.useRef<HTMLTextAreaElement | null>(null);
 
   useNavigationPrompt(
     Boolean(workspaceId && hasUnsavedChanges),
@@ -287,6 +293,11 @@ const PasteProblemCreator: React.FC = () => {
     pieceType: PieceType;
   } | null>(null);
 
+  React.useEffect(() => {
+    if (!mobileMode || analysisMode || introMoveActive || activeSlot !== null) return;
+    setActiveSlot('correct');
+  }, [activeSlot, analysisMode, introMoveActive, mobileMode]);
+
   const searchSfen = rootSfen;
   const introMoveError = useMemo(() => {
     const move = introMoveUsi.trim();
@@ -317,6 +328,55 @@ const PasteProblemCreator: React.FC = () => {
   const displayParsed = useMemo(() => (displaySfen ? parseSfen(displaySfen) : null), [displaySfen]);
   const searchParsed = useMemo(() => (searchSfen ? parseSfen(searchSfen) : null), [searchSfen]);
   const parsed = displayParsed;
+  const mobileSlot = activeSlot ?? 'correct';
+  const mobileChoice = choices[mobileSlot];
+  const mobileEvalCp = mobileChoice.eval_cp ?? (mobileSlot === 'correct' ? rootEvalCp : null);
+  const mobileReplayMoves = useMemo(() => buildReplayLine(mobileChoice), [mobileChoice]);
+  const mobileReplaySignature = mobileReplayMoves.join(' ');
+  const mobileReplayPosition = useMemo(() => {
+    if (!displaySfen) return null;
+    const state = parseSfen(displaySfen);
+    let { board, senteHand, goteHand, sideToMove, moveNumber } = state;
+    for (let index = 0; index < mobileReplayStep && index < mobileReplayMoves.length; index += 1) {
+      try {
+        const result = applyUsiMove(board, senteHand, goteHand, sideToMove, mobileReplayMoves[index]);
+        board = result.board;
+        senteHand = result.senteHand;
+        goteHand = result.goteHand;
+        sideToMove = sideToMove === 'sente' ? 'gote' : 'sente';
+        moveNumber += 1;
+      } catch {
+        break;
+      }
+    }
+    return { board, senteHand, goteHand, sideToMove, moveNumber };
+  }, [displaySfen, mobileReplayMoves, mobileReplayStep]);
+  const mobileReplaySfen = mobileReplayPosition
+    ? boardToSfen(
+        mobileReplayPosition.board,
+        mobileReplayPosition.sideToMove,
+        mobileReplayPosition.senteHand,
+        mobileReplayPosition.goteHand,
+        mobileReplayPosition.moveNumber,
+      )
+    : displaySfen;
+  const boardAnalysisTargetSfen = mobileMode
+    ? mobileReplaySfen
+    : analysisMode
+      ? store.getSfen()
+      : displaySfen;
+
+  React.useEffect(() => {
+    setMobileReplayStep(0);
+  }, [mobileReplaySignature, mobileSlot, introMoveActive]);
+
+  React.useEffect(() => {
+    const textarea = mobileExplanationRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.max(52, textarea.scrollHeight)}px`;
+  }, [mobileChoice.explanation, mobileSlot]);
+
   const [boardAnalysisMp, setBoardAnalysisMp] = useState(1);
   const [boardAnalyzing, setBoardAnalyzing] = useState(false);
   const [boardAnalysisDepth, setBoardAnalysisDepth] = useState(0);
@@ -345,7 +405,7 @@ const PasteProblemCreator: React.FC = () => {
   }, []);
 
   const startBoardAnalysis = useCallback(() => {
-    if (!displaySfen) {
+    if (!boardAnalysisTargetSfen) {
       setBoardAnalysisError('局面がありません');
       return;
     }
@@ -357,7 +417,7 @@ const PasteProblemCreator: React.FC = () => {
     setBoardAnalysisLines(new Map());
 
     const es = startAnalysisStream(
-      displaySfen,
+      boardAnalysisTargetSfen,
       boardAnalysisMp,
       (info) => {
         setBoardAnalysisDepth((prev) => Math.max(prev, info.depth));
@@ -379,7 +439,7 @@ const PasteProblemCreator: React.FC = () => {
     );
     boardAnalysisEventSourceRef.current = es;
     setBoardAnalyzing(true);
-  }, [boardAnalysisMp, displaySfen, stopBoardAnalysis]);
+  }, [boardAnalysisMp, boardAnalysisTargetSfen, stopBoardAnalysis]);
 
   const toggleBoardAnalysis = useCallback(() => {
     if (boardAnalyzing) {
@@ -400,16 +460,16 @@ const PasteProblemCreator: React.FC = () => {
     if (boardAnalyzing) {
       void stopBoardAnalysis(true);
     }
-  }, [displaySfen]);
+  }, [boardAnalysisTargetSfen]);
 
   const sortedBoardAnalysisLines = useMemo(
     () => Array.from(boardAnalysisLines.values()).sort((a, b) => a.multipv - b.multipv),
     [boardAnalysisLines],
   );
   const boardAnalysisSenteSign = useMemo(() => {
-    if (!displaySfen) return 1;
-    return parseSfen(displaySfen).sideToMove === 'sente' ? 1 : -1;
-  }, [displaySfen]);
+    if (!boardAnalysisTargetSfen) return 1;
+    return parseSfen(boardAnalysisTargetSfen).sideToMove === 'sente' ? 1 : -1;
+  }, [boardAnalysisTargetSfen]);
 
   const setIntroDestinationBoth = useCallback((cell: BoardCell | null) => {
     introDestinationRef.current = cell;
@@ -821,23 +881,24 @@ const PasteProblemCreator: React.FC = () => {
 
   const handleRecalculatePercent = useCallback(
     (slot: SlotKey) => {
-      const cp = choices[slot].eval_cp;
-        if (cp === null) return;
+      const cp = choices[slot].eval_cp ?? (slot === 'correct' ? rootEvalCp : null);
+      if (cp === null) return;
       try {
-          const percent = cpToWinRatePercent({
+        const percent = cpToWinRatePercent({
           cp,
-            userColor: parsed?.sideToMove ?? 'sente',
+          userColor: parsed?.sideToMove ?? 'sente',
         });
         setChoices((prev) => ({
           ...prev,
           [slot]: { ...prev[slot], eval_percent: percent },
         }));
         if (slot === 'correct') setRootEvalPercent(percent);
+        setMessage(`評価値 ${cp} を勝率 ${percent}% に変換しました`);
       } catch {
-        /* ignore */
+        setMessage('勝率への変換に失敗しました');
       }
     },
-    [choices, parsed],
+    [choices, parsed, rootEvalCp],
   );
 
   const performEvaluateChoice = useCallback(
@@ -1298,12 +1359,14 @@ const PasteProblemCreator: React.FC = () => {
       ...prev,
       [slot]: { ...prev[slot], eval_cp: value },
     }));
+    if (slot === 'correct') setRootEvalCp(value);
   };
   const handleEvalPercentChange = (slot: SlotKey, value: number | null) => {
     setChoices((prev) => ({
       ...prev,
       [slot]: { ...prev[slot], eval_percent: value },
     }));
+    if (slot === 'correct') setRootEvalPercent(value);
   };
   const handleExplanationChange = (slot: SlotKey, text: string) => {
     setChoices((prev) => ({
@@ -1787,9 +1850,297 @@ const PasteProblemCreator: React.FC = () => {
     acc[slot] = validation.ok ? '' : formatMoveValidationError('読み筋が非合法です', validation);
     return acc;
   }, { correct: '', incorrect1: '', incorrect2: '' });
+  const mobileAnalysisLine = sortedBoardAnalysisLines[0] ?? null;
+  const mobileAnalysisLabels = mobileAnalysisLine && boardAnalysisTargetSfen
+    ? pvToJapanese(mobileAnalysisLine.pv, boardAnalysisTargetSfen, 4)
+    : [];
+  const mobileAnalysisValue = mobileAnalysisLine
+    ? mobileAnalysisLine.mate !== null
+      ? `詰${mobileAnalysisLine.mate * boardAnalysisSenteSign}`
+      : `${mobileAnalysisLine.eval_cp * boardAnalysisSenteSign > 0 ? '+' : ''}${mobileAnalysisLine.eval_cp * boardAnalysisSenteSign}`
+    : null;
 
   return (
     <>
+      {mobileMode && mobileExplanationMode && mobileReplayPosition && (
+        <MobileExplanationEditor
+          board={mobileReplayPosition.board}
+          senteHand={mobileReplayPosition.senteHand}
+          goteHand={mobileReplayPosition.goteHand}
+          sideToMove={mobileReplayPosition.sideToMove}
+          title={`${SLOT_LABELS[mobileSlot]} ${mobileChoice.label || ''}`.trim()}
+          value={mobileChoice.explanation}
+          onChange={(value) => handleExplanationChange(mobileSlot, value)}
+          onDone={() => setMobileExplanationMode(false)}
+        />
+      )}
+
+      {mobileMode && !mobileExplanationMode && (
+        <div className="mobile-draft-editor">
+          <div className="mobile-problem-heading">
+            <div className="mobile-prompt-row">
+              <span>問題 {displayNo != null ? String(displayNo).padStart(2, '0') : '--'}</span>
+              <input
+                type="text"
+                aria-label="問題文"
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder={DEFAULT_PROMPT}
+                className="mobile-prompt-input"
+              />
+              <label className="mobile-header-rating">
+                <span>レート</span>
+                <select
+                  aria-label="問題レート"
+                  value={problemRating}
+                  onChange={(event) => setProblemRating(Number(event.target.value))}
+                >
+                  {Array.from({ length: 11 }, (_, index) => 1000 + index * 100).map((rating) => (
+                    <option key={rating} value={rating}>{rating}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="mobile-status-row">
+              <span>{workspaceName ?? '新規問題'}</span>
+              <span className={hasUnsavedChanges ? 'is-unsaved' : 'is-saved'}>
+                {hasUnsavedChanges ? '未保存' : '保存済み'}
+              </span>
+              <span>
+                {introMoveActive
+                  ? '初手を登録中'
+                  : mobileReplayStep > 0
+                    ? `読み筋 ${mobileReplayStep}/${mobileReplayMoves.length}`
+                    : `${SLOT_LABELS[mobileSlot]}を編集中`}
+              </span>
+            </div>
+          </div>
+
+          <div className="mobile-choice-focus">
+            <div>
+              <span>{SLOT_LABELS[mobileSlot]}</span>
+              <strong>{mobileChoice.label || '盤面で候補手を選択'}</strong>
+              {mobileEvalCp !== null && <small>評価値 {mobileEvalCp}</small>}
+            </div>
+          </div>
+
+          <section className="mobile-board-section">
+            {mobileReplayPosition ? (
+              <Board
+                mobile
+                board={mobileReplayPosition.board}
+                senteHand={mobileReplayPosition.senteHand}
+                goteHand={mobileReplayPosition.goteHand}
+                sideToMove={mobileReplayPosition.sideToMove}
+                selectedCell={mobileReplayStep === 0 ? (introMoveActive ? introDestination : selectedCell) : null}
+                selectedHandPiece={mobileReplayStep === 0 ? selectedHandPiece : null}
+                arrows={mobileReplayStep === 0 ? arrows : []}
+                showAllHandPieces={introMoveActive && !!introDestination}
+                onCellClick={mobileReplayStep === 0 ? handleCellClick : undefined}
+                onHandPieceClick={mobileReplayStep === 0 ? handleHandPieceClick : undefined}
+                mobileBottomControls={
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setMobileReplayStep(0)}
+                      disabled={mobileReplayStep === 0}
+                      aria-label="読み筋の先頭へ"
+                    >
+                      |◀
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMobileReplayStep((current) => Math.max(0, current - 1))}
+                      disabled={mobileReplayStep === 0}
+                      aria-label="読み筋を一手戻る"
+                    >
+                      ◀
+                    </button>
+                    <span className="mobile-replay-position">
+                      {mobileReplayStep} / {mobileReplayMoves.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMobileReplayStep((current) => Math.min(mobileReplayMoves.length, current + 1))}
+                      disabled={mobileReplayStep >= mobileReplayMoves.length}
+                      aria-label="読み筋を一手進む"
+                    >
+                      ▶
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMobileReplayStep(mobileReplayMoves.length)}
+                      disabled={mobileReplayStep >= mobileReplayMoves.length}
+                      aria-label="読み筋の最後へ"
+                    >
+                      ▶|
+                    </button>
+                  </>
+                }
+              />
+            ) : (
+              <div className="mobile-empty-board">局面がありません</div>
+            )}
+
+            {promotionChoice && parsed && (
+              <div className="mobile-promotion-row">
+                <span>成りますか？</span>
+                <button type="button" onClick={() => handlePromotionSelect(false)}>
+                  {pieceKanji({ type: promotionChoice.pieceType, side: parsed.sideToMove, promoted: false })}
+                </button>
+                <button type="button" className="text-rose-700" onClick={() => handlePromotionSelect(true)}>
+                  {pieceKanji({ type: promotionChoice.pieceType, side: parsed.sideToMove, promoted: true })}
+                </button>
+              </div>
+            )}
+
+          </section>
+
+          <section className="mobile-choice-editor">
+            <textarea
+              ref={mobileExplanationRef}
+              readOnly
+              value={mobileChoice.explanation}
+              onClick={() => setMobileExplanationMode(true)}
+              placeholder="タップして解説・メモを入力"
+              rows={2}
+            />
+            <div className="mobile-choice-tabs">
+              {SLOT_ORDER.map((slot, index) => (
+                <button
+                  key={slot}
+                  type="button"
+                  className={activeSlot === slot ? 'is-active' : ''}
+                  onClick={() => {
+                    if (activeSlot !== slot) handleActivateChoiceSlot(slot);
+                  }}
+                >
+                  <span>{index + 1}</span>
+                  {slot === 'correct' && <small>✓</small>}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="mobile-position-fields">
+            <div className={`mobile-intro-field ${introMoveActive ? 'is-active' : ''}`}>
+              <button type="button" onClick={handleActivateIntroMove}>
+                <span>初手</span>
+                <strong>
+                  {introMoveUsi && searchParsed
+                    ? usiToLabel(introMoveUsi, searchParsed.board, searchParsed.sideToMove)
+                    : '登録'}
+                </strong>
+              </button>
+              {introMoveUsi && (
+                <button type="button" className="mobile-intro-clear" onClick={handleClearIntroMove} aria-label="初手をクリア">
+                  ×
+                </button>
+              )}
+            </div>
+            <label>
+              <span>評価値</span>
+              <input
+                type="number"
+                value={mobileEvalCp ?? ''}
+                onChange={(event) => handleEvalCpChange(
+                  mobileSlot,
+                  event.target.value === '' ? null : Number(event.target.value),
+                )}
+              />
+            </label>
+            <label className="mobile-win-rate-field">
+              <span>勝率</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={mobileChoice.eval_percent ?? ''}
+                onChange={(event) => handleEvalPercentChange(
+                  mobileSlot,
+                  event.target.value === '' ? null : Number(event.target.value),
+                )}
+              />
+              <button
+                type="button"
+                onClick={() => handleRecalculatePercent(mobileSlot)}
+                disabled={mobileEvalCp === null}
+                aria-label="評価値から勝率を再計算"
+              >
+                %
+              </button>
+            </label>
+          </section>
+
+          <section className="mobile-analysis-row">
+            <button
+              type="button"
+              onClick={toggleBoardAnalysis}
+              className={boardAnalyzing ? 'is-stopping' : ''}
+              disabled={!parsed}
+            >
+              {boardAnalyzing ? '検討停止' : '検討'}
+            </button>
+            <div className="mobile-analysis-result">
+              {boardAnalysisError ? (
+                <span className="text-rose-700">{boardAnalysisError}</span>
+              ) : mobileAnalysisLine ? (
+                <>
+                  <strong>評価値 {mobileAnalysisValue}</strong>
+                  <span>最善手 {mobileAnalysisLabels[0] ?? '-'}</span>
+                  <span>depth {boardAnalysisDepth}</span>
+                </>
+              ) : (
+                <span>{boardAnalyzing ? `検討中 depth ${boardAnalysisDepth}` : '未検討'}</span>
+              )}
+            </div>
+          </section>
+
+          <details className="mobile-detail-settings" open>
+            <summary>問題情報・詳細設定</summary>
+            <div className="mobile-detail-settings-body">
+              <label>
+                問題番号
+                <input
+                  type="number"
+                  value={displayNo ?? ''}
+                  onChange={(event) => setDisplayNo(event.target.value ? Number(event.target.value) : null)}
+                />
+              </label>
+              {introMoveError && <div className="text-[11px] text-rose-700">{introMoveError}</div>}
+              <TagSelector selected={tags} onChange={setTags} defaultExpanded />
+            </div>
+          </details>
+
+          {message && (
+            <div className={`mobile-message ${message.includes('エラー') ? 'is-error' : ''}`}>
+              {message}
+            </div>
+          )}
+
+          <div className="mobile-save-bar">
+            <button
+              type="button"
+              className="is-delete"
+              onClick={() => setShowDeleteWorkspaceConfirm(true)}
+              disabled={!workspaceId}
+            >
+              削除
+            </button>
+            <button type="button" className="is-joseki" onClick={handleRegisterJoseki} disabled={registeringJoseki}>
+              {registeringJoseki ? '保存中...' : '定跡保存'}
+            </button>
+            <button type="button" className="is-thinking" onClick={handleSave} disabled={saving}>
+              {saving ? '保存中...' : '思考保存'}
+            </button>
+            <button type="button" className="is-draft" onClick={handleSaveDraftToDb} disabled={!workspaceId || draftSaving}>
+              {draftSaving ? '保存中...' : '途中'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!mobileMode && (
       <div className="flex h-[calc(100vh-106px)] min-h-[680px] w-full flex-col overflow-auto rounded-xl border border-sky-200/80 bg-gradient-to-br from-sky-50 via-blue-50 to-cyan-50 shadow-sm xl:overflow-hidden">
         <div className="shrink-0 border-b border-sky-200/75 bg-white/70 px-4 py-3 backdrop-blur-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2191,6 +2542,7 @@ const PasteProblemCreator: React.FC = () => {
           </aside>
         </div>
       </div>
+      )}
 
       {/* Preview modal */}
       {showPreview && (

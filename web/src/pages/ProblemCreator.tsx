@@ -846,7 +846,7 @@ const ProblemCreator: React.FC = () => {
 
   if (!rootSfen) {
     return (
-      <div className="w-full h-[calc(100vh-84px)] overflow-hidden">
+      <div className="problem-creator-page w-full h-[calc(100vh-84px)] overflow-hidden">
         <div className="bg-red-50 border border-red-300 text-red-700 p-3 rounded mb-3">
           局面が選択されていません。作問スタジオから作問フローを開始してください。
         </div>
@@ -857,11 +857,11 @@ const ProblemCreator: React.FC = () => {
 
   return (
     <>
-      <div className="w-full h-[calc(100vh-84px)] overflow-hidden">
+      <div className="problem-creator-page w-full h-[calc(100vh-84px)] overflow-hidden">
         <h2 className="text-lg font-semibold mb-2">問題作成</h2>
 
-        <div className="flex w-full h-[calc(100%-26px)] min-w-0 gap-3 items-start justify-start overflow-hidden">
-          <div className="flex-shrink-0">
+        <div className="problem-creator-layout flex w-full h-[calc(100%-26px)] min-w-0 gap-3 items-start justify-start overflow-hidden">
+          <div className="problem-board-column flex-shrink-0">
             <Board
               board={analysisMode ? store.board : board}
               senteHand={analysisMode ? store.senteHand : senteHand}
@@ -977,8 +977,8 @@ const ProblemCreator: React.FC = () => {
             />
           </div>
 
-          <div className="flex-1 grid grid-cols-[272px_minmax(320px,420px)] gap-3 items-start min-w-0 max-w-full">
-            <div className="flex flex-col gap-1.5 items-start w-[272px]">
+          <div className="problem-editor-columns flex-1 grid grid-cols-[272px_minmax(320px,420px)] gap-3 items-start min-w-0 max-w-full">
+            <div className="problem-choice-column flex flex-col gap-1.5 items-start w-[272px]">
               {(["correct", "incorrect1", "incorrect2"] as SlotKey[]).map(
                 (slot) => (
                   <ChoiceCard

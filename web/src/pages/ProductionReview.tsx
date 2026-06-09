@@ -408,9 +408,9 @@ const ProductionReview: React.FC = () => {
   };
 
   return (
-    <div className="h-[calc(100vh-106px)] min-h-[680px] overflow-hidden rounded-xl border border-sky-200/80 bg-gradient-to-b from-sky-50 via-blue-50 to-slate-50 shadow-sm">
-      <div className="flex h-full">
-        <aside className="w-[220px] shrink-0 border-r border-sky-200/80 bg-white/75 backdrop-blur-sm">
+    <div className="production-review-shell h-[calc(100vh-106px)] min-h-[680px] overflow-hidden rounded-xl border border-sky-200/80 bg-gradient-to-b from-sky-50 via-blue-50 to-slate-50 shadow-sm">
+      <div className="production-review-layout flex h-full">
+        <aside className="production-review-sidebar w-[220px] shrink-0 border-r border-sky-200/80 bg-white/75 backdrop-blur-sm">
           <div className="border-b border-sky-200/70 px-4 py-3">
             <h2 className="text-xl font-semibold text-slate-900">本番問題一覧</h2>
             <div className="mt-1 text-xs text-sky-700">{items.length.toLocaleString('ja-JP')} 件</div>
@@ -531,7 +531,7 @@ const ProductionReview: React.FC = () => {
           </div>
         </aside>
 
-        <main className="flex-1 overflow-y-auto p-4">
+        <main className="production-review-detail flex-1 overflow-y-auto p-4">
           {loadingDetail ? <Banner text="詳細を読み込み中..." /> : null}
           {detailError ? <Banner text={detailError} tone="error" /> : null}
           {saveError ? <Banner text={saveError} tone="error" /> : null}

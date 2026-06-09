@@ -4,10 +4,11 @@ import { TAG_CATEGORIES } from '../lib/constants';
 interface TagSelectorProps {
   selected: string[];
   onChange: (tags: string[]) => void;
+  defaultExpanded?: boolean;
 }
 
-const TagSelector: React.FC<TagSelectorProps> = ({ selected, onChange }) => {
-  const [collapsed, setCollapsed] = useState(true);
+const TagSelector: React.FC<TagSelectorProps> = ({ selected, onChange, defaultExpanded = false }) => {
+  const [collapsed, setCollapsed] = useState(!defaultExpanded);
   const [proTagDraft, setProTagDraft] = useState('');
 
   const toggle = (value: string) => {

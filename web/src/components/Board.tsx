@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Board as BoardType, Side, HandPieces, PieceType, HandPieceType } from '../types/shogi';
 import { pieceKanji } from '../types/shogi';
+import { useMobileMode } from './MobileModeContext';
 
 export interface ArrowInfo {
   from: { row: number; col: number } | null;
@@ -23,6 +24,8 @@ interface BoardProps {
   onHandPieceClick?: (side: Side, pieceType: HandPieceType) => void;
   selectedHandPiece?: { side: Side; type: HandPieceType } | null;
   showAllHandPieces?: boolean;
+  mobile?: boolean;
+  mobileBottomControls?: React.ReactNode;
 }
 
 const FILE_LABELS = ['９', '８', '７', '６', '５', '４', '３', '２', '１'];
@@ -44,8 +47,78 @@ const Board: React.FC<BoardProps> = ({
   onHandPieceClick,
   selectedHandPiece,
   showAllHandPieces = false,
+  mobile = false,
+  mobileBottomControls,
 }) => {
+  const { mobileMode } = useMobileMode();
   const arrowList = arrows ?? (arrow ? [arrow] : []);
+
+  if (mobile || mobileMode) {
+    return (
+      <div className="mobile-shogi-board">
+        <MobileHandDisplay
+          side="gote"
+          hand={goteHand}
+          onClick={onHandPieceClick}
+          selectedType={selectedHandPiece?.side === 'gote' ? selectedHandPiece.type : null}
+          showAll={showAllHandPieces}
+        />
+        <div className="mobile-board-grid-wrap">
+          <div className="mobile-board-file-labels" aria-hidden="true">
+            {FILE_LABELS.map((label) => <span key={label}>{label}</span>)}
+          </div>
+          <div className="mobile-board-rank-labels" aria-hidden="true">
+            {RANK_LABELS.map((label) => <span key={label}>{label}</span>)}
+          </div>
+          <div className="mobile-board-grid">
+            {board.map((row, ri) =>
+              row.map((cell, ci) => {
+                const isSelected = selectedCell?.row === ri && selectedCell?.col === ci;
+                return (
+                  <div
+                    key={`${ri}-${ci}`}
+                    className={`mobile-board-cell ${isSelected ? 'is-selected' : ''}`}
+                    onClick={() => onCellClick?.(ri, ci)}
+                    onDoubleClick={() => onCellDoubleClick?.(ri, ci)}
+                    onDragOver={(e) => {
+                      if (!onCellDrop) return;
+                      e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      if (!onCellDrop) return;
+                      e.preventDefault();
+                      const payload = e.dataTransfer.getData('application/json') || e.dataTransfer.getData('text/plain');
+                      if (payload) onCellDrop(ri, ci, payload);
+                    }}
+                  >
+                    {cell && (
+                      <span
+                        className={`mobile-board-piece ${cell.side === 'gote' ? 'rotate-180' : ''} ${cell.promoted ? 'text-rose-700' : 'text-slate-800'}`}
+                      >
+                        {pieceKanji(cell)}
+                      </span>
+                    )}
+                  </div>
+                );
+              }),
+            )}
+          </div>
+          {arrowList.length > 0 && <ArrowOverlay arrows={arrowList} responsive />}
+        </div>
+        <MobileHandDisplay
+          side="sente"
+          hand={senteHand}
+          onClick={onHandPieceClick}
+          selectedType={selectedHandPiece?.side === 'sente' ? selectedHandPiece.type : null}
+          showAll={showAllHandPieces}
+          controls={mobileBottomControls}
+        />
+        <div className="mobile-board-turn">
+          {sideToMove === 'sente' ? '先手番' : '後手番'}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-start gap-4">
@@ -185,12 +258,44 @@ const HandDisplay: React.FC<HandDisplayProps> = ({ side, hand, onClick, label, s
   );
 };
 
+const MobileHandDisplay: React.FC<Omit<HandDisplayProps, 'label'> & { controls?: React.ReactNode }> = ({
+  side,
+  hand,
+  onClick,
+  selectedType = null,
+  showAll = false,
+  controls,
+}) => {
+  const pieces = showAll ? HAND_ORDER : HAND_ORDER.filter((type) => hand[type] > 0);
+  return (
+    <div className={`mobile-hand-row ${side === 'gote' ? 'mobile-hand-row-gote' : 'mobile-hand-row-sente'}`}>
+      <span className="mobile-hand-label">{side === 'gote' ? '相手' : '自分'}</span>
+      <div className="mobile-hand-pieces">
+        {pieces.length === 0 && <span className="mobile-hand-empty">持ち駒なし</span>}
+        {pieces.map((type) => (
+          <button
+            key={type}
+            type="button"
+            className={`mobile-hand-piece ${selectedType === type ? 'is-selected' : ''} ${hand[type] === 0 ? 'is-empty' : ''}`}
+            onClick={() => onClick?.(side, type)}
+          >
+            <span>{HAND_KANJI[type]}</span>
+            {(showAll || hand[type] > 1) && <small>{hand[type]}</small>}
+          </button>
+        ))}
+      </div>
+      {controls && <div className="mobile-hand-controls">{controls}</div>}
+    </div>
+  );
+};
+
 // ---- Arrow overlay ----
 
 const CELL_SIZE = BOARD_CELL_SIZE;
 
 interface ArrowOverlayProps {
   arrows: ArrowInfo[];
+  responsive?: boolean;
 }
 
 const ARROW_STYLE = {
@@ -214,14 +319,19 @@ const ARROW_STYLE = {
   },
 } as const;
 
-const ArrowOverlay: React.FC<ArrowOverlayProps> = ({ arrows }) => {
+const ArrowOverlay: React.FC<ArrowOverlayProps> = ({ arrows, responsive = false }) => {
   const boardW = BOARD_SIZE;
   const boardH = BOARD_SIZE;
   const lineArrows = arrows.filter((a) => a.from !== null);
   const dropArrows = arrows.filter((a) => a.from === null);
 
   return (
-    <svg className="absolute top-[2px] left-[2px] pointer-events-none z-10" style={{ width: boardW, height: boardH }} viewBox={`0 0 ${boardW} ${boardH}`}>
+    <svg
+      className={responsive ? 'absolute inset-0 pointer-events-none z-10 h-full w-full' : 'absolute top-[2px] left-[2px] pointer-events-none z-10'}
+      style={responsive ? undefined : { width: boardW, height: boardH }}
+      viewBox={`0 0 ${boardW} ${boardH}`}
+      preserveAspectRatio="none"
+    >
       <defs>
         {(Object.keys(ARROW_STYLE) as Array<keyof typeof ARROW_STYLE>).map((key) => {
           const s = ARROW_STYLE[key];
