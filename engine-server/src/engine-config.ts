@@ -16,7 +16,7 @@ const pvIntervalMs = envInt("AMTS_ENGINE_PV_INTERVAL_MS", 300, 0, 60000);
 const multipv = envInt("AMTS_ENGINE_MULTIPV", 3, 1, 500);
 
 // 評価関数が出力する評価値の尺度
-const fvScale = envInt("FV_SCALE", 16, 1, 128);
+const fvScale = envInt("FV_SCALE", 20, 1, 128);
 
 // エンジン応答を待つ最大時間をミリ秒で指定
 const waitTimeoutMs = envInt("AMTS_ENGINE_WAIT_TIMEOUT_MS", 180000, 1000, 1800000);
