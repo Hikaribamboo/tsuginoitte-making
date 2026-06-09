@@ -28,7 +28,6 @@ import { useNavigationPrompt } from '../hooks/useNavigationPrompt';
 
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 type BoardCell = { row: number; col: number };
-const WINRATE_SCALE = 800;
 const CHOICE_EVAL_DEPTH = 26;
 const BOARD_ANALYSIS_MIN_DISPLAY_DEPTH = 22;
 const BOARD_ANALYSIS_MAX_DEPTH = 28;
@@ -787,7 +786,6 @@ const PasteProblemCreator: React.FC = () => {
           evalPercent = cpToWinRatePercent({
             cp: result.evalCp,
             userColor: parsed?.sideToMove ?? 'sente',
-            scale: WINRATE_SCALE,
           });
         } catch {
           /* ignore */
@@ -829,7 +827,6 @@ const PasteProblemCreator: React.FC = () => {
           const percent = cpToWinRatePercent({
           cp,
             userColor: parsed?.sideToMove ?? 'sente',
-          scale: WINRATE_SCALE,
         });
         setChoices((prev) => ({
           ...prev,
@@ -917,7 +914,6 @@ const PasteProblemCreator: React.FC = () => {
         const percent = cpToWinRatePercent({
           cp: rawCp,
           userColor: parsed?.sideToMove ?? 'sente',
-          scale: WINRATE_SCALE,
         });
         const fullPv = buildLegalChoicePv({
           rootSfen,

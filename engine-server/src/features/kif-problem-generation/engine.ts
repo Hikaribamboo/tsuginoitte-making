@@ -5,6 +5,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 
 import { perfMark, startTimer } from "./debug/coarsePerf";
+import { engineConfig } from "../../engine-config.js";
 
 export type PvInfo = {
   multipv: number;
@@ -112,7 +113,7 @@ export class UsiEngine {
     this.proc.stdin.write(line.endsWith("\n") ? line : line + "\n");
   }
 
-  async waitFor(predicate: (line: string) => boolean, timeoutMs = 30000): Promise<string> {
+  async waitFor(predicate: (line: string) => boolean, timeoutMs = engineConfig.waitTimeoutMs): Promise<string> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.onLine = undefined;
@@ -140,7 +141,7 @@ export class UsiEngine {
     ponder?: boolean;
   }) {
     this.write("usi");
-    await this.waitFor((l) => l === "usiok", 30000);
+    await this.waitFor((l) => l === "usiok");
 
     if (this.engineEvalDir && existsSync(this.engineEvalDir)) {
       this.write(`setoption name EvalDir value ${this.engineEvalDir}`);
@@ -150,12 +151,12 @@ export class UsiEngine {
     if (args.hashMb != null) this.write(`setoption name USI_Hash value ${args.hashMb}`);
     if (args.ponder != null) this.write(`setoption name USI_Ponder value ${args.ponder ? "true" : "false"}`);
 
-    this.write("setoption name NumaPolicy value auto");
-    this.write("setoption name Stochastic_Ponder value false");
-    this.write("setoption name DepthLimit value 0");
-    this.write("setoption name NodesLimit value 0");
-    this.write(`setoption name FV_SCALE value ${process.env.AMTS_ENGINE_FV_SCALE?.trim() || process.env.FV_SCALE?.trim() || "40"}`);
-    this.write(`setoption name USI_AnalyseMode value true`);
+    for (const [name, value] of Object.entries(engineConfig.usiOptions)) {
+      this.write(`setoption name ${name} value ${value}`);
+    }
+    for (const [name, value] of engineConfig.extraUsiOptions) {
+      this.write(`setoption name ${name} value ${value}`);
+    }
 
     if (args.disableBook) this.write("setoption name USI_OwnBook value false");
 
@@ -163,11 +164,11 @@ export class UsiEngine {
     this.currentMultiPv = args.multipv;
 
     this.write("isready");
-    await this.waitFor((l) => l === "readyok", 30000);
+    await this.waitFor((l) => l === "readyok");
 
     this.write("usinewgame");
     this.write("isready");
-    await this.waitFor((l) => l === "readyok", 30000);
+    await this.waitFor((l) => l === "readyok");
   }
 
   async setMultiPv(multipv: number) {
@@ -203,7 +204,7 @@ export class UsiEngine {
         const tag = args.label ? `|${args.label}` : "";
         perfMark(`engine.analyze.timeout${tag}`, ms);
         reject(new Error("analyze timeout"));
-      }, 180000);
+      }, engineConfig.waitTimeoutMs);
       this.pendingReject = reject;
       this.pendingCleanup = () => clearTimeout(timeout);
 

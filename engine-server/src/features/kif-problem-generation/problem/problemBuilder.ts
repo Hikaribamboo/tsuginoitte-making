@@ -164,7 +164,6 @@ export async function buildProblemOutFromScan(args: {
   prompt: string;
   blunderThreshold: number;
   shuffleSeed: number;
-  evalScale: number;
   rootEvalDepth?: number;
   rootEvalPvPlies?: number;
   rejectIfBestTooBadCp?: number;
@@ -177,7 +176,6 @@ export async function buildProblemOutFromScan(args: {
     prompt,
     blunderThreshold,
     shuffleSeed,
-    evalScale,
     rootEvalDepth = 18,
     rootEvalPvPlies = 2,
     rejectIfBestTooBadCp,
@@ -262,7 +260,6 @@ export async function buildProblemOutFromScan(args: {
       evalPercent: cpToWinRatePercentFromRootSfen({
         cp: best.eval,
         rootSfen,
-        scale: evalScale,
       }),
       line: bestLine,
       isCorrect: true,
@@ -273,7 +270,6 @@ export async function buildProblemOutFromScan(args: {
       evalPercent: cpToWinRatePercentFromRootSfen({
         cp: wrong1.eval,
         rootSfen,
-        scale: evalScale,
       }),
       line: wrong1Line,
       isCorrect: false,
@@ -284,7 +280,6 @@ export async function buildProblemOutFromScan(args: {
       evalPercent: cpToWinRatePercentFromRootSfen({
         cp: wrong2.eval,
         rootSfen,
-        scale: evalScale,
       }),
       line: wrong2Line,
       isCorrect: false,
@@ -309,7 +304,6 @@ export async function buildProblemOutFromScan(args: {
   const rootEvalPercent = cpToWinRatePercentFromRootSfen({
     cp: rootEvalCp,
     rootSfen,
-    scale: evalScale,
   });
 
   const diffWrong1 = lossFromBestCp({

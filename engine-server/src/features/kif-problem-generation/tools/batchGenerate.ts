@@ -2,6 +2,7 @@ import "dotenv/config";
 import { existsSync } from "fs";
 import path from 'path';
 import { createClient } from "@supabase/supabase-js";
+import { engineConfig } from "../../../engine-config.js";
 
 import { createUsiEngineClient, getEnginePath } from "../../../services/engine/engineClient";
 import { config } from "../config.js";
@@ -60,10 +61,10 @@ export async function main() {
 
   await engine.init({
     multipv: config.scan.multipv,
-    disableBook: config.engine.disableBook,
-    threads: config.engine.threads,
-    hashMb: config.engine.hashMb,
-    ponder: config.engine.ponder,
+    disableBook: !engineConfig.ownBook,
+    threads: engineConfig.threads,
+    hashMb: engineConfig.hashMb,
+    ponder: engineConfig.ponder,
   });
 
   try {
@@ -124,7 +125,6 @@ export async function main() {
             prompt,
             blunderThreshold: config.finalize.blunderThresholdCp,
             shuffleSeed: kifu.id * 100 + built,
-            evalScale: config.eval.scale,
             rootEvalDepth: config.scan.depth,
             rootEvalPvPlies: 2,
             rejectIfBestTooBadCp: config.finalize.rejectIfBestTooBadCp,

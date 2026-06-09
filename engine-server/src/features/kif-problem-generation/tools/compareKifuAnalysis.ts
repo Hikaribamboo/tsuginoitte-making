@@ -2,6 +2,8 @@ import "dotenv/config";
 import { existsSync } from "fs";
 import path from "path";
 
+import { engineConfig } from "../../../engine-config.js";
+import { envInt } from "../../../env.js";
 import { createUsiEngineClient, getEnginePath, type PvInfo } from "../../../services/engine/engineClient";
 
 type Color = "b" | "w";
@@ -60,13 +62,6 @@ function absLossFromBest(bestSente: number | null, actualSente: number | null, t
   return Math.abs(signed);
 }
 
-function intEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw || !raw.trim()) return fallback;
-  const parsed = Number.parseInt(raw.trim(), 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
 function resolveEngineEvalDir(enginePath: string): string {
   const fromEnv = process.env.EVAL_DIR?.trim();
   if (fromEnv) return fromEnv;
@@ -87,9 +82,9 @@ function value(value: unknown): string {
 async function main() {
   const command = process.argv.slice(2).join(" ").trim() || process.env.AMTS_COMPARE_POSITION || DEFAULT_POSITION;
   const { initialSfen, moves } = parsePositionCommand(command);
-  const depth = intEnv("AMTS_COMPARE_DEPTH", intEnv("AMTS_SCAN_DEPTH", 16));
-  const startRow = Math.max(1, intEnv("AMTS_COMPARE_START_ROW", 1));
-  const endRow = Math.min(moves.length, intEnv("AMTS_COMPARE_END_ROW", moves.length));
+  const depth = envInt("AMTS_COMPARE_DEPTH", envInt("AMTS_SCAN_DEPTH", 16, 1, 80), 1, 80);
+  const startRow = envInt("AMTS_COMPARE_START_ROW", 1, 1, Math.max(1, moves.length));
+  const endRow = envInt("AMTS_COMPARE_END_ROW", moves.length, 1, Math.max(1, moves.length));
 
   const enginePath = process.env.ENGINE_PATH?.trim() || getEnginePath();
   const engineEvalDir = resolveEngineEvalDir(enginePath);
@@ -102,10 +97,10 @@ async function main() {
 
   await engine.init({
     multipv: 1,
-    disableBook: true,
-    threads: intEnv("AMTS_ENGINE_THREADS", 4),
-    hashMb: intEnv("AMTS_ENGINE_HASH_MB", 1024),
-    ponder: false,
+    disableBook: !engineConfig.ownBook,
+    threads: engineConfig.threads,
+    hashMb: engineConfig.hashMb,
+    ponder: engineConfig.ponder,
   });
 
   const initialTurn = getInitialTurn(initialSfen);

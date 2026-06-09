@@ -3,6 +3,8 @@ import { existsSync } from "fs";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 
+import { engineConfig } from "../../../engine-config.js";
+import { envInt } from "../../../env.js";
 import { createUsiEngineClient, getEnginePath, type EngineClient, type PvInfo } from "../../../services/engine/engineClient";
 import { config } from "../../kif-problem-generation/config";
 import { cpToWinRatePercentFromRootSfen } from "../../kif-problem-generation/evaluation/cpToWinRate";
@@ -68,14 +70,6 @@ const PROMPT = "最善手を選んでください";
 
 const featureDir = path.resolve(import.meta.dirname, "..");
 const defaultOutputPath = path.resolve(process.cwd(), "outputs", "book_generated.json");
-
-function envInt(name: string, fallback: number, min: number, max: number): number {
-  const raw = process.env[name];
-  if (!raw || !raw.trim()) return fallback;
-  const parsed = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
 
 function resolveBookFile(raw: string | undefined): {
   key: BookFileKey;
@@ -344,7 +338,6 @@ async function buildProblemFromSfen(args: {
   const rootEvalPercent = cpToWinRatePercentFromRootSfen({
     cp: rootEvalCp,
     rootSfen: sfen,
-    scale: config.eval.scale,
   });
 
   const toChoice = (slotLabel: ChoiceDraft["slotLabel"], info: PvInfo): ChoiceDraft => ({
@@ -357,7 +350,6 @@ async function buildProblemFromSfen(args: {
     eval_percent: cpToWinRatePercentFromRootSfen({
       cp: normalizeCpToSentePerspective(info.eval, turn),
       rootSfen: sfen,
-      scale: config.eval.scale,
     }),
   });
 
@@ -424,10 +416,10 @@ export async function main(): Promise<void> {
   const engine = createUsiEngineClient(enginePath, engineEvalDir);
   await engine.init({
     multipv: 1,
-    disableBook: config.engine.disableBook,
-    threads: config.engine.threads,
-    hashMb: config.engine.hashMb,
-    ponder: config.engine.ponder,
+    disableBook: !engineConfig.ownBook,
+    threads: engineConfig.threads,
+    hashMb: engineConfig.hashMb,
+    ponder: engineConfig.ponder,
   });
 
   const records: GeneratedRecord[] = [];

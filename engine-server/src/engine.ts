@@ -1,8 +1,9 @@
 import { spawn, ChildProcess } from 'child_process';
 import { chmodSync, accessSync, constants as fsConst, existsSync } from 'fs';
 import path from 'path';
-import os from 'os';
 import { EventEmitter } from 'events';
+import { engineConfig } from './engine-config.js';
+import { envBool } from './env.js';
 
 export interface EngineResult {
   eval_cp: number;
@@ -189,7 +190,7 @@ export class ShogiEngine {
     if (!this.ready) throw new Error('Engine not ready');
 
     const {
-      depth = 20,
+      depth = engineConfig.defaultEvaluateDepth,
       nodes,
       stable = false,
       searchMoves = [],
@@ -210,7 +211,7 @@ export class ShogiEngine {
 
     // Stable mode for repeatable choice scoring: single-thread + clear hash.
     if (stable) {
-      this.send('setoption name Threads value 1');
+      this.send(`setoption name Threads value ${engineConfig.stableThreads}`);
       this.send('setoption name Clear Hash');
     }
 
@@ -264,7 +265,7 @@ export class ShogiEngine {
       if (line.includes('score mate')) {
         const mateMatch = line.match(/score mate (-?\d+)/);
         if (mateMatch) {
-          evalCp = parseInt(mateMatch[1], 10) > 0 ? 30000 : -30000;
+          evalCp = parseInt(mateMatch[1], 10) > 0 ? engineConfig.mateScoreCp : -engineConfig.mateScoreCp;
         }
         const pvMatch = line.match(/ pv (.+)/);
         if (pvMatch) pv = pvMatch[1].split(' ');
@@ -288,7 +289,7 @@ export class ShogiEngine {
         if (line.includes('score mate')) {
           const mateMatch = line.match(/score mate (-?\d+)/);
           if (mateMatch) {
-            evalCp = parseInt(mateMatch[1], 10) > 0 ? 30000 : -30000;
+            evalCp = parseInt(mateMatch[1], 10) > 0 ? engineConfig.mateScoreCp : -engineConfig.mateScoreCp;
           }
           const pvMatch = line.match(/ pv (.+)/);
           if (pvMatch) pv = pvMatch[1].split(' ');
@@ -409,7 +410,7 @@ export class ShogiEngine {
         }
       };
       this.analysisEmitter.on('rawline', handler);
-      const timeoutId = setTimeout(finish, 5000);
+      const timeoutId = setTimeout(finish, engineConfig.stopTimeoutMs);
       this.send('stop');
       this.analyzing = false;
     });
@@ -442,7 +443,7 @@ export class ShogiEngine {
 
   private sendAndWait(command: string, terminator: string): Promise<string[]> {
     return new Promise((resolve, reject) => {
-      const timeoutMs = ShogiEngine.envInt('AMTS_ENGINE_WAIT_TIMEOUT_MS', 180000, 1000, 1800000);
+      const timeoutMs = engineConfig.waitTimeoutMs;
       let timeoutId: NodeJS.Timeout;
       const waiter = {
         resolve: (lines: string[]) => {
@@ -482,33 +483,13 @@ export class ShogiEngine {
   }
 
   private static detectDefaultTuning(): AnalysisTuning {
-    const logicalCpu = Math.max(1, os.cpus().length);
-    const totalMemMb = Math.floor(os.totalmem() / (1024 * 1024));
-    const ownBook = ShogiEngine.envBool('AMTS_ENGINE_OWN_BOOK', false);
-
-    if (process.platform === 'darwin') {
-      // macOS defaults: leave headroom for UI/server while keeping strong depth speed.
-      const defaultThreads = Math.min(8, Math.max(3, Math.floor(logicalCpu * 0.6)));
-      const defaultHashMb = Math.min(2048, Math.max(768, Math.floor(totalMemMb / 8)));
-      const threads = ShogiEngine.envInt('AMTS_ENGINE_THREADS', defaultThreads, 1, 128);
-      const hashMb = ShogiEngine.envInt('AMTS_ENGINE_HASH_MB', defaultHashMb, 64, 262144);
-      return {
-        hashMb,
-        threads,
-        cores: ShogiEngine.envInt('AMTS_ENGINE_CORES', threads, 1, 128),
-        pvIntervalMs: ShogiEngine.envInt('AMTS_ENGINE_PV_INTERVAL_MS', 300, 0, 60000),
-        multipv: ShogiEngine.envInt('AMTS_ENGINE_MULTIPV', 3, 1, 500),
-        ownBook,
-      };
-    }
-
     return {
-      hashMb: ShogiEngine.envInt('AMTS_ENGINE_HASH_MB', 1024, 64, 262144),
-      threads: ShogiEngine.envInt('AMTS_ENGINE_THREADS', 4, 1, 128),
-      cores: ShogiEngine.envInt('AMTS_ENGINE_CORES', 4, 1, 128),
-      pvIntervalMs: ShogiEngine.envInt('AMTS_ENGINE_PV_INTERVAL_MS', 300, 0, 60000),
-      multipv: ShogiEngine.envInt('AMTS_ENGINE_MULTIPV', 3, 1, 500),
-      ownBook,
+      hashMb: engineConfig.hashMb,
+      threads: engineConfig.threads,
+      cores: engineConfig.cores,
+      pvIntervalMs: engineConfig.pvIntervalMs,
+      multipv: engineConfig.multipv,
+      ownBook: engineConfig.ownBook,
     };
   }
 
@@ -518,45 +499,15 @@ export class ShogiEngine {
     this.send(`setoption name PvInterval value ${tuning.pvIntervalMs}`);
     this.setOptionIfSupported('USI_OwnBook', tuning.ownBook ? 'true' : 'false');
     this.setOptionIfSupported('Cores', String(tuning.cores));
-    for (const [name, value] of ShogiEngine.envUsiOptions('AMTS_ENGINE_USI_OPTIONS')) {
+    for (const [name, value] of Object.entries(engineConfig.usiOptions)) {
+      this.setOptionIfSupported(name, String(value));
+    }
+    for (const [name, value] of engineConfig.extraUsiOptions) {
       this.setOptionIfSupported(name, value);
     }
     this.send(`setoption name MultiPV value ${tuning.multipv}`);
     await this.sendAndWait('isready', 'readyok');
     this.tuning = { ...tuning };
-  }
-
-  private static envInt(name: string, fallback: number, min: number, max: number): number {
-    const raw = process.env[name];
-    if (!raw || !raw.trim()) return fallback;
-    const parsed = Number.parseInt(raw.trim(), 10);
-    if (!Number.isFinite(parsed) || Number.isNaN(parsed)) return fallback;
-    return Math.min(max, Math.max(min, parsed));
-  }
-
-  private static envBool(name: string, fallback: boolean): boolean {
-    const raw = process.env[name];
-    if (!raw || !raw.trim()) return fallback;
-    const normalized = raw.trim().toLowerCase();
-    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
-    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
-    return fallback;
-  }
-
-  private static envUsiOptions(name: string): Array<[string, string]> {
-    const raw = process.env[name];
-    if (!raw || !raw.trim()) return [];
-    return raw
-      .split(/[;\n]/)
-      .map((entry): [string, string] | null => {
-        const index = entry.indexOf('=');
-        if (index <= 0) return null;
-        const optionName = entry.slice(0, index).trim();
-        const optionValue = entry.slice(index + 1).trim();
-        if (!optionName || !optionValue) return null;
-        return [optionName, optionValue];
-      })
-      .filter((entry): entry is [string, string] => Boolean(entry));
   }
 
   private setOptionIfSupported(name: string, value: string): void {
@@ -584,7 +535,7 @@ export class ShogiEngine {
       const trimmed = line.trim();
       if (!trimmed) continue;
       this.rememberEngineLine(trimmed);
-      if (ShogiEngine.envBool('ENGINE_LOG_STDOUT', false)) {
+      if (envBool('ENGINE_LOG_STDOUT', false)) {
         console.log(`[engine stdout] ${trimmed}`);
       }
 
@@ -636,7 +587,7 @@ export class ShogiEngine {
     const mateMatch = line.match(/score mate (-?\d+)/);
     if (mateMatch) {
       mate = parseInt(mateMatch[1], 10);
-      eval_cp = mate > 0 ? 30000 : -30000;
+      eval_cp = mate > 0 ? engineConfig.mateScoreCp : -engineConfig.mateScoreCp;
     }
 
     return { multipv, depth, eval_cp, mate, pv };

@@ -35,7 +35,6 @@ import { CAN_PROMOTE, pieceKanji } from "../types/shogi";
 import { useNavigationPrompt } from "../hooks/useNavigationPrompt";
 
 type SlotKey = "correct" | "incorrect1" | "incorrect2";
-const WINRATE_SCALE = 800;
 const CHOICE_EVAL_DEPTH = 24;
 const SLOT_ORDER: SlotKey[] = ["correct", "incorrect1", "incorrect2"];
 
@@ -521,7 +520,6 @@ const ProblemCreator: React.FC = () => {
         const choicePct = cpToWinRatePercentFromRootSfen({
           cp: rawCp,
           rootSfen,
-          scale: WINRATE_SCALE,
         });
 
         setChoices((prev) => {

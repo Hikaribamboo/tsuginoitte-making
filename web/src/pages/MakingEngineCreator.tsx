@@ -92,6 +92,7 @@ type SampleKifuEvalRow = {
   afterMovesEvalCp: number;
   afterMovesPv: string[];
   afterMovesRawTail: string[];
+  idealEval?: number | null;
 };
 
 const DEFAULT_BOOK_FORM: BookFormState = {
@@ -117,15 +118,17 @@ const DEFAULT_KIFS_FORM: KifsFormState = {
 };
 
 const DEFAULT_ENGINE_TEST_SFEN =
-  'ln3g2l/1r4k2/p2psgns1/2p2bppp/1p2pp3/2PPP1PSP/PP1S1GNP1/3B1GK2/LN1R4L w P 46';
+  'ln1gk2nl/2s3g2/p2ppsbp1/2p3p1p/1r3pPP1/2PBPS3/PP1P1P2P/2GS3R1/LN1K1G1NL b p 1';
 
 const DEFAULT_COMPARE_POSITION =
   'position sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1 moves 2g2f 3c3d 7g7f 4c4d 3i4h 3a3b 2f2e 2b3c 5i6h 3b4c 4i5h 8b4b 5g5f 5a6b 6h7h 6b7b 3g3f 7b8b 6g6f 9a9b 8h7g 8b9a 5h6g 7a8b 7h8h 6a7a 2i3g 4a5b 9i9h 4c5d 6i7h 6c6d 8h9i 6d6e 6f6e 5d6e P*6f 6e7d 7i8h 5b6b 1g1f 4d4e 4h5g 3d3e 2h2f 3c4d 2e2d 2c2d 2f2d 4b2b 2d4d 3e3f 3g4e 3f3g+ 4d4a+ 2b2h+ B*5e 2h7h 6g6h 7h7g 6h7g 3g4g 4e5c+ 6b5c 4a4g N*8e 7g7h B*6i 4g3h G*4g 3h6h 6i5h+ R*5a 4g5g 6h5h 5g5h 5a5c+ 5h5g G*7i P*6g 5e4f R*5h B*3f P*4g 5c5a S*6b 3f8a+ 9a8a 5a2a 6g6h+ 7h6h 5g6h 7i6h 5h5f+ N*6d P*6a G*5b 7d6c 5b6a 7a6a 2a6a G*7a G*7b 8a9a 7b7a 8b7a N*7e G*7b 7e6c 6b6c 6d7b+';
 
 const SAMPLE_KIFU_POSITIONS = [
-  'position sfen 1+B5nl/6gk1/p2+Rps1s1/2p3ppp/1pb1PN3/5pPPP/PP2Sl3/4G1S2/+r2PG1KLL w G2n3p 70 moves G*6f',
-  'position sfen lr5nl/3kg1g2/2nspp1pp/p1pp5/1p7/P1PP1Pp2/1PS1P3P/2GKG2R1/LN5NL b BS2Pbs 47 moves S*3e',
+  'position sfen ln1g3Bl/1ks3g2/6n2/ppppp1ppp/5r3/P1P1PpP1P/1P1P1S3/2KGG2R1/LNS5L b Sbn2p 1',
+  'position sfen ln1g4l/1ks6/9/pppp+B1ppp/7n1/P1P1PrP1P/1P1Pp4/2KGG2R1/LNS5L b GS2Pbsnp 1',
 ];
+
+const SAMPLE_KIFU_IDEALS: number[] = [554, 393];
 
 const MakingEngineCreator: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -263,16 +266,6 @@ const MakingEngineCreator: React.FC = () => {
         depth,
         multipv: 1,
         newGame: true,
-        usiOptions: {
-          USI_Hash: 1024,
-          USI_Ponder: false,
-          Threads: 4,
-          NumaPolicy: 'auto',
-          Stochastic_Ponder: false,
-          DepthLimit: 0,
-          NodesLimit: 0,
-          USI_OwnBook: false,
-        },
       });
       setTestResult(result);
       setMessage('エンジン検証が完了しました。');
@@ -368,6 +361,7 @@ const MakingEngineCreator: React.FC = () => {
         rows.push({
           index: index + 1,
           position: SAMPLE_KIFU_POSITIONS[index],
+          idealEval: SAMPLE_KIFU_IDEALS[index] ?? null,
           moves: parsed.moves,
           beforeBestmove: before.bestmove ?? before.pv[0] ?? '',
           beforeEvalCp: before.eval_cp,
@@ -490,7 +484,7 @@ const MakingEngineCreator: React.FC = () => {
           <div>
             <h3 className="text-base font-semibold text-slate-900">kifus エンジン検証</h3>
             <p className="mt-1 text-sm text-slate-600">
-              サンプル2局面について、SFEN単体の評価と、moves 適用後の評価値を取得します。
+              サンプル2局面を、エンジンサーバーの共通設定で検証します。
             </p>
           </div>
           <div className="flex items-end gap-2">
@@ -509,8 +503,10 @@ const MakingEngineCreator: React.FC = () => {
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead className="text-xs text-slate-500">
-              <tr>
+                <tr>
                 <th className="border-b border-slate-200 px-2 py-2">#</th>
+                <th className="border-b border-slate-200 px-2 py-2">SFEN</th>
+                <th className="border-b border-slate-200 px-2 py-2">理想</th>
                 <th className="border-b border-slate-200 px-2 py-2">moves</th>
                 <th className="border-b border-slate-200 px-2 py-2">before best</th>
                 <th className="border-b border-slate-200 px-2 py-2">before eval</th>
@@ -523,6 +519,10 @@ const MakingEngineCreator: React.FC = () => {
               {sampleKifuRows.map((row) => (
                 <tr key={row.index} className="align-top">
                   <td className="border-b border-slate-100 px-2 py-2 font-mono text-xs">{row.index}</td>
+                  <td className="max-w-[320px] break-all border-b border-slate-100 px-2 py-2 font-mono text-xs">
+                    {row.position}
+                  </td>
+                  <td className="border-b border-slate-100 px-2 py-2 font-mono text-xs">{row.idealEval ?? '-'}</td>
                   <td className="border-b border-slate-100 px-2 py-2 font-mono text-xs">{row.moves.join(' ') || '-'}</td>
                   <td className="border-b border-slate-100 px-2 py-2 font-mono text-xs">{row.beforeBestmove || '-'}</td>
                   <td className="border-b border-slate-100 px-2 py-2 font-mono text-xs">{row.beforeEvalCp}</td>
@@ -536,7 +536,7 @@ const MakingEngineCreator: React.FC = () => {
               ))}
               {sampleKifuRows.length === 0 ? (
                 <tr>
-                  <td className="px-2 py-3 text-sm text-slate-500" colSpan={7}>
+                  <td className="px-2 py-3 text-sm text-slate-500" colSpan={8}>
                     まだ検証していません。
                   </td>
                 </tr>

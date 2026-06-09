@@ -1,13 +1,7 @@
 import { parseSfen } from './sfen';
 import type { Side } from '../types/shogi';
 
-function sigmoid(x: number): number {
-  return 1 / (1 + Math.exp(-x));
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
+export const WIN_RATE_K = 1000;
 
 function toUserPerspectiveCp(cp: number, userColor: Side): number {
   return userColor === 'sente' ? cp : -cp;
@@ -16,33 +10,35 @@ function toUserPerspectiveCp(cp: number, userColor: Side): number {
 export function cpToWinRatePercent(args: {
   cp: number;
   userColor: Side;
-  scale: number;
 }): number {
-  const { cp, userColor, scale } = args;
+  const { cp, userColor } = args;
 
   if (!Number.isFinite(cp)) {
     throw new Error(`[cpToWinRate] cp must be finite: ${cp}`);
   }
-  if (!Number.isFinite(scale) || scale <= 0) {
-    throw new Error(`[cpToWinRate] scale must be > 0: ${scale}`);
-  }
 
   const effectiveCp = toUserPerspectiveCp(cp, userColor);
-  const rawPercent = 100 * sigmoid(effectiveCp / scale);
-  return clamp(Math.round(rawPercent), 1, 99);
+  return evalToWinRatePercent(effectiveCp);
+}
+
+export function evalToWinRate(evalCp: number, k = WIN_RATE_K): number {
+  return 1 / (1 + Math.exp(-evalCp / k));
+}
+
+export function evalToWinRatePercent(evalCp: number, k = WIN_RATE_K): number {
+  return Math.round(evalToWinRate(evalCp, k) * 100);
 }
 
 export function cpToWinRatePercentFromRootSfen(args: {
   cp: number;
   rootSfen: string;
-  scale: number;
 }): number {
-  const { cp, rootSfen, scale } = args;
+  const { cp, rootSfen } = args;
   const userColor = parseSfen(rootSfen).sideToMove;
-  return cpToWinRatePercent({ cp, userColor, scale });
+  return cpToWinRatePercent({ cp, userColor });
 }
 
 // Backward-compatible helper used in older call sites
 export function evalCpToPercent(cp: number): number {
-  return cpToWinRatePercent({ cp, userColor: 'sente', scale: 500 });
+  return cpToWinRatePercent({ cp, userColor: 'sente' });
 }

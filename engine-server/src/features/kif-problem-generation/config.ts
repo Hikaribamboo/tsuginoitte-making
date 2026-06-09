@@ -1,69 +1,57 @@
-function envInt(name: string, fallback: number, min: number, max: number): number {
-  const raw = process.env[name];
-  if (!raw || !raw.trim()) return fallback;
-  const parsed = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
+import { envBool, envInt } from "../../env.js";
 
-function envBool(name: string, fallback: boolean): boolean {
-  const raw = process.env[name];
-  if (!raw || !raw.trim()) return fallback;
-  const normalized = raw.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  return fallback;
-}
-
+// 最終解析で使う探索深さ
 const FINALIZE_DEPTH = envInt("AMTS_FINALIZE_DEPTH", 26, 26, 80);
-const ENGINE_OWN_BOOK = envBool("AMTS_ENGINE_OWN_BOOK", false);
 
-// src/config.ts
 export const config = {
-  engine: {
-    threads: envInt("AMTS_ENGINE_THREADS", 4, 1, 128),
-    hashMb: envInt("AMTS_ENGINE_HASH_MB", 1024, 64, 262144),
-    disableBook: !ENGINE_OWN_BOOK,
-    ponder: false,
-  },
-
   scan: {
+    // 作問候補を探す最初の解析で使う探索深さ
     depth: envInt("AMTS_SCAN_DEPTH", 12, 1, 50),
+
+    // 最初の解析で取得する候補手数
     multipv: 1,
+
+    // 最初の解析結果をすべてログ出力するか
     debugAllPass1: envBool("AMTS_DEBUG_PASS1_ALL", false),
   },
 
   finalize: {
+    // 作問候補を確定する解析で使う探索深さ
     depth: FINALIZE_DEPTH,
-    multipv: 3,
+
+    // 保存する読み筋の最大手数
     pvPlies: 9,
 
-    blunderThresholdCp: 300,
+    // 実戦手を悪手候補と判定する評価値差
+    blunderThresholdCp: 200,
 
-    choiceDepthSteps: [FINALIZE_DEPTH, FINALIZE_DEPTH + 4],
+    // 同じ棋譜から作る問題同士に必要な最小手数差
+    minCandidateGapPlies: 10,
 
-    dynamicMpBaseSteps: [3, 10],
-    dynamicMpTail: 30,
-    dynamicMpInsert20WorstLossThreshold: 400,
-
-    minCandidateGapPlies: 12,
-
+    // ユーザー側が不利すぎる問題を除外する評価値
     rejectIfBestTooBadCp: 400,
+
+    // ユーザー側が有利すぎる問題を除外する評価値
     rejectIfBestTooGoodCp: 2400,
   },
 
-  eval: {
-    scale: envInt("FV_SCALE", 40, 1, 10000),
-  },
+  // 不自然な評価値変化として扱う最小差
+  suspiciousMinDiff: envInt("AMTS_SUSPICIOUS_MIN_DIFF", 140, 1, 10000),
 
-  suspiciousMinDiff: envInt("AMTS_SUSPICIOUS_MIN_DIFF", 300, 1, 10000),
-  suspiciousMaxDiff: envInt("AMTS_SUSPICIOUS_MAX_DIFF", 1600, 1, 10000),
+  // 不自然な評価値変化として扱う最大差
+  suspiciousMaxDiff: envInt("AMTS_SUSPICIOUS_MAX_DIFF", 1200, 1, 10000),
 
+  // 一局から検査する作問候補の最大数
   maxCandidates: envInt("AMTS_MAX_CANDIDATES", 20, 1, 300),
+
+  // 一局から作成する問題の最大数
   maxProblemsPerGame: envInt("AMTS_MAX_PROBLEMS_PER_GAME", 3, 1, 50),
+
+  // 一局の最初の解析から保持する候補の最大数
   maxScanResultsPerGame: envInt("AMTS_MAX_SCAN_RESULTS_PER_GAME", 12, 1, 200),
 
   batch: {
+    // 一回の処理で取得する棋譜数
     generateBatchSize: envInt("AMTS_BATCH_SIZE", 1, 1, 5000),
   },
 } as const;

@@ -1,4 +1,6 @@
 import { getEnginePath } from "../../../services/engine/engineClient";
+import { engineConfig } from "../../../engine-config.js";
+import { envBool, envInt } from "../../../env.js";
 
 export type SelfPlaySideConfig = {
   enginePath: string;
@@ -22,22 +24,6 @@ export type SelfPlayConfigProfile = {
   engineWhite: SelfPlaySideConfig;
 };
 
-function envInt(name: string, fallback: number, min: number, max: number): number {
-  const raw = process.env[name];
-  if (!raw || !raw.trim()) return fallback;
-  const parsed = Number.parseInt(raw.trim(), 10);
-  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) return fallback;
-  return Math.min(max, Math.max(min, parsed));
-}
-
-function envBool(name: string, fallback: boolean): boolean {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  if (["1", "true", "yes", "on"].includes(raw.toLowerCase())) return true;
-  if (["0", "false", "no", "off"].includes(raw.toLowerCase())) return false;
-  return fallback;
-}
-
 const defaultPath = process.env.ENGINE_PATH?.trim() || getEnginePath();
 
 export const selfPlayProfiles: Record<string, SelfPlayConfigProfile> = {
@@ -49,20 +35,20 @@ export const selfPlayProfiles: Record<string, SelfPlayConfigProfile> = {
     verboseLogging: true,
     engineBlack: {
       enginePath: defaultPath,
-      threads: 2,
-      hashMb: 512,
-      disableBook: true,
-      ponder: false,
+      threads: engineConfig.threads,
+      hashMb: engineConfig.hashMb,
+      disableBook: !engineConfig.ownBook,
+      ponder: engineConfig.ponder,
       nodes: 1200,
       movetimeMs: 120,
       randomness: 0,
     },
     engineWhite: {
       enginePath: defaultPath,
-      threads: 2,
-      hashMb: 512,
-      disableBook: true,
-      ponder: false,
+      threads: engineConfig.threads,
+      hashMb: engineConfig.hashMb,
+      disableBook: !engineConfig.ownBook,
+      ponder: engineConfig.ponder,
       nodes: 1200,
       movetimeMs: 120,
       randomness: 0,

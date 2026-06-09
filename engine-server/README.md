@@ -14,6 +14,7 @@ npm run dev
 
 Required or commonly used variables:
 
+- Engine defaults and USI options are centralized in `src/engine-config.ts`
 - `PORT` default `8765`
 - `HOST` default `0.0.0.0`
 - `ENGINE_PATH`
@@ -22,7 +23,8 @@ Required or commonly used variables:
 - `AMTS_ENGINE_HASH_MB` default `1024` on Windows
 - `AMTS_ENGINE_OWN_BOOK` default `false`
 - `AMTS_FINALIZE_DEPTH` default used by kif problem generation final pass
-- `FV_SCALE` default `40`, used for kif problem win-rate conversion
+- `FV_SCALE` default `16`, passed to the shogi engine
+- Win-rate conversion uses `k = 1000`
 - `ENABLE_SHOGI_ENGINE` default enabled by the scripts
 - `SUPABASE_URL` required by kifs/job generation scripts
 - `SUPABASE_SERVICE_ROLE_KEY` required by kifs/job generation scripts
