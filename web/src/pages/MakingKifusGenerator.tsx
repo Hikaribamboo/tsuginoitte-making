@@ -15,6 +15,7 @@ import {
   type MakingJobSnapshot,
 } from '../api/backend';
 import { parseKifRecord } from '../lib/kif-parser';
+import { parseQuestKifuImport, type QuestKifuImportResult } from '../lib/quest-kifu-import';
 
 type KifusGenerateFormState = {
   gamesPerBasePosition: string;
@@ -27,6 +28,12 @@ type BasePositionFormState = {
   initialSfen: string;
   tagsText: string;
   note: string;
+};
+
+type QuestImportFormState = {
+  username: string;
+  requestedCount: string;
+  text: string;
 };
 
 const DEFAULT_FORM: KifusGenerateFormState = {
@@ -42,9 +49,16 @@ const DEFAULT_BASE_POSITION_FORM: BasePositionFormState = {
   note: '',
 };
 
+const DEFAULT_QUEST_IMPORT_FORM: QuestImportFormState = {
+  username: '',
+  requestedCount: '',
+  text: '',
+};
+
 const MakingKifusGenerator: React.FC = () => {
   const [form, setForm] = useState<KifusGenerateFormState>(DEFAULT_FORM);
   const [basePositionForm, setBasePositionForm] = useState<BasePositionFormState>(DEFAULT_BASE_POSITION_FORM);
+  const [questImportForm, setQuestImportForm] = useState<QuestImportFormState>(DEFAULT_QUEST_IMPORT_FORM);
   const [basePositions, setBasePositions] = useState<BasePosition[]>([]);
   const [jobs, setJobs] = useState<MakingJobSnapshot[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -54,6 +68,10 @@ const MakingKifusGenerator: React.FC = () => {
   const [starting, setStarting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [savingBasePosition, setSavingBasePosition] = useState(false);
+  const [questImporting, setQuestImporting] = useState(false);
+  const [questImportResult, setQuestImportResult] = useState<QuestKifuImportResult | null>(null);
+  const [questImportError, setQuestImportError] = useState('');
+  const [questImportMessage, setQuestImportMessage] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
@@ -118,6 +136,10 @@ const MakingKifusGenerator: React.FC = () => {
 
   const updateBasePosition = <K extends keyof BasePositionFormState>(key: K, value: BasePositionFormState[K]) => {
     setBasePositionForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updateQuestImport = <K extends keyof QuestImportFormState>(key: K, value: QuestImportFormState[K]) => {
+    setQuestImportForm((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleSaveBasePosition = async () => {
@@ -220,6 +242,48 @@ const MakingKifusGenerator: React.FC = () => {
       setError(nextError?.message ?? '棋譜アップロードに失敗しました');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const questImportPreview = useMemo(() => {
+    if (!questImportForm.text.trim()) return null;
+    return parseQuestKifuImport({
+      text: questImportForm.text,
+      username: questImportForm.username.trim() || null,
+      requestedCount: parseOptionalInt(questImportForm.requestedCount),
+    });
+  }, [questImportForm.requestedCount, questImportForm.text, questImportForm.username]);
+
+  const questImportDisplay = questImportPreview ?? questImportResult;
+
+  const handleQuestImport = async () => {
+    setQuestImporting(true);
+    setQuestImportError('');
+    setQuestImportMessage('');
+    setError('');
+    setMessage('');
+
+    try {
+      const parsed = parseQuestKifuImport({
+        text: questImportForm.text,
+        username: questImportForm.username.trim() || null,
+        requestedCount: parseOptionalIntStrict(questImportForm.requestedCount),
+      });
+
+      if (parsed.rows.length === 0) {
+        const firstError = parsed.errors[0]?.message ?? '有効な棋譜を1件も解析できませんでした';
+        throw new Error(firstError);
+      }
+
+      const inserted = await createKifus(parsed.rows);
+      await refreshSummary();
+      setQuestImportResult(parsed);
+      setQuestImportMessage(`将棋クエスト棋譜を ${parsed.records.length} 局解析し、${inserted} 件保存しました（失敗: ${parsed.errors.length} 件）`);
+      setQuestImportForm((prev) => ({ ...prev, text: '' }));
+    } catch (nextError: any) {
+      setQuestImportError(nextError?.message ?? '将棋クエスト棋譜の取り込みに失敗しました');
+    } finally {
+      setQuestImporting(false);
     }
   };
 
@@ -373,6 +437,105 @@ const MakingKifusGenerator: React.FC = () => {
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">将棋クエスト棋譜取り込み</h3>
+                <div className="text-xs text-slate-500">貼り付けた棋譜をUSIへ正規化し、既存のmaking_kifus保存処理に流します。</div>
+              </div>
+              <button
+                type="button"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                onClick={() => void handleQuestImport()}
+                disabled={questImporting}
+              >
+                {questImporting ? '取り込み中...' : '解析してDB保存'}
+              </button>
+            </div>
+
+            <div className="grid gap-2 md:grid-cols-2">
+              <FieldInput
+                label="将棋クエストのユーザー名"
+                value={questImportForm.username}
+                onChange={(next) => updateQuestImport('username', next)}
+                placeholder="任意"
+              />
+              <FieldInput
+                label="取得件数 / 参考件数"
+                value={questImportForm.requestedCount}
+                onChange={(next) => updateQuestImport('requestedCount', next)}
+                placeholder="任意"
+              />
+            </div>
+
+            <label className="mt-2 flex flex-col gap-1">
+              <span className="text-xs text-slate-600">棋譜テキスト貼り付け</span>
+              <textarea
+                className="min-h-40 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900"
+                value={questImportForm.text}
+                onChange={(event) => updateQuestImport('text', event.target.value)}
+                placeholder="将棋クエストの棋譜表示をそのまま貼り付けてください"
+              />
+            </label>
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <QuestStatCard label="解析候補" value={questImportDisplay?.records.length ?? 0} />
+              <QuestStatCard label="解析失敗" value={questImportDisplay?.errors.length ?? 0} />
+              <QuestStatCard label="保存対象" value={questImportDisplay?.rows.length ?? 0} />
+            </div>
+
+            {questImportError ? <Banner tone="error" text={questImportError} /> : null}
+            {questImportMessage ? <Banner tone="success" text={questImportMessage} /> : null}
+
+            <div className="mt-3 space-y-3">
+              <div>
+                <div className="mb-1 text-sm font-semibold text-slate-800">取り込みプレビュー</div>
+                {questImportDisplay && questImportDisplay.records.length > 0 ? (
+                  <div className="space-y-2">
+                    {questImportDisplay.records.slice(0, 3).map((record, index) => (
+                      <div key={record.sourceRef} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-slate-900">局面 {index + 1}</div>
+                          <div className="text-xs text-slate-500">{record.moves.length} 手 / {record.sourceRef}</div>
+                        </div>
+                        <div className="mt-1 font-mono text-[11px] text-slate-600 break-all">{record.finalSfen}</div>
+                        <div className="mt-2 grid gap-1 text-xs text-slate-600">
+                          {record.steps.slice(0, 2).map((step) => (
+                            <div key={`${record.sourceRef}-${step.ply}`} className="rounded bg-white px-2 py-1">
+                              <span className="font-semibold text-slate-700">{step.ply}手目</span>
+                              <span className="ml-2 font-mono">{step.label}</span>
+                              <span className="ml-2 text-slate-500">{step.sideToMove === 'sente' ? '先手' : '後手'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-500">棋譜を貼り付けると、変換結果の概要を表示します。</div>
+                )}
+              </div>
+
+              {questImportDisplay?.errors.length ? (
+                <div>
+                  <div className="mb-1 text-sm font-semibold text-slate-800">失敗した棋譜</div>
+                  <div className="space-y-2">
+                    {questImportDisplay.errors.map((item) => (
+                      <div key={`${item.sourceRef}-${item.recordIndex}`} className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                        <div className="font-semibold">{item.sourceRef}</div>
+                        <div>#{item.recordIndex} {item.message}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-2 text-xs text-slate-500">
+              まずは貼り付け方式を優先しています。KIF形式の棋譜を将棋クエストから共有表示で取得できる場合は、そのまま貼り付けてください。
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="mb-3 text-base font-semibold text-slate-900">making_kifusテーブル集計</h3>
             {summaryLoading ? (
               <div className="text-sm text-slate-500">集計中...</div>
@@ -477,6 +640,23 @@ function parseRequiredInt(raw: string, label: string, min: number): number {
   return parsed;
 }
 
+function parseOptionalInt(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
+}
+
+function parseOptionalIntStrict(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
+    throw new Error('取得件数は整数で指定してください');
+  }
+  return parsed;
+}
+
 function extractInitialSfen(sourceText: string, fallbackCurrentSfen: string): string {
   const singleLine = sourceText.replace(/\r\n?/g, '\n').trim().replace(/\s+/g, ' ');
   const embedded = singleLine.match(/position\s+sfen\s+(.+)$/i);
@@ -542,6 +722,15 @@ function Banner({ text, tone = 'info' }: { text: string; tone?: 'info' | 'error'
         : 'border-sky-200 bg-sky-50 text-sky-700';
 
   return <div className={`rounded-lg border px-3 py-2 text-sm ${cls}`}>{text}</div>;
+}
+
+function QuestStatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="text-sm font-semibold text-slate-900">{value.toLocaleString('ja-JP')}</div>
+    </div>
+  );
 }
 
 function jobStatusClass(status: MakingJobSnapshot['status']): string {

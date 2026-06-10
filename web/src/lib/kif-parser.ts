@@ -179,6 +179,7 @@ function parseHandText(text: string): Record<HandPieceType, number> {
 }
 
 interface ParsedPositionText {
+  initialSfen: string;
   sfen: string;
   moves: string[];
   moveNumber: number;
@@ -249,6 +250,7 @@ function parseSfenWithMovesText(text: string): ParsedPositionText | null {
   const moves = moveSplit[1]?.trim() ? moveSplit[1].trim().split(/\s+/) : [];
   const moveNumber = parseSfen(sfen).moveNumber;
   return {
+    initialSfen: sfen,
     sfen: moves.length > 0 ? computeSfenFromMoves(sfen, moveNumber, moves) : sfen,
     moves,
     moveNumber,
@@ -335,7 +337,7 @@ function parseBoardDiagramPosition(text: string): ParsedPositionText | null {
   const sideToMove: Side = inferredSide ?? (moveNumber % 2 === 1 ? 'sente' : 'gote');
   const sfen = boardToSfen(board, sideToMove, senteHand, goteHand, moveNumber);
 
-  return { sfen, moves: [], moveNumber };
+  return { initialSfen: sfen, sfen, moves: [], moveNumber };
 }
 
 function extractKifMoveFromLine(line: string): { moveNumber: number; moveText: string } | null {
@@ -355,6 +357,8 @@ function extractKifMoveFromLine(line: string): { moveNumber: number; moveText: s
 // ---- Full KIF record parser ----
 
 export interface KifParseResult {
+  initialSfen: string;
+  initialMoveNumber: number;
   sfen: string;
   moves: string[];
   moveLabels: string[];
@@ -365,12 +369,24 @@ export function parseKifRecord(text: string): KifParseResult | null {
 
   const parsedSfenText = parseSfenWithMovesText(trimmed);
   if (parsedSfenText) {
-    return { sfen: parsedSfenText.sfen, moves: parsedSfenText.moves, moveLabels: [] };
+    return {
+      initialSfen: parsedSfenText.initialSfen,
+      initialMoveNumber: parsedSfenText.moveNumber,
+      sfen: parsedSfenText.sfen,
+      moves: parsedSfenText.moves,
+      moveLabels: [],
+    };
   }
 
   // Allow pasting a plain SFEN string
   if (isLikelySfen(trimmed)) {
-    return { sfen: trimmed, moves: [], moveLabels: [] };
+    return {
+      initialSfen: trimmed,
+      initialMoveNumber: parseSfen(trimmed).moveNumber,
+      sfen: trimmed,
+      moves: [],
+      moveLabels: [],
+    };
   }
 
   const basePosition = parseBoardDiagramPosition(trimmed);
@@ -404,11 +420,13 @@ export function parseKifRecord(text: string): KifParseResult | null {
   }
 
   if (moves.length === 0) {
-    return basePosition ? { sfen: basePosition.sfen, moves: [], moveLabels: [] } : null;
+    return basePosition
+      ? { initialSfen, initialMoveNumber, sfen: basePosition.sfen, moves: [], moveLabels: [] }
+      : null;
   }
 
   const sfen = computeSfenFromMoves(initialSfen, initialMoveNumber, moves);
-  return { sfen, moves, moveLabels };
+  return { initialSfen, initialMoveNumber, sfen, moves, moveLabels };
 }
 
 // ---- Branching KIF record parser ----

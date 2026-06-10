@@ -42,6 +42,10 @@ export interface CreateKifuInput {
   moves: string[];
   tags?: string[];
   basePositionId?: string | null;
+  sourceType?: string;
+  sourceRef?: string | null;
+  sourcePayload?: Record<string, unknown>;
+  sourceSnapshot?: Record<string, unknown>;
 }
 
 const KNOWN_STATUSES: KifuStatus[] = ['pending', 'processing', 'done', 'failed', 'impossible'];
@@ -114,8 +118,8 @@ export async function createKifus(inputs: CreateKifuInput[]): Promise<number> {
   if (inputs.length === 0) return 0;
 
   const payload = inputs.map((input) => ({
-    source_type: 'imported',
-    source_ref: null,
+    source_type: input.sourceType ?? 'imported',
+    source_ref: input.sourceRef ?? null,
     initial_sfen: input.initialSfen,
     moves: input.moves.join(' '),
     status: 'pending',
@@ -124,7 +128,9 @@ export async function createKifus(inputs: CreateKifuInput[]): Promise<number> {
     source_payload: {
       created_from: 'making_kifus_generator',
       moves_count: input.moves.length,
+      ...(input.sourcePayload ?? {}),
     },
+    source_snapshot: input.sourceSnapshot ?? {},
   }));
 
   const chunkSize = 500;

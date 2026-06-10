@@ -2792,7 +2792,12 @@ function buildLegalChoicePv(args: {
   maxMoves: number;
 }): string[] {
   const { rootSfen, introMoves, choiceUsi, enginePv, maxMoves } = args;
-  const continuation = enginePv[0] === choiceUsi ? enginePv.slice(1) : enginePv;
+  const choiceIndex = enginePv.findIndex((move) => move === choiceUsi);
+  const continuation = choiceIndex >= 0
+    ? enginePv.slice(choiceIndex + 1)
+    : enginePv[0] === choiceUsi
+      ? enginePv.slice(1)
+      : enginePv;
   const fullPv = [choiceUsi];
 
   for (const move of continuation) {
