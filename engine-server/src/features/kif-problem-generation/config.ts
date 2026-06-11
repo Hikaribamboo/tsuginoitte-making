@@ -39,6 +39,9 @@ export const config = {
 
     // pass1評価で明らかに範囲外の局面を早期棄却する際の安全幅
     earlyRejectMarginCp: 800,
+
+    // 1回のdepth探索が難局面で長時間停止し続けるのを防ぐ上限
+    maxDepthRunMs: envInt("AMTS_MAX_DEPTH_RUN_MS", 5 * 60 * 1000, 10_000, 60 * 60 * 1000),
   },
 
   // 一局から作成する問題の最大数

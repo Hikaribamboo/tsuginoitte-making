@@ -57,23 +57,11 @@ export async function main() {
     auth: { persistSession: false },
   });
 
-  const engine = createUsiEngineClient(enginePath, engineEvalDir);
-
   console.log(
-    `設定: pass1 depth=${config.scan.depth} minDiff=${config.scan.minDiff} pass2 depth=${config.finalize.depth} minDiff=${config.finalize.minDiff} maxProblemsPerGame=${config.maxProblemsPerGame} minCandidateGapPlies=${config.finalize.minCandidateGapPlies} threads=${engineConfig.threads} cores=${engineConfig.cores} hashMb=${engineConfig.hashMb}`,
+    `設定: pass1 depth=${config.scan.depth} minDiff=${config.scan.minDiff} pass2 depth=${config.finalize.depth} minDiff=${config.finalize.minDiff} maxDepthRunMs=${config.finalize.maxDepthRunMs} maxProblemsPerGame=${config.maxProblemsPerGame} minCandidateGapPlies=${config.finalize.minCandidateGapPlies} threads=${engineConfig.threads} cores=${engineConfig.cores} hashMb=${engineConfig.hashMb}`,
   );
 
-  await engine.init({
-    multipv: config.scan.multipv,
-    disableBook: !engineConfig.ownBook,
-    threads: engineConfig.threads,
-    cores: engineConfig.cores,
-    hashMb: engineConfig.hashMb,
-    pvIntervalMs: Math.max(engineConfig.pvIntervalMs, 1000),
-    ponder: engineConfig.ponder,
-  });
-
-  try {
+  {
     const { data, error } = await supabase.rpc("claim_making_kifus", {
       batch_size: config.batch.generateBatchSize,
     });
@@ -95,8 +83,19 @@ export async function main() {
     for (let i = 0; i < kifus.length; i++) {
       const kifu = kifus[i];
       let finalized = false;
+      const engine = createUsiEngineClient(enginePath, engineEvalDir);
 
       try {
+        console.log(`対象棋譜: id=${kifu.id} index=${i + 1}/${kifus.length}`);
+        await engine.init({
+          multipv: config.scan.multipv,
+          disableBook: !engineConfig.ownBook,
+          threads: engineConfig.threads,
+          cores: engineConfig.cores,
+          hashMb: engineConfig.hashMb,
+          pvIntervalMs: Math.max(engineConfig.pvIntervalMs, 1000),
+          ponder: engineConfig.ponder,
+        });
         const initialSfen = kifu.initial_sfen;
         const moves = splitMoves(kifu.moves);
         const scans = await scanGame({ engine, initialSfen, moves });
@@ -210,6 +209,7 @@ export async function main() {
         }
 
         if (built === 0) {
+          console.log(`作問結果: kifu=${kifu.id} created=0 existing=0 accepted=0 status=impossible`);
           const { error: impossibleErr } = await supabase.from("making_kifus").update({ status: "impossible" }).eq("id", kifu.id);
           if (impossibleErr) throw impossibleErr;
           finalized = true;
@@ -283,10 +283,11 @@ export async function main() {
           }
         }
         console.error(`[batchGenerate] kifu ${kifu.id} failed: ${String(e?.message ?? e)}`);
+      } finally {
+        await engine.quit().catch(() => undefined);
+        engine.kill();
       }
     }
-  } finally {
-    await engine.quit();
   }
 }
 

@@ -176,8 +176,9 @@ async function analyzeMove(args: {
   pvPlies: number;
   moveUsi: string;
   perfLabel?: string;
+  maxDurationMs?: number;
 }): Promise<PvInfo | null> {
-  const { engine, positionCommand, depth, pvPlies, moveUsi, perfLabel } = args;
+  const { engine, positionCommand, depth, pvPlies, moveUsi, perfLabel, maxDurationMs } = args;
 
   const endAll = startTimer();
 
@@ -192,6 +193,8 @@ async function analyzeMove(args: {
     pvPlies,
     searchMoves: [moveUsi],
     label: perfLabel ? `${perfLabel}|searchMove` : "scan-pass2-searchMove",
+    maxDurationMs,
+    stopWhen: (info) => info.evalType === "mate",
   });
   perfMark(
     perfLabel ? `${perfLabel}|analyzeMove` : "scanGame.pass2.analyzeMove.analyze",
@@ -432,6 +435,7 @@ export async function scanGame(args: {
 
     const pvPlies = Math.max(config.finalize.pvPlies, 9);
     const finalDepth = config.finalize.depth;
+    const maxDepthRunMs = config.finalize.maxDepthRunMs;
     const wrongProbeDepth = Math.min(16, finalDepth);
     const wrongProbeMultiPv = 5;
     const threshold = config.finalize.minDiff;
@@ -473,6 +477,8 @@ export async function scanGame(args: {
             depth: finalDepth,
             pvPlies,
             label: `scan-pass2-t${t}-best-d${finalDepth}`,
+            maxDurationMs: maxDepthRunMs,
+            stopWhen: (info) => info.evalType === "mate",
           });
           bestMs = bestTimer();
           depthRunLogs.push({ purpose: "best", moveUsi: null, depth: finalDepth, elapsedMs: bestMs, status: "OK" });
@@ -510,6 +516,7 @@ export async function scanGame(args: {
             pvPlies,
             moveUsi: actualMoveUsi,
             perfLabel: `${candidateLabel}|actual-d${finalDepth}`,
+            maxDurationMs: maxDepthRunMs,
           });
           actualMs = actualTimer();
           depthRunLogs.push({ purpose: "actual", moveUsi: actualMoveUsi, depth: finalDepth, elapsedMs: actualMs, status: "OK" });
@@ -575,6 +582,7 @@ export async function scanGame(args: {
               pvPlies,
               moveUsi: wrongUsi,
               perfLabel: `${candidateLabel}|wrong2-${wrongUsi}-d${finalDepth}`,
+              maxDurationMs: maxDepthRunMs,
             });
             const elapsedMs = wrongFinalTimer();
             wrongFinalMs += elapsedMs;

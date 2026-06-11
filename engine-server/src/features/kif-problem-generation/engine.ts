@@ -109,7 +109,9 @@ export class UsiEngine {
   }
 
   write(line: string) {
-    if (this.proc.stdin.destroyed || this.proc.stdin.writableEnded) return;
+    if (this.proc.exitCode != null || this.proc.signalCode != null || this.proc.stdin.destroyed || this.proc.stdin.writableEnded) {
+      throw new Error("engine is not running");
+    }
     this.proc.stdin.write(line.endsWith("\n") ? line : line + "\n");
   }
 
@@ -191,23 +193,48 @@ export class UsiEngine {
     pvPlies: number;
     searchMoves?: string[];
     label?: string;
+    maxDurationMs?: number;
+    stopWhen?: (info: PvInfo) => boolean;
   }): Promise<AnalyzeResult> {
     const latest: Map<number, PvInfo> = new Map();
     let bestmove: string | null = null;
     const forcedMove = args.searchMoves?.length === 1 ? args.searchMoves[0] : null;
+    let stopReason: string | null = null;
+    let stopSent = false;
 
     const end = startTimer();
 
     this.write(args.positionCommand);
 
     return new Promise((resolve, reject) => {
+      let forceStopTimer: NodeJS.Timeout | null = null;
+      const requestStop = (reason: string) => {
+        if (stopSent) return;
+        stopSent = true;
+        stopReason = reason;
+        this.write("stop");
+        forceStopTimer = setTimeout(() => {
+          this.proc.kill();
+        }, engineConfig.stopTimeoutMs);
+      };
+      const durationTimer =
+        args.maxDurationMs != null
+          ? setTimeout(() => requestStop(`analysis exceeded ${args.maxDurationMs}ms`), args.maxDurationMs)
+          : null;
+
       this.pendingReject = reject;
-      this.pendingCleanup = undefined;
+      this.pendingCleanup = () => {
+        if (durationTimer) clearTimeout(durationTimer);
+        if (forceStopTimer) clearTimeout(forceStopTimer);
+      };
 
       this.onLine = (line) => {
         if (line.startsWith("info ")) {
           const info = parseInfoLine(line);
-          if (info) latest.set(info.multipv, { ...info, pv: info.pv.slice(0, args.pvPlies) });
+          if (info) {
+            latest.set(info.multipv, { ...info, pv: info.pv.slice(0, args.pvPlies) });
+            if (args.stopWhen?.(info)) requestStop("analysis stop condition matched");
+          }
           return;
         }
 
@@ -229,6 +256,10 @@ export class UsiEngine {
           const tag = args.label ? `|${args.label}` : "";
           perfMark(`engine.analyze${tag}`, ms);
 
+          if (stopReason) {
+            reject(new Error(stopReason));
+            return;
+          }
           resolve({ infos, bestmove });
         }
       };
@@ -242,7 +273,13 @@ export class UsiEngine {
   }
 
   async quit() {
-    this.write("quit");
+    if (this.proc.exitCode == null && this.proc.signalCode == null && !this.proc.stdin.destroyed && !this.proc.stdin.writableEnded) {
+      this.write("quit");
+    }
+  }
+
+  kill() {
+    this.proc.kill();
   }
 }
 

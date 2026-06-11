@@ -14,6 +14,16 @@ export type AnalyzeResult = {
   bestmove: string | null;
 };
 
+export type AnalyzeArgs = {
+  positionCommand: string;
+  depth: number;
+  pvPlies: number;
+  searchMoves?: string[];
+  label?: string;
+  maxDurationMs?: number;
+  stopWhen?: (info: PvInfo) => boolean;
+};
+
 export type EngineInitOptions = {
   multipv: number;
   disableBook: boolean;
@@ -27,10 +37,11 @@ export type EngineInitOptions = {
 export interface EngineClient {
   init(opts: EngineInitOptions): Promise<void>;
   setMultiPv(multipv: number): Promise<void>;
-  analyze(args: { positionCommand: string; depth: number; pvPlies: number; searchMoves?: string[]; label?: string }): Promise<AnalyzeResult>;
+  analyze(args: AnalyzeArgs): Promise<AnalyzeResult>;
   write(line: string): void;
   waitFor(predicate: (line: string) => boolean, timeoutMs?: number): Promise<string>;
   quit(): Promise<void>;
+  kill(): void;
 }
 
 export function createUsiEngineClient(engineExePath: string, engineEvalDir?: string): EngineClient {
@@ -45,6 +56,7 @@ export function createUsiEngineClient(engineExePath: string, engineEvalDir?: str
     quit: async () => {
       await engine.quit();
     },
+    kill: () => engine.kill(),
   };
 }
 
