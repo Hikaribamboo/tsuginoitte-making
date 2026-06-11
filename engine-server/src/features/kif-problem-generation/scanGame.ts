@@ -439,113 +439,128 @@ export async function scanGame(args: {
     let actualInfo: PvInfo | null = null;
     let selectedWrongInfo: PvInfo | null = null;
 
-    await engine.setMultiPv(1);
-    const bestAnalysis = await engine.analyze({
-      positionCommand: positionCommandS,
-      depth: finalDepth,
-      pvPlies,
-      label: `scan-pass2-t${t}-best-d${finalDepth}`,
-    });
-    gathered = mergeUniqueByMove(gathered, bestAnalysis.infos);
-    const finalBest = pickBestCpInfo(bestAnalysis.infos);
-    const correctUsi = finalBest?.pv[0] ?? null;
-    console.log(`pass2 best row${t + 1} d${finalDepth} ${finalBest ? formatMoveEval(finalBest, turnAtS) : "-"}`);
+    console.log(`pass2 candidate row${t + 1} start depth=${finalDepth} mp=${wrongProbeMps.join('/')}`);
 
-    if (!finalBest || !correctUsi) {
-      giveUpReason = "最善手なし";
-    } else {
-      const userCp = computeUserCpFromGathered({ gathered, questionTurn: turnAtS });
-      if (userCp != null && rejectIfBestTooBadCp != null && userCp < -rejectIfBestTooBadCp) {
-        giveUpReason = `ユーザー不利 turn=${turnAtS} userCp ${userCp} 下限 ${rejectIfBestTooBadCp}`;
-      } else if (userCp != null && rejectIfBestTooGoodCp != null && userCp > rejectIfBestTooGoodCp) {
-        giveUpReason = `ユーザー有利すぎ turn=${turnAtS} userCp ${userCp} 上限 ${rejectIfBestTooGoodCp}`;
-      }
-    }
-
-    if (!giveUpReason) {
-      actualInfo = await analyzeMove({
-        engine,
+    try {
+      console.log(`pass2 candidate row${t + 1} best start`);
+      await engine.setMultiPv(1);
+      const bestAnalysis = await engine.analyze({
         positionCommand: positionCommandS,
         depth: finalDepth,
         pvPlies,
-        moveUsi: actualMoveUsi,
-        perfLabel: `${candidateLabel}|actual-d${finalDepth}`,
+        label: `scan-pass2-t${t}-best-d${finalDepth}`,
       });
-      if (actualInfo) gathered = mergeUniqueByMove(gathered, [actualInfo]);
-      if (!actualInfo) {
-        giveUpReason = "実戦手評価なし";
-      } else if (finalBest) {
-        const actualLoss = formatLoss({
-          best: finalBest,
-          candidate: actualInfo,
-          turnAtS,
-        });
-        if (actualLoss == null || actualLoss < threshold) {
-          giveUpReason = `実戦手の悪手度不足 loss=${actualLoss ?? "none"} 下限 ${threshold}`;
+      console.log(`pass2 candidate row${t + 1} best done`);
+      gathered = mergeUniqueByMove(gathered, bestAnalysis.infos);
+      const finalBest = pickBestCpInfo(bestAnalysis.infos);
+      const correctUsi = finalBest?.pv[0] ?? null;
+      console.log(`pass2 best row${t + 1} d${finalDepth} ${finalBest ? formatMoveEval(finalBest, turnAtS) : "-"}`);
+
+      if (!finalBest || !correctUsi) {
+        giveUpReason = "最善手なし";
+      } else {
+        const userCp = computeUserCpFromGathered({ gathered, questionTurn: turnAtS });
+        if (userCp != null && rejectIfBestTooBadCp != null && userCp < -rejectIfBestTooBadCp) {
+          giveUpReason = `ユーザー不利 turn=${turnAtS} userCp ${userCp} 下限 ${rejectIfBestTooBadCp}`;
+        } else if (userCp != null && rejectIfBestTooGoodCp != null && userCp > rejectIfBestTooGoodCp) {
+          giveUpReason = `ユーザー有利すぎ turn=${turnAtS} userCp ${userCp} 上限 ${rejectIfBestTooGoodCp}`;
         }
       }
-    }
 
-    if (!giveUpReason && correctUsi) {
-      const triedWrongMoves = new Set<string>();
-
-      for (const mp of wrongProbeMps) {
-        await engine.setMultiPv(mp);
-        const probe = await engine.analyze({
+      if (!giveUpReason) {
+        console.log(`pass2 candidate row${t + 1} actual start move=${actualMoveUsi}`);
+        actualInfo = await analyzeMove({
+          engine,
           positionCommand: positionCommandS,
-          depth: wrongProbeDepth,
+          depth: finalDepth,
           pvPlies,
-          label: `scan-pass2-t${t}-wrongProbe-d${wrongProbeDepth}-mp${mp}`,
+          moveUsi: actualMoveUsi,
+          perfLabel: `${candidateLabel}|actual-d${finalDepth}`,
         });
-        const candidatesForWrong2 = listWrong2Candidates({
-          infos: probe.infos,
-          correctUsi,
-          actualMoveUsi,
-          threshold,
-          turnAtS,
-          randomSeed: t * 1000 + mp,
-        });
-
-        for (const candidate of candidatesForWrong2) {
-          const wrongUsi = candidate.info.pv[0];
-          if (!wrongUsi || triedWrongMoves.has(wrongUsi)) continue;
-          triedWrongMoves.add(wrongUsi);
-
-          const wrongFinal = await analyzeMove({
-            engine,
-            positionCommand: positionCommandS,
-            depth: finalDepth,
-            pvPlies,
-            moveUsi: wrongUsi,
-            perfLabel: `${candidateLabel}|wrong2-${wrongUsi}-d${finalDepth}`,
+        console.log(`pass2 candidate row${t + 1} actual done`);
+        if (actualInfo) gathered = mergeUniqueByMove(gathered, [actualInfo]);
+        if (!actualInfo) {
+          giveUpReason = "実戦手評価なし";
+        } else if (finalBest) {
+          const actualLoss = formatLoss({
+            best: finalBest,
+            candidate: actualInfo,
+            turnAtS,
           });
-          if (wrongFinal) gathered = mergeUniqueByMove(gathered, [wrongFinal]);
+          if (actualLoss == null || actualLoss < threshold) {
+            giveUpReason = `実戦手の悪手度不足 loss=${actualLoss ?? "none"} 下限 ${threshold}`;
+          }
+        }
+      }
 
+      if (!giveUpReason && correctUsi) {
+        const triedWrongMoves = new Set<string>();
+
+        for (const mp of wrongProbeMps) {
+          console.log(`pass2 candidate row${t + 1} wrongProbe start mp=${mp}`);
+          await engine.setMultiPv(mp);
+          const probe = await engine.analyze({
+            positionCommand: positionCommandS,
+            depth: wrongProbeDepth,
+            pvPlies,
+            label: `scan-pass2-t${t}-wrongProbe-d${wrongProbeDepth}-mp${mp}`,
+          });
+          console.log(`pass2 candidate row${t + 1} wrongProbe done mp=${mp}`);
+          const candidatesForWrong2 = listWrong2Candidates({
+            infos: probe.infos,
+            correctUsi,
+            actualMoveUsi,
+            threshold,
+            turnAtS,
+            randomSeed: t * 1000 + mp,
+          });
+
+          for (const candidate of candidatesForWrong2) {
+            const wrongUsi = candidate.info.pv[0];
+            if (!wrongUsi || triedWrongMoves.has(wrongUsi)) continue;
+            triedWrongMoves.add(wrongUsi);
+
+            console.log(`pass2 candidate row${t + 1} wrongFinal start move=${wrongUsi}`);
+            const wrongFinal = await analyzeMove({
+              engine,
+              positionCommand: positionCommandS,
+              depth: finalDepth,
+              pvPlies,
+              moveUsi: wrongUsi,
+              perfLabel: `${candidateLabel}|wrong2-${wrongUsi}-d${finalDepth}`,
+            });
+            console.log(`pass2 candidate row${t + 1} wrongFinal done move=${wrongUsi}`);
+            if (wrongFinal) gathered = mergeUniqueByMove(gathered, [wrongFinal]);
+
+            const summary = summarizeWrong2Potential({
+              infos: gathered,
+              wrong1Usi: actualMoveUsi,
+              threshold,
+              turnAtS,
+            });
+            if (summary.foundWrong2) {
+              selectedWrongInfo = wrongFinal;
+              ok = true;
+              break;
+            }
+          }
+
+          if (ok) break;
+        }
+
+        if (!ok) {
           const summary = summarizeWrong2Potential({
             infos: gathered,
             wrong1Usi: actualMoveUsi,
             threshold,
             turnAtS,
           });
-          if (summary.foundWrong2) {
-            selectedWrongInfo = wrongFinal;
-            ok = true;
-            break;
-          }
+          giveUpReason = `悪手不足 worstLoss=${summary.worstLoss}`;
         }
-
-        if (ok) break;
       }
-
-      if (!ok) {
-        const summary = summarizeWrong2Potential({
-          infos: gathered,
-          wrong1Usi: actualMoveUsi,
-          threshold,
-          turnAtS,
-        });
-        giveUpReason = `悪手不足 worstLoss=${summary.worstLoss}`;
-      }
+    } catch (error: any) {
+      giveUpReason = error?.message ?? String(error);
+      console.log(`pass2 candidate row${t + 1} failed: ${giveUpReason}`);
     }
 
     const rootSfenRaw = buildRootSfenWithMoveNumber(initialSfen, moves, t - 1);
