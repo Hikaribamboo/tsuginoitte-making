@@ -101,6 +101,7 @@ export async function main() {
         const moves = splitMoves(kifu.moves);
         const scans = await scanGame({ engine, initialSfen, moves });
         let built = 0;
+        let skippedExisting = 0;
         const kifuDraftProblemsPayload: Array<{
           created_at: string;
           prompt: string;
@@ -146,8 +147,24 @@ export async function main() {
             continue;
           }
 
+          const sourceRef = `making_kifu:${kifu.id}:row:${scan.t + 1}`;
+          const { data: existing, error: existingErr } = await supabase
+            .from("making_draft_problems")
+            .select("id")
+            .eq("source_type", "kif_problem_generation")
+            .eq("root_sfen", out.rootSfen)
+            .contains("source_payload", { source_kifu_id: kifu.id })
+            .limit(1)
+            .maybeSingle();
+          if (existingErr) throw existingErr;
+          if (existing) {
+            console.log(`作問結果: row${scan.t + 1} は既存のためスキップ source_ref=${sourceRef}`);
+            skippedExisting += 1;
+            built += 1;
+            continue;
+          }
+
           const tmpIndex = kifuDraftProblemsPayload.length;
-          const sourceRef = `making_kifu:${kifu.id}:problem:${built + 1}`;
           kifuDraftProblemsPayload.push({
             created_at: createdAt,
             prompt: out.prompt,
@@ -199,55 +216,61 @@ export async function main() {
           continue;
         }
 
-        const { data: inserted, error: insErr } = await supabase
-          .from("making_draft_problems")
-          .insert(kifuDraftProblemsPayload.map((problem) => ({
-            workspace_id: null,
-            mode: "next_move",
-            status: "draft",
-            prompt: problem.prompt,
-            root_sfen: problem.root_sfen,
-            intro_moves_usi: problem.intro_moves_usi,
-            correct_choice_id: problem.correct_choice_id,
-            root_eval_cp: problem.root_eval_cp,
-            root_eval_percent: problem.root_eval_percent,
-            problem_rating: null,
-            problem_rating_games: 0,
-            manual_difficulty_tier: null,
-            display_no: null,
-            tags: [],
-            review_comment: null,
-            source_type: problem.source_type,
-            source_ref: problem.source_ref,
-            source_payload: problem.source_payload,
-            source_snapshot: problem.source_snapshot,
-            created_at: problem.created_at,
-            updated_at: problem.created_at,
-          })))
-          .select("id")
-          .order("id", { ascending: true });
+        if (kifuDraftProblemsPayload.length > 0) {
+          const { data: inserted, error: insErr } = await supabase
+            .from("making_draft_problems")
+            .insert(kifuDraftProblemsPayload.map((problem) => ({
+              workspace_id: null,
+              mode: "next_move",
+              status: "draft",
+              prompt: problem.prompt,
+              root_sfen: problem.root_sfen,
+              intro_moves_usi: problem.intro_moves_usi,
+              correct_choice_id: problem.correct_choice_id,
+              root_eval_cp: problem.root_eval_cp,
+              root_eval_percent: problem.root_eval_percent,
+              problem_rating: null,
+              problem_rating_games: 0,
+              manual_difficulty_tier: null,
+              display_no: null,
+              tags: [],
+              review_comment: null,
+              source_type: problem.source_type,
+              source_ref: problem.source_ref,
+              source_payload: problem.source_payload,
+              source_snapshot: problem.source_snapshot,
+              created_at: problem.created_at,
+              updated_at: problem.created_at,
+            })))
+            .select("id")
+            .order("id", { ascending: true });
 
-        if (insErr) throw insErr;
+          if (insErr) throw insErr;
 
-        const insertedIds = (inserted ?? []).map((r: { id: number | string }) => Number(r.id));
-        if (insertedIds.length !== kifuDraftProblemsPayload.length) {
-          throw new Error("inserted draft problems length mismatch");
+          const insertedIds = (inserted ?? []).map((r: { id: number | string }) => Number(r.id));
+          if (insertedIds.length !== kifuDraftProblemsPayload.length) {
+            throw new Error("inserted draft problems length mismatch");
+          }
+
+          const draftChoicesPayload = kifuDraftChoicesStash.map((c) => ({
+            draft_problem_id: insertedIds[c.tmpIndex],
+            choice_id: c.choice_id,
+            usi: c.usi,
+            label: c.label,
+            eval_cp: c.eval_cp,
+            eval_percent: c.eval_percent,
+            explanation: c.explanation,
+            line: c.line,
+            source_snapshot: c.source_snapshot,
+          }));
+
+          const { error: choiceErr } = await supabase.from("making_draft_choices").insert(draftChoicesPayload);
+          if (choiceErr) throw choiceErr;
         }
 
-        const draftChoicesPayload = kifuDraftChoicesStash.map((c) => ({
-          draft_problem_id: insertedIds[c.tmpIndex],
-          choice_id: c.choice_id,
-          usi: c.usi,
-          label: c.label,
-          eval_cp: c.eval_cp,
-          eval_percent: c.eval_percent,
-          explanation: c.explanation,
-          line: c.line,
-          source_snapshot: c.source_snapshot,
-        }));
-
-        const { error: choiceErr } = await supabase.from("making_draft_choices").insert(draftChoicesPayload);
-        if (choiceErr) throw choiceErr;
+        console.log(
+          `作問結果: kifu=${kifu.id} created=${kifuDraftProblemsPayload.length} existing=${skippedExisting} accepted=${built}`,
+        );
 
         const { error: doneErr } = await supabase.from("making_kifus").update({ status: "done" }).eq("id", kifu.id);
         if (doneErr) throw doneErr;

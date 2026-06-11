@@ -36,6 +36,9 @@ export const config = {
 
     // ユーザー側が有利すぎる問題を除外する評価値
     rejectIfBestTooGoodCp: 2400,
+
+    // pass1評価で明らかに範囲外の局面を早期棄却する際の安全幅
+    earlyRejectMarginCp: 800,
   },
 
   // 一局から作成する問題の最大数

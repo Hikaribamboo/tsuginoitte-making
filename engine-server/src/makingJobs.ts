@@ -168,6 +168,7 @@ async function runCommand(
         line.startsWith('pass1抽出:') ||
         line.startsWith('pass2結果:') ||
         line.startsWith('pass2 candidate') ||
+        line.startsWith('pass2 depth') ||
         line.startsWith('pass2 best') ||
         line.startsWith('pass2 row') ||
         line.startsWith('pass2 sfen') ||

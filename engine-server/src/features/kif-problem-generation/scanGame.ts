@@ -5,6 +5,7 @@ import { perfMark, startTimer } from "./debug/coarsePerf";
 import { buildRootSfenWithMoveNumber } from "./problem/buildRootSfenWithMoveNumber";
 import { correctRootSfenMeta } from "./problem/correctRootSfenMeta";
 import { normalizeCpToSentePerspective } from "./problem/rootEval";
+import { sfenAtPly } from "./shogi/sfenEngine";
 import type { ScanResult } from "./types";
 
 type Color = "b" | "w";
@@ -13,6 +14,7 @@ type Candidate = {
   t: number;
   introMoveUsi: string;
   actualMoveUsi: string;
+  pass1UserCp: number;
 };
 
 type Pass1LogItem = {
@@ -31,6 +33,20 @@ type Pass2LogItem = {
   wrong: PvInfo | null;
 };
 
+type DepthRunLog = {
+  purpose: "best" | "actual" | "wrongFinal";
+  moveUsi: string | null;
+  depth: number;
+  elapsedMs: number;
+  status: "OK" | "ERROR";
+};
+
+function depthRunReason(purpose: DepthRunLog["purpose"]): string {
+  if (purpose === "best") return "最善手と評価値の確定";
+  if (purpose === "actual") return "実戦手の悪手度確認";
+  return "不正解候補の評価確定";
+}
+
 function pickBestCpInfo(infos: PvInfo[]) {
   const sorted = [...infos].sort((a, b) => a.multipv - b.multipv);
   const best = sorted[0];
@@ -38,9 +54,8 @@ function pickBestCpInfo(infos: PvInfo[]) {
   return best;
 }
 
-function buildPositionCommand(initialSfen: string, movesApplied: string[]) {
-  const baseCmd = `position sfen ${initialSfen}`;
-  return movesApplied.length === 0 ? baseCmd : `${baseCmd} moves ${movesApplied.join(" ")}`;
+function buildPositionCommandAtPly(initialSfen: string, moves: string[], ply: number) {
+  return `position sfen ${sfenAtPly(initialSfen, moves, ply)}`;
 }
 
 function getTurnAtS(initialTurn: Color, appliedPlies: number): Color {
@@ -340,9 +355,8 @@ export async function scanGame(args: {
     const introMoveUsi = moves[t - 1];
     const actualMoveUsi = moves[t];
 
-    const movesToS = moves.slice(0, t);
     const turnAtS = getTurnAtS(initialTurn, t);
-    const positionCommandS = buildPositionCommand(initialSfen, movesToS);
+    const positionCommandS = buildPositionCommandAtPly(initialSfen, moves, t);
 
     const bestRes = await engine.analyze({
       positionCommand: positionCommandS,
@@ -391,7 +405,8 @@ export async function scanGame(args: {
     }
 
     if (isCandidate) {
-      candidates.push({ t, introMoveUsi, actualMoveUsi });
+      const pass1UserCp = turnAtS === "b" ? bestEvalSente : -bestEvalSente;
+      candidates.push({ t, introMoveUsi, actualMoveUsi, pass1UserCp });
       pass1LogItems.push({ t });
     }
   }
@@ -410,11 +425,10 @@ export async function scanGame(args: {
     if (c.t < nextPass2T) continue;
 
     const candidateLabel = `scanGame.pass2.t${c.t}`;
-    const { t, introMoveUsi, actualMoveUsi } = c;
+    const { t, introMoveUsi, actualMoveUsi, pass1UserCp } = c;
 
-    const movesToS = moves.slice(0, t);
     const turnAtS = getTurnAtS(initialTurn, t);
-    const positionCommandS = buildPositionCommand(initialSfen, movesToS);
+    const positionCommandS = buildPositionCommandAtPly(initialSfen, moves, t);
 
     const pvPlies = Math.max(config.finalize.pvPlies, 9);
     const finalDepth = config.finalize.depth;
@@ -424,6 +438,7 @@ export async function scanGame(args: {
 
     const rejectIfBestTooBadCp = config.finalize.rejectIfBestTooBadCp;
     const rejectIfBestTooGoodCp = config.finalize.rejectIfBestTooGoodCp;
+    const earlyRejectMarginCp = config.finalize.earlyRejectMarginCp;
 
     let gathered: PvInfo[] = [];
     let giveUpReason: string | null = null;
@@ -436,50 +451,75 @@ export async function scanGame(args: {
     let actualMs = 0;
     let wrongProbeMs = 0;
     let wrongFinalMs = 0;
+    const depthRunLogs: DepthRunLog[] = [];
 
     console.log(`pass2 candidate row${t + 1} start depth=${finalDepth} wrongProbeMp=${wrongProbeMultiPv}`);
 
     try {
-      console.log(`pass2 candidate row${t + 1} best start`);
-      const bestTimer = startTimer();
-      await engine.setMultiPv(1);
-      const bestAnalysis = await engine.analyze({
-        positionCommand: positionCommandS,
-        depth: finalDepth,
-        pvPlies,
-        label: `scan-pass2-t${t}-best-d${finalDepth}`,
-      });
-      bestMs = bestTimer();
-      console.log(`pass2 candidate row${t + 1} best done`);
-      gathered = mergeUniqueByMove(gathered, bestAnalysis.infos);
-      finalBest = pickBestCpInfo(bestAnalysis.infos);
-      const correctUsi = finalBest?.pv[0] ?? null;
-      console.log(`pass2 best row${t + 1} d${finalDepth} ${finalBest ? formatMoveEval(finalBest, turnAtS) : "-"}`);
+      if (rejectIfBestTooBadCp != null && pass1UserCp < -(rejectIfBestTooBadCp + earlyRejectMarginCp)) {
+        giveUpReason = `pass1でユーザー不利 pass1UserCp ${pass1UserCp} 早期棄却上限 ${rejectIfBestTooBadCp + earlyRejectMarginCp}`;
+      } else if (rejectIfBestTooGoodCp != null && pass1UserCp > rejectIfBestTooGoodCp + earlyRejectMarginCp) {
+        giveUpReason = `pass1でユーザー有利すぎ pass1UserCp ${pass1UserCp} 早期棄却上限 ${rejectIfBestTooGoodCp + earlyRejectMarginCp}`;
+      }
 
-      if (!finalBest || !correctUsi) {
-        giveUpReason = "最善手なし";
-      } else {
-        const userCp = computeUserCpFromGathered({ gathered, questionTurn: turnAtS });
-        if (userCp != null && rejectIfBestTooBadCp != null && userCp < -rejectIfBestTooBadCp) {
-          giveUpReason = `ユーザー不利 turn=${turnAtS} userCp ${userCp} 下限 ${rejectIfBestTooBadCp}`;
-        } else if (userCp != null && rejectIfBestTooGoodCp != null && userCp > rejectIfBestTooGoodCp) {
-          giveUpReason = `ユーザー有利すぎ turn=${turnAtS} userCp ${userCp} 上限 ${rejectIfBestTooGoodCp}`;
+      if (!giveUpReason) {
+        console.log(`pass2 depth run row${t + 1} start purpose=best reason=${depthRunReason("best")} depth=${finalDepth} move=all`);
+        const bestTimer = startTimer();
+        let bestAnalysis: Awaited<ReturnType<EngineClient["analyze"]>>;
+        try {
+          await engine.setMultiPv(1);
+          bestAnalysis = await engine.analyze({
+            positionCommand: positionCommandS,
+            depth: finalDepth,
+            pvPlies,
+            label: `scan-pass2-t${t}-best-d${finalDepth}`,
+          });
+          bestMs = bestTimer();
+          depthRunLogs.push({ purpose: "best", moveUsi: null, depth: finalDepth, elapsedMs: bestMs, status: "OK" });
+          console.log(`pass2 depth run row${t + 1} done purpose=best reason=${depthRunReason("best")} depth=${finalDepth} move=all elapsed=${bestMs}ms`);
+        } catch (error) {
+          bestMs = bestTimer();
+          depthRunLogs.push({ purpose: "best", moveUsi: null, depth: finalDepth, elapsedMs: bestMs, status: "ERROR" });
+          console.log(`pass2 depth run row${t + 1} error purpose=best reason=${depthRunReason("best")} depth=${finalDepth} move=all elapsed=${bestMs}ms`);
+          throw error;
+        }
+        gathered = mergeUniqueByMove(gathered, bestAnalysis.infos);
+        finalBest = pickBestCpInfo(bestAnalysis.infos);
+        console.log(`pass2 best row${t + 1} d${finalDepth} ${finalBest ? formatMoveEval(finalBest, turnAtS) : "-"}`);
+
+        if (!finalBest || !finalBest.pv[0]) {
+          giveUpReason = "最善手なし";
+        } else {
+          const userCp = computeUserCpFromGathered({ gathered, questionTurn: turnAtS });
+          if (userCp != null && rejectIfBestTooBadCp != null && userCp < -rejectIfBestTooBadCp) {
+            giveUpReason = `ユーザー不利 turn=${turnAtS} userCp ${userCp} 下限 ${rejectIfBestTooBadCp}`;
+          } else if (userCp != null && rejectIfBestTooGoodCp != null && userCp > rejectIfBestTooGoodCp) {
+            giveUpReason = `ユーザー有利すぎ turn=${turnAtS} userCp ${userCp} 上限 ${rejectIfBestTooGoodCp}`;
+          }
         }
       }
 
       if (!giveUpReason) {
-        console.log(`pass2 candidate row${t + 1} actual start move=${actualMoveUsi}`);
+        console.log(`pass2 depth run row${t + 1} start purpose=actual reason=${depthRunReason("actual")} depth=${finalDepth} move=${actualMoveUsi}`);
         const actualTimer = startTimer();
-        actualInfo = await analyzeMove({
-          engine,
-          positionCommand: positionCommandS,
-          depth: finalDepth,
-          pvPlies,
-          moveUsi: actualMoveUsi,
-          perfLabel: `${candidateLabel}|actual-d${finalDepth}`,
-        });
-        actualMs = actualTimer();
-        console.log(`pass2 candidate row${t + 1} actual done`);
+        try {
+          actualInfo = await analyzeMove({
+            engine,
+            positionCommand: positionCommandS,
+            depth: finalDepth,
+            pvPlies,
+            moveUsi: actualMoveUsi,
+            perfLabel: `${candidateLabel}|actual-d${finalDepth}`,
+          });
+          actualMs = actualTimer();
+          depthRunLogs.push({ purpose: "actual", moveUsi: actualMoveUsi, depth: finalDepth, elapsedMs: actualMs, status: "OK" });
+          console.log(`pass2 depth run row${t + 1} done purpose=actual reason=${depthRunReason("actual")} depth=${finalDepth} move=${actualMoveUsi} elapsed=${actualMs}ms`);
+        } catch (error) {
+          actualMs = actualTimer();
+          depthRunLogs.push({ purpose: "actual", moveUsi: actualMoveUsi, depth: finalDepth, elapsedMs: actualMs, status: "ERROR" });
+          console.log(`pass2 depth run row${t + 1} error purpose=actual reason=${depthRunReason("actual")} depth=${finalDepth} move=${actualMoveUsi} elapsed=${actualMs}ms`);
+          throw error;
+        }
         if (actualInfo) gathered = mergeUniqueByMove(gathered, [actualInfo]);
         if (!actualInfo) {
           giveUpReason = "実戦手評価なし";
@@ -495,6 +535,7 @@ export async function scanGame(args: {
         }
       }
 
+      const correctUsi = finalBest?.pv[0] ?? null;
       if (!giveUpReason && correctUsi) {
         const triedWrongMoves = new Set<string>();
 
@@ -523,18 +564,29 @@ export async function scanGame(args: {
           if (!wrongUsi || triedWrongMoves.has(wrongUsi)) continue;
           triedWrongMoves.add(wrongUsi);
 
-          console.log(`pass2 candidate row${t + 1} wrongFinal start move=${wrongUsi}`);
+          console.log(`pass2 depth run row${t + 1} start purpose=wrongFinal reason=${depthRunReason("wrongFinal")} depth=${finalDepth} move=${wrongUsi}`);
           const wrongFinalTimer = startTimer();
-          const wrongFinal = await analyzeMove({
-            engine,
-            positionCommand: positionCommandS,
-            depth: finalDepth,
-            pvPlies,
-            moveUsi: wrongUsi,
-            perfLabel: `${candidateLabel}|wrong2-${wrongUsi}-d${finalDepth}`,
-          });
-          wrongFinalMs += wrongFinalTimer();
-          console.log(`pass2 candidate row${t + 1} wrongFinal done move=${wrongUsi}`);
+          let wrongFinal: PvInfo | null;
+          try {
+            wrongFinal = await analyzeMove({
+              engine,
+              positionCommand: positionCommandS,
+              depth: finalDepth,
+              pvPlies,
+              moveUsi: wrongUsi,
+              perfLabel: `${candidateLabel}|wrong2-${wrongUsi}-d${finalDepth}`,
+            });
+            const elapsedMs = wrongFinalTimer();
+            wrongFinalMs += elapsedMs;
+            depthRunLogs.push({ purpose: "wrongFinal", moveUsi: wrongUsi, depth: finalDepth, elapsedMs, status: "OK" });
+            console.log(`pass2 depth run row${t + 1} done purpose=wrongFinal reason=${depthRunReason("wrongFinal")} depth=${finalDepth} move=${wrongUsi} elapsed=${elapsedMs}ms`);
+          } catch (error) {
+            const elapsedMs = wrongFinalTimer();
+            wrongFinalMs += elapsedMs;
+            depthRunLogs.push({ purpose: "wrongFinal", moveUsi: wrongUsi, depth: finalDepth, elapsedMs, status: "ERROR" });
+            console.log(`pass2 depth run row${t + 1} error purpose=wrongFinal reason=${depthRunReason("wrongFinal")} depth=${finalDepth} move=${wrongUsi} elapsed=${elapsedMs}ms`);
+            throw error;
+          }
           if (wrongFinal) gathered = mergeUniqueByMove(gathered, [wrongFinal]);
 
           const summary = summarizeWrong2Potential({
@@ -568,6 +620,13 @@ export async function scanGame(args: {
     console.log(
       `pass2 timing row${t + 1}: total=${candidateTimer()}ms best=${bestMs}ms actual=${actualMs}ms wrongProbe=${wrongProbeMs}ms wrongFinal=${wrongFinalMs}ms`,
     );
+    const depthRunTotalMs = depthRunLogs.reduce((sum, run) => sum + run.elapsedMs, 0);
+    console.log(`pass2 depth summary row${t + 1}: count=${depthRunLogs.length} total=${depthRunTotalMs}ms`);
+    for (const [index, run] of depthRunLogs.entries()) {
+      console.log(
+        `pass2 depth summary row${t + 1} #${index + 1}: purpose=${run.purpose} reason=${depthRunReason(run.purpose)} depth=${run.depth} move=${run.moveUsi ?? "all"} status=${run.status} elapsed=${run.elapsedMs}ms`,
+      );
+    }
 
     const rootSfenRaw = buildRootSfenWithMoveNumber(initialSfen, moves, t - 1);
     const rootSfen = correctRootSfenMeta({
