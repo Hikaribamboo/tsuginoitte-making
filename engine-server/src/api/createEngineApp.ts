@@ -7,6 +7,7 @@ import { ShogiEngine } from '../engine.js';
 import { cancelMakingJob, getMakingJob, listMakingJobs, startMakingJob } from '../makingJobs.js';
 import { listMakingPathOptions } from '../makingOptions.js';
 import { resolvePredictionModelPath, runLocalShogiPrediction } from '../features/recognition/recognition.service.js';
+import { fetchShogiQuestGames, type ShogiQuestMode } from '../features/shogi-quest/shogiQuest.service.js';
 
 type UnifiedJobKind = 'book-problem' | 'kif-problem' | 'kifs-generation';
 
@@ -111,6 +112,20 @@ export function createEngineApp(engine: ShogiEngine): Express {
       res.json(options);
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? 'failed to list making options' });
+    }
+  });
+
+  app.get('/api/shogi-quest/games', async (req, res) => {
+    const username = typeof req.query.username === 'string' ? req.query.username : '';
+    const mode = (typeof req.query.mode === 'string' ? req.query.mode : '') as ShogiQuestMode;
+    const count = Number.parseInt(typeof req.query.count === 'string' ? req.query.count : '', 10);
+
+    try {
+      const result = await fetchShogiQuestGames({ username, mode, count });
+      res.json(result);
+    } catch (error: any) {
+      console.error('[api] GET /api/shogi-quest/games failed:', error?.message ?? error);
+      res.status(400).json({ error: error?.message ?? '将棋クエスト棋譜の取得に失敗しました' });
     }
   });
 

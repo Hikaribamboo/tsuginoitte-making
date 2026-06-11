@@ -48,6 +48,29 @@ export interface CreateKifuInput {
   sourceSnapshot?: Record<string, unknown>;
 }
 
+export interface MakingKifuInsertRow {
+  source_type: 'shogi_quest';
+  source_ref: string;
+  initial_sfen: string;
+  moves: string;
+  status: 'pending';
+  kifu_hash: string | null;
+  tags: string[];
+  base_position_id: null;
+  source_payload: Record<string, unknown>;
+}
+
+export interface MakingKifuInsertFailure {
+  sourceRef: string;
+  message: string;
+}
+
+export interface MakingKifuInsertResult {
+  insertedSourceRefs: string[];
+  duplicateSourceRefs: string[];
+  failures: MakingKifuInsertFailure[];
+}
+
 const KNOWN_STATUSES: KifuStatus[] = ['pending', 'processing', 'done', 'failed', 'impossible'];
 
 function normalizeTagArray(value: unknown): string[] {
@@ -142,6 +165,58 @@ export async function createKifus(inputs: CreateKifuInput[]): Promise<number> {
     inserted += chunk.length;
   }
   return inserted;
+}
+
+export async function listExistingMakingKifuSourceRefs(
+  sourceType: string,
+  sourceRefs: string[],
+): Promise<Set<string>> {
+  const uniqueRefs = Array.from(new Set(sourceRefs.map((ref) => ref.trim()).filter(Boolean)));
+  const existing = new Set<string>();
+
+  for (let index = 0; index < uniqueRefs.length; index += 100) {
+    const chunk = uniqueRefs.slice(index, index + 100);
+    const { data, error } = await supabase
+      .from('making_kifus')
+      .select('source_ref')
+      .eq('source_type', sourceType)
+      .in('source_ref', chunk);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (typeof row.source_ref === 'string') existing.add(row.source_ref);
+    }
+  }
+
+  return existing;
+}
+
+export async function insertMakingKifuRows(rows: MakingKifuInsertRow[]): Promise<MakingKifuInsertResult> {
+  const insertedSourceRefs: string[] = [];
+  const duplicateSourceRefs: string[] = [];
+  const failures: MakingKifuInsertFailure[] = [];
+  const existing = await listExistingMakingKifuSourceRefs('shogi_quest', rows.map((row) => row.source_ref));
+
+  for (const row of rows) {
+    if (existing.has(row.source_ref)) {
+      duplicateSourceRefs.push(row.source_ref);
+      continue;
+    }
+
+    const { error } = await supabase.from('making_kifus').insert(row);
+    if (!error) {
+      insertedSourceRefs.push(row.source_ref);
+      continue;
+    }
+
+    const isDuplicate = error.code === '23505' || /duplicate|unique/i.test(error.message);
+    if (isDuplicate) {
+      duplicateSourceRefs.push(row.source_ref);
+    } else {
+      failures.push({ sourceRef: row.source_ref, message: error.message });
+    }
+  }
+
+  return { insertedSourceRefs, duplicateSourceRefs, failures };
 }
 
 export async function listBasePositions(): Promise<BasePosition[]> {

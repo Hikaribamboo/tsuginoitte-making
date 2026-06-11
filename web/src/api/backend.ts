@@ -299,3 +299,18 @@ export async function cancelMakingJob(jobId: string): Promise<MakingJobSnapshot>
   }
   return payload.job;
 }
+
+export async function fetchShogiQuestGames(input: {
+  username: string;
+  mode: import('../lib/quest-kifu-import').ShogiQuestMode;
+  count: number;
+}): Promise<import('../lib/quest-kifu-import').ShogiQuestFetchResult> {
+  const params = new URLSearchParams({
+    username: input.username,
+    mode: input.mode,
+    count: String(input.count),
+  });
+  const res = await fetch(`${ENGINE_API}/api/shogi-quest/games?${params.toString()}`);
+  if (!res.ok) return parseMakingJobError(res);
+  return await res.json() as import('../lib/quest-kifu-import').ShogiQuestFetchResult;
+}

@@ -4,18 +4,26 @@ import {
   createBasePosition,
   createKifus,
   getKifuSummary,
+  insertMakingKifuRows,
+  listExistingMakingKifuSourceRefs,
   listBasePositions,
   type BasePosition,
   type KifuSummary,
 } from '../api/kifus';
 import {
   cancelMakingJob,
+  fetchShogiQuestGames,
   listMakingJobs,
   startMakingJob,
   type MakingJobSnapshot,
 } from '../api/backend';
 import { parseKifRecord } from '../lib/kif-parser';
-import { parseQuestKifuImport, type QuestKifuImportResult } from '../lib/quest-kifu-import';
+import {
+  buildMakingKifuInsertRows,
+  type QuestKifuPrepareError,
+  type QuestKifuPreparedRecord,
+  type ShogiQuestMode,
+} from '../lib/quest-kifu-import';
 
 type KifusGenerateFormState = {
   gamesPerBasePosition: string;
@@ -33,7 +41,20 @@ type BasePositionFormState = {
 type QuestImportFormState = {
   username: string;
   requestedCount: string;
-  text: string;
+  mode: ShogiQuestMode;
+};
+
+type QuestImportPhase = 'idle' | 'fetching' | 'analyzing' | 'saving';
+type QuestItemStatus = 'ready' | 'duplicate' | 'error' | 'saved' | 'save_error';
+
+type QuestImportItem = {
+  sourceRef: string;
+  startedAt: string | null;
+  players: Array<{ id?: string; name?: string }>;
+  movesCount: number | null;
+  status: QuestItemStatus;
+  message: string;
+  record: QuestKifuPreparedRecord | null;
 };
 
 const DEFAULT_FORM: KifusGenerateFormState = {
@@ -51,8 +72,8 @@ const DEFAULT_BASE_POSITION_FORM: BasePositionFormState = {
 
 const DEFAULT_QUEST_IMPORT_FORM: QuestImportFormState = {
   username: '',
-  requestedCount: '',
-  text: '',
+  requestedCount: '10',
+  mode: '10min',
 };
 
 const MakingKifusGenerator: React.FC = () => {
@@ -68,8 +89,10 @@ const MakingKifusGenerator: React.FC = () => {
   const [starting, setStarting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [savingBasePosition, setSavingBasePosition] = useState(false);
-  const [questImporting, setQuestImporting] = useState(false);
-  const [questImportResult, setQuestImportResult] = useState<QuestKifuImportResult | null>(null);
+  const [questImportPhase, setQuestImportPhase] = useState<QuestImportPhase>('idle');
+  const [questImportItems, setQuestImportItems] = useState<QuestImportItem[]>([]);
+  const [questFetchedCount, setQuestFetchedCount] = useState(0);
+  const [questConfirmOpen, setQuestConfirmOpen] = useState(false);
   const [questImportError, setQuestImportError] = useState('');
   const [questImportMessage, setQuestImportMessage] = useState('');
   const [error, setError] = useState('');
@@ -79,6 +102,16 @@ const MakingKifusGenerator: React.FC = () => {
     () => jobs.find((job) => job.id === selectedJobId) ?? null,
     [jobs, selectedJobId],
   );
+
+  const questSummary = useMemo(() => ({
+    fetched: questFetchedCount,
+    parsed: questImportItems.filter((item) => item.record != null).length,
+    parseFailed: questImportItems.filter((item) => item.status === 'error').length,
+    ready: questImportItems.filter((item) => item.status === 'ready').length,
+    duplicate: questImportItems.filter((item) => item.status === 'duplicate').length,
+    saved: questImportItems.filter((item) => item.status === 'saved').length,
+    saveFailed: questImportItems.filter((item) => item.status === 'save_error').length,
+  }), [questFetchedCount, questImportItems]);
 
   const refreshJobs = async () => {
     try {
@@ -245,45 +278,97 @@ const MakingKifusGenerator: React.FC = () => {
     }
   };
 
-  const questImportPreview = useMemo(() => {
-    if (!questImportForm.text.trim()) return null;
-    return parseQuestKifuImport({
-      text: questImportForm.text,
-      username: questImportForm.username.trim() || null,
-      requestedCount: parseOptionalInt(questImportForm.requestedCount),
-    });
-  }, [questImportForm.requestedCount, questImportForm.text, questImportForm.username]);
-
-  const questImportDisplay = questImportPreview ?? questImportResult;
-
   const handleQuestImport = async () => {
-    setQuestImporting(true);
     setQuestImportError('');
     setQuestImportMessage('');
     setError('');
     setMessage('');
+    setQuestConfirmOpen(false);
+    setQuestImportItems([]);
+    setQuestFetchedCount(0);
 
     try {
-      const parsed = parseQuestKifuImport({
-        text: questImportForm.text,
-        username: questImportForm.username.trim() || null,
-        requestedCount: parseOptionalIntStrict(questImportForm.requestedCount),
+      const username = questImportForm.username.trim();
+      if (!username) throw new Error('将棋クエストのユーザー名を入力してください');
+      const requestedCount = parseRequiredInt(questImportForm.requestedCount, '取得件数', 1, 50);
+      if (!questImportForm.mode) throw new Error('モードを選択してください');
+
+      setQuestImportPhase('fetching');
+      const fetched = await fetchShogiQuestGames({
+        username,
+        count: requestedCount,
+        mode: questImportForm.mode,
       });
+      setQuestFetchedCount(fetched.games.length + fetched.errors.length);
 
-      if (parsed.rows.length === 0) {
-        const firstError = parsed.errors[0]?.message ?? '有効な棋譜を1件も解析できませんでした';
-        throw new Error(firstError);
+      setQuestImportPhase('analyzing');
+      const prepared = await buildMakingKifuInsertRows(fetched);
+      const existingRefs = await listExistingMakingKifuSourceRefs(
+        'shogi_quest',
+        prepared.records.map((record) => record.sourceRef),
+      );
+      const nextItems = [
+        ...prepared.records.map((record): QuestImportItem => ({
+          sourceRef: record.sourceRef,
+          startedAt: record.startedAt,
+          players: record.players,
+          movesCount: record.movesCount,
+          status: existingRefs.has(record.sourceRef) ? 'duplicate' : 'ready',
+          message: existingRefs.has(record.sourceRef) ? '重複のため保存対象外' : '保存予定',
+          record,
+        })),
+        ...prepared.errors.map(questPrepareErrorToItem),
+      ];
+      setQuestImportItems(nextItems);
+
+      const readyCount = nextItems.filter((item) => item.status === 'ready').length;
+      if (nextItems.length === 0) {
+        throw new Error('対象ユーザーの棋譜を取得できませんでした');
       }
-
-      const inserted = await createKifus(parsed.rows);
-      await refreshSummary();
-      setQuestImportResult(parsed);
-      setQuestImportMessage(`将棋クエスト棋譜を ${parsed.records.length} 局解析し、${inserted} 件保存しました（失敗: ${parsed.errors.length} 件）`);
-      setQuestImportForm((prev) => ({ ...prev, text: '' }));
+      setQuestImportMessage(`取得・解析が完了しました。保存候補は ${readyCount} 件です。`);
+      setQuestConfirmOpen(true);
     } catch (nextError: any) {
-      setQuestImportError(nextError?.message ?? '将棋クエスト棋譜の取り込みに失敗しました');
+      setQuestImportError(nextError?.message ?? '将棋クエスト棋譜の取得・解析に失敗しました');
     } finally {
-      setQuestImporting(false);
+      setQuestImportPhase('idle');
+    }
+  };
+
+  const handleQuestSave = async () => {
+    const rows = questImportItems
+      .filter((item) => item.status === 'ready' && item.record)
+      .map((item) => item.record!.row);
+    if (rows.length === 0) {
+      setQuestImportError('DB保存対象の棋譜がありません');
+      return;
+    }
+
+    setQuestImportPhase('saving');
+    setQuestImportError('');
+    setQuestImportMessage('');
+    try {
+      const result = await insertMakingKifuRows(rows);
+      const inserted = new Set(result.insertedSourceRefs);
+      const duplicates = new Set(result.duplicateSourceRefs);
+      const failures = new Map(result.failures.map((failure) => [failure.sourceRef, failure.message]));
+      setQuestImportItems((current) => current.map((item) => {
+        if (inserted.has(item.sourceRef)) return { ...item, status: 'saved', message: '保存済み' };
+        if (duplicates.has(item.sourceRef)) return { ...item, status: 'duplicate', message: '重複のため保存対象外' };
+        if (failures.has(item.sourceRef)) {
+          return { ...item, status: 'save_error', message: failures.get(item.sourceRef) ?? 'DB保存に失敗しました' };
+        }
+        return item;
+      }));
+      await refreshSummary();
+      setQuestConfirmOpen(false);
+      setQuestImportMessage(
+        `making_kifus に ${result.insertedSourceRefs.length} 件保存しました` +
+        `（重複: ${result.duplicateSourceRefs.length} 件、失敗: ${result.failures.length} 件）`,
+      );
+    } catch (nextError: any) {
+      setQuestImportError(nextError?.message ?? '将棋クエスト棋譜のDB保存に失敗しました');
+    } finally {
+      setQuestImportPhase('idle');
     }
   };
 
@@ -440,98 +525,80 @@ const MakingKifusGenerator: React.FC = () => {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-base font-semibold text-slate-900">将棋クエスト棋譜取り込み</h3>
-                <div className="text-xs text-slate-500">貼り付けた棋譜をUSIへ正規化し、既存のmaking_kifus保存処理に流します。</div>
+                <div className="text-xs text-slate-500">
+                  ユーザー名・取得件数・モードを指定して棋譜を取得し，既存のmaking_kifus形式に整形します。
+                </div>
               </div>
               <button
                 type="button"
                 className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
                 onClick={() => void handleQuestImport()}
-                disabled={questImporting}
+                disabled={questImportPhase !== 'idle'}
               >
-                {questImporting ? '取り込み中...' : '解析してDB保存'}
+                {questPhaseLabel(questImportPhase)}
               </button>
             </div>
 
-            <div className="grid gap-2 md:grid-cols-2">
+            <div className="grid gap-2 md:grid-cols-3">
               <FieldInput
                 label="将棋クエストのユーザー名"
                 value={questImportForm.username}
                 onChange={(next) => updateQuestImport('username', next)}
-                placeholder="任意"
+                placeholder="例: 6174"
+                disabled={questImportPhase !== 'idle'}
               />
               <FieldInput
-                label="取得件数 / 参考件数"
+                label="取得件数"
                 value={questImportForm.requestedCount}
                 onChange={(next) => updateQuestImport('requestedCount', next)}
-                placeholder="任意"
+                placeholder="1〜50"
+                type="number"
+                min={1}
+                max={50}
+                disabled={questImportPhase !== 'idle'}
               />
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-slate-600">モード</span>
+                <select
+                  className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900"
+                  value={questImportForm.mode}
+                  onChange={(event) => updateQuestImport('mode', event.target.value as ShogiQuestMode)}
+                  disabled={questImportPhase !== 'idle'}
+                >
+                  <option value="10min">10分</option>
+                  <option value="5min">5分</option>
+                </select>
+              </label>
             </div>
 
-            <label className="mt-2 flex flex-col gap-1">
-              <span className="text-xs text-slate-600">棋譜テキスト貼り付け</span>
-              <textarea
-                className="min-h-40 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm text-slate-900"
-                value={questImportForm.text}
-                onChange={(event) => updateQuestImport('text', event.target.value)}
-                placeholder="将棋クエストの棋譜表示をそのまま貼り付けてください"
-              />
-            </label>
-
-            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              <QuestStatCard label="解析候補" value={questImportDisplay?.records.length ?? 0} />
-              <QuestStatCard label="解析失敗" value={questImportDisplay?.errors.length ?? 0} />
-              <QuestStatCard label="保存対象" value={questImportDisplay?.rows.length ?? 0} />
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <QuestStatCard label="取得件数" value={questSummary.fetched} />
+              <QuestStatCard label="解析成功" value={questSummary.parsed} />
+              <QuestStatCard label="解析失敗" value={questSummary.parseFailed} />
+              <QuestStatCard label="保存候補" value={questSummary.ready} />
+              <QuestStatCard label="重複候補" value={questSummary.duplicate} />
+              <QuestStatCard label="保存済み" value={questSummary.saved} />
+              <QuestStatCard label="保存失敗" value={questSummary.saveFailed} />
             </div>
 
             {questImportError ? <Banner tone="error" text={questImportError} /> : null}
             {questImportMessage ? <Banner tone="success" text={questImportMessage} /> : null}
 
-            <div className="mt-3 space-y-3">
-              <div>
-                <div className="mb-1 text-sm font-semibold text-slate-800">取り込みプレビュー</div>
-                {questImportDisplay && questImportDisplay.records.length > 0 ? (
-                  <div className="space-y-2">
-                    {questImportDisplay.records.slice(0, 3).map((record, index) => (
-                      <div key={record.sourceRef} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="text-sm font-semibold text-slate-900">局面 {index + 1}</div>
-                          <div className="text-xs text-slate-500">{record.moves.length} 手 / {record.sourceRef}</div>
-                        </div>
-                        <div className="mt-1 font-mono text-[11px] text-slate-600 break-all">{record.finalSfen}</div>
-                        <div className="mt-2 grid gap-1 text-xs text-slate-600">
-                          {record.steps.slice(0, 2).map((step) => (
-                            <div key={`${record.sourceRef}-${step.ply}`} className="rounded bg-white px-2 py-1">
-                              <span className="font-semibold text-slate-700">{step.ply}手目</span>
-                              <span className="ml-2 font-mono">{step.label}</span>
-                              <span className="ml-2 text-slate-500">{step.sideToMove === 'sente' ? '先手' : '後手'}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-slate-500">棋譜を貼り付けると、変換結果の概要を表示します。</div>
-                )}
+            <div className="mt-3">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-slate-800">取り込みプレビュー</div>
+                {questImportItems.some((item) => item.status === 'ready') ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    onClick={() => setQuestConfirmOpen(true)}
+                    disabled={questImportPhase !== 'idle'}
+                  >
+                    DB保存前の確認を開く
+                  </button>
+                ) : null}
               </div>
-
-              {questImportDisplay?.errors.length ? (
-                <div>
-                  <div className="mb-1 text-sm font-semibold text-slate-800">失敗した棋譜</div>
-                  <div className="space-y-2">
-                    {questImportDisplay.errors.map((item) => (
-                      <div key={`${item.sourceRef}-${item.recordIndex}`} className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-                        <div className="font-semibold">{item.sourceRef}</div>
-                        <div>#{item.recordIndex} {item.message}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="mt-2 text-xs text-slate-500">
-              まずは貼り付け方式を優先しています。KIF形式の棋譜を将棋クエストから共有表示で取得できる場合は、そのまま貼り付けてください。
+              <QuestPreviewTable items={questImportItems} />
             </div>
           </div>
 
@@ -627,32 +694,27 @@ const MakingKifusGenerator: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {questConfirmOpen ? (
+        <QuestConfirmModal
+          items={questImportItems}
+          saving={questImportPhase === 'saving'}
+          onCancel={() => setQuestConfirmOpen(false)}
+          onSave={() => void handleQuestSave()}
+        />
+      ) : null}
     </div>
   );
 };
 
-function parseRequiredInt(raw: string, label: string, min: number): number {
+function parseRequiredInt(raw: string, label: string, min: number, max?: number): number {
   const trimmed = raw.trim();
   const parsed = Number.parseInt(trimmed, 10);
-  if (!trimmed || !Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < min) {
+  if (!/^\d+$/.test(trimmed) || !Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < min) {
     throw new Error(`${label} は ${min} 以上の整数で指定してください`);
   }
-  return parsed;
-}
-
-function parseOptionalInt(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const parsed = Number.parseInt(trimmed, 10);
-  return Number.isFinite(parsed) && !Number.isNaN(parsed) ? parsed : null;
-}
-
-function parseOptionalIntStrict(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const parsed = Number.parseInt(trimmed, 10);
-  if (!Number.isFinite(parsed) || Number.isNaN(parsed)) {
-    throw new Error('取得件数は整数で指定してください');
+  if (max != null && parsed > max) {
+    throw new Error(`${label} は ${max} 以下の整数で指定してください`);
   }
   return parsed;
 }
@@ -694,22 +756,188 @@ function FieldInput({
   value,
   onChange,
   placeholder,
+  type = 'text',
+  min,
+  max,
+  disabled = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  type?: React.HTMLInputTypeAttribute;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
 }) {
   return (
     <label className="flex flex-col gap-1">
       <span className="text-xs text-slate-600">{label}</span>
       <input
         className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-900"
+        type={type}
+        min={min}
+        max={max}
+        disabled={disabled}
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
       />
     </label>
+  );
+}
+
+function questPrepareErrorToItem(error: QuestKifuPrepareError): QuestImportItem {
+  return {
+    sourceRef: error.sourceRef,
+    startedAt: error.startedAt,
+    players: error.players,
+    movesCount: null,
+    status: 'error',
+    message: `${error.stage === 'fetch' ? '取得失敗' : '変換失敗'}: ${error.message}`,
+    record: null,
+  };
+}
+
+function questPhaseLabel(phase: QuestImportPhase): string {
+  if (phase === 'fetching') return '取得中...';
+  if (phase === 'analyzing') return '解析中...';
+  if (phase === 'saving') return '保存中...';
+  return '取得して解析';
+}
+
+function questStatusLabel(status: QuestItemStatus): string {
+  if (status === 'ready') return '保存予定';
+  if (status === 'duplicate') return '重複';
+  if (status === 'saved') return '保存済み';
+  if (status === 'save_error') return '保存失敗';
+  return 'エラー';
+}
+
+function questStatusClass(status: QuestItemStatus): string {
+  if (status === 'ready') return 'bg-sky-100 text-sky-700';
+  if (status === 'duplicate') return 'bg-amber-100 text-amber-700';
+  if (status === 'saved') return 'bg-emerald-100 text-emerald-700';
+  return 'bg-rose-100 text-rose-700';
+}
+
+function questPlayersText(players: QuestImportItem['players']): string {
+  if (players.length === 0) return '-';
+  return players
+    .slice(0, 2)
+    .map((player) => player.name ?? player.id ?? '?')
+    .join(' / ');
+}
+
+function questDateText(value: string | null): string {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ja-JP');
+}
+
+function QuestPreviewTable({ items }: { items: QuestImportItem[] }) {
+  if (items.length === 0) {
+    return <div className="rounded-lg border border-dashed border-slate-300 px-3 py-4 text-sm text-slate-500">取得後に変換結果を表示します。</div>;
+  }
+
+  return (
+    <div className="max-h-[360px] overflow-auto rounded-lg border border-slate-200">
+      <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+        <thead className="sticky top-0 bg-slate-100 text-slate-600">
+          <tr>
+            <th className="px-3 py-2 font-semibold">source_ref</th>
+            <th className="px-3 py-2 font-semibold">対局日時</th>
+            <th className="px-3 py-2 font-semibold">先手 / 後手</th>
+            <th className="px-3 py-2 font-semibold">手数</th>
+            <th className="px-3 py-2 font-semibold">解析状態</th>
+            <th className="px-3 py-2 font-semibold">保存判定</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 bg-white">
+          {items.map((item, index) => (
+            <tr key={`${item.sourceRef}-${item.status}-${index}`}>
+              <td className="max-w-44 break-all px-3 py-2 font-mono text-slate-700">{item.sourceRef}</td>
+              <td className="whitespace-nowrap px-3 py-2 text-slate-600">{questDateText(item.startedAt)}</td>
+              <td className="whitespace-nowrap px-3 py-2 text-slate-600">{questPlayersText(item.players)}</td>
+              <td className="px-3 py-2 text-slate-600">{item.movesCount ?? '-'}</td>
+              <td className="px-3 py-2 text-slate-600">{item.record ? '解析成功' : '解析失敗'}</td>
+              <td className="px-3 py-2">
+                <span className={`rounded-full px-2 py-0.5 font-semibold ${questStatusClass(item.status)}`}>
+                  {questStatusLabel(item.status)}
+                </span>
+                <div className="mt-1 max-w-60 text-[11px] text-slate-500">{item.message}</div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function QuestConfirmModal({
+  items,
+  saving,
+  onCancel,
+  onSave,
+}: {
+  items: QuestImportItem[];
+  saving: boolean;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const ready = items.filter((item) => item.status === 'ready');
+  const duplicateCount = items.filter((item) => item.status === 'duplicate').length;
+  const errorCount = items.filter((item) => item.status === 'error' || item.status === 'save_error').length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="quest-confirm-title">
+      <div className="flex max-h-[90vh] w-full max-w-6xl flex-col rounded-xl bg-white shadow-xl">
+        <div className="border-b border-slate-200 px-5 py-4">
+          <h3 id="quest-confirm-title" className="text-lg font-semibold text-slate-900">DB保存前の確認</h3>
+          <div className="mt-1 text-sm text-slate-600">保存対象の内容を確認してから public.making_kifus に保存します。</div>
+        </div>
+        <div className="space-y-3 overflow-y-auto p-5">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <QuestStatCard label="保存対象件数" value={ready.length} />
+            <QuestStatCard label="重複除外件数" value={duplicateCount} />
+            <QuestStatCard label="エラー件数" value={errorCount} />
+          </div>
+          <QuestPreviewTable items={items} />
+          {ready.length > 0 ? (
+            <div>
+              <div className="mb-1 text-sm font-semibold text-slate-800">保存対象の内訳</div>
+              <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+                {ready.map((item) => (
+                  <div key={item.sourceRef} className="flex flex-wrap justify-between gap-2 text-xs text-slate-600">
+                    <span className="font-mono">{item.sourceRef}</span>
+                    <span>{questPlayersText(item.players)} / {item.movesCount ?? 0}手 / {questDateText(item.startedAt)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button
+            type="button"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            onClick={onCancel}
+            disabled={saving}
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+            onClick={onSave}
+            disabled={saving || ready.length === 0}
+          >
+            {saving ? '保存中...' : 'DB保存'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
