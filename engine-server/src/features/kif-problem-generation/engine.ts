@@ -197,16 +197,8 @@ export class UsiEngine {
     this.write(args.positionCommand);
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.onLine = undefined;
-        this.clearPending();
-        const ms = end();
-        const tag = args.label ? `|${args.label}` : "";
-        perfMark(`engine.analyze.timeout${tag}`, ms);
-        reject(new Error("analyze timeout"));
-      }, engineConfig.waitTimeoutMs);
       this.pendingReject = reject;
-      this.pendingCleanup = () => clearTimeout(timeout);
+      this.pendingCleanup = undefined;
 
       this.onLine = (line) => {
         if (line.startsWith("info ")) {

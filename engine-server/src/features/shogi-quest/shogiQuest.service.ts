@@ -3,6 +3,8 @@ const HISTORY_ENDPOINT = process.env.SHOGI_QUEST_HISTORY_ENDPOINT?.trim()
 const GAME_ENDPOINT = process.env.SHOGI_QUEST_GAME_ENDPOINT?.trim()
   || 'http://questgames.net/game/';
 const REQUEST_TIMEOUT_MS = 20_000;
+const MAX_FETCH_COUNT = 1_000;
+const GAME_FETCH_CONCURRENCY = 8;
 
 export type ShogiQuestMode = '10min' | '5min';
 
@@ -97,8 +99,8 @@ export async function fetchShogiQuestGames(input: {
 }): Promise<ShogiQuestFetchResult> {
   const username = input.username.trim();
   if (!username) throw new Error('将棋クエストのユーザー名を指定してください');
-  if (!Number.isInteger(input.count) || input.count < 1 || input.count > 50) {
-    throw new Error('取得件数は1件以上50件以下で指定してください');
+  if (!Number.isInteger(input.count) || input.count < 1 || input.count > MAX_FETCH_COUNT) {
+    throw new Error(`取得件数は1件以上${MAX_FETCH_COUNT}件以下で指定してください`);
   }
   if (input.mode !== '10min' && input.mode !== '5min') {
     throw new Error('モードは10分または5分を指定してください');
@@ -122,16 +124,29 @@ export async function fetchShogiQuestGames(input: {
   const games: ShogiQuestFetchedGame[] = [];
   const errors: ShogiQuestFetchFailure[] = [];
 
-  for (const history of histories) {
-    try {
-      games.push(await fetchGame(history));
-    } catch (error) {
-      errors.push({
-        gameId: history.id?.trim() || null,
-        stage: 'fetch',
-        message: `棋譜本体の取得に失敗しました: ${errorMessage(error)}`,
-        history,
-      });
+  for (let offset = 0; offset < histories.length; offset += GAME_FETCH_CONCURRENCY) {
+    const batch = histories.slice(offset, offset + GAME_FETCH_CONCURRENCY);
+    const results = await Promise.all(batch.map(async (history) => {
+      try {
+        return { game: await fetchGame(history), error: null };
+      } catch (error) {
+        return {
+          game: null,
+          error: {
+            gameId: history.id?.trim() || null,
+            stage: 'fetch' as const,
+            message: `棋譜本体の取得に失敗しました: ${errorMessage(error)}`,
+            history,
+          },
+        };
+      }
+    }));
+    for (const result of results) {
+      if (result.game) {
+        games.push(result.game);
+      } else if (result.error) {
+        errors.push(result.error);
+      }
     }
   }
 

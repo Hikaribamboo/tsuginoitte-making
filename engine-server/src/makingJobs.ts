@@ -167,9 +167,11 @@ async function runCommand(
         line.startsWith('対象棋譜') ||
         line.startsWith('pass1抽出:') ||
         line.startsWith('pass2結果:') ||
+        line.startsWith('pass2 candidate') ||
         line.startsWith('pass2 best') ||
         line.startsWith('pass2 row') ||
         line.startsWith('pass2 sfen') ||
+        line.startsWith('pass2 timing') ||
         line.startsWith('kifu sfen:') ||
         line.startsWith('作問結果:') ||
         line.startsWith('[batchGenerate]') ||

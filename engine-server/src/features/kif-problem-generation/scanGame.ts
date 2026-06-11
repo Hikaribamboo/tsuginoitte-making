@@ -419,8 +419,7 @@ export async function scanGame(args: {
     const pvPlies = Math.max(config.finalize.pvPlies, 9);
     const finalDepth = config.finalize.depth;
     const wrongProbeDepth = Math.min(16, finalDepth);
-    const shouldTryMp15 = t % 5 === 0;
-    const wrongProbeMps = shouldTryMp15 ? [5, 10, 15] : [5, 10];
+    const wrongProbeMultiPv = 5;
     const threshold = config.finalize.minDiff;
 
     const rejectIfBestTooBadCp = config.finalize.rejectIfBestTooBadCp;
@@ -432,11 +431,17 @@ export async function scanGame(args: {
     let finalBest: PvInfo | null = null;
     let actualInfo: PvInfo | null = null;
     let selectedWrongInfo: PvInfo | null = null;
+    const candidateTimer = startTimer();
+    let bestMs = 0;
+    let actualMs = 0;
+    let wrongProbeMs = 0;
+    let wrongFinalMs = 0;
 
-    console.log(`pass2 candidate row${t + 1} start depth=${finalDepth} mp=${wrongProbeMps.join('/')}`);
+    console.log(`pass2 candidate row${t + 1} start depth=${finalDepth} wrongProbeMp=${wrongProbeMultiPv}`);
 
     try {
       console.log(`pass2 candidate row${t + 1} best start`);
+      const bestTimer = startTimer();
       await engine.setMultiPv(1);
       const bestAnalysis = await engine.analyze({
         positionCommand: positionCommandS,
@@ -444,6 +449,7 @@ export async function scanGame(args: {
         pvPlies,
         label: `scan-pass2-t${t}-best-d${finalDepth}`,
       });
+      bestMs = bestTimer();
       console.log(`pass2 candidate row${t + 1} best done`);
       gathered = mergeUniqueByMove(gathered, bestAnalysis.infos);
       finalBest = pickBestCpInfo(bestAnalysis.infos);
@@ -463,6 +469,7 @@ export async function scanGame(args: {
 
       if (!giveUpReason) {
         console.log(`pass2 candidate row${t + 1} actual start move=${actualMoveUsi}`);
+        const actualTimer = startTimer();
         actualInfo = await analyzeMove({
           engine,
           positionCommand: positionCommandS,
@@ -471,6 +478,7 @@ export async function scanGame(args: {
           moveUsi: actualMoveUsi,
           perfLabel: `${candidateLabel}|actual-d${finalDepth}`,
         });
+        actualMs = actualTimer();
         console.log(`pass2 candidate row${t + 1} actual done`);
         if (actualInfo) gathered = mergeUniqueByMove(gathered, [actualInfo]);
         if (!actualInfo) {
@@ -490,56 +498,56 @@ export async function scanGame(args: {
       if (!giveUpReason && correctUsi) {
         const triedWrongMoves = new Set<string>();
 
-        for (const mp of wrongProbeMps) {
-          console.log(`pass2 candidate row${t + 1} wrongProbe start mp=${mp}`);
-          await engine.setMultiPv(mp);
-          const probe = await engine.analyze({
+        console.log(`pass2 candidate row${t + 1} wrongProbe start mp=${wrongProbeMultiPv}`);
+        const wrongProbeTimer = startTimer();
+        await engine.setMultiPv(wrongProbeMultiPv);
+        const probe = await engine.analyze({
+          positionCommand: positionCommandS,
+          depth: wrongProbeDepth,
+          pvPlies,
+          label: `scan-pass2-t${t}-wrongProbe-d${wrongProbeDepth}-mp${wrongProbeMultiPv}`,
+        });
+        wrongProbeMs = wrongProbeTimer();
+        console.log(`pass2 candidate row${t + 1} wrongProbe done mp=${wrongProbeMultiPv}`);
+        const candidatesForWrong2 = listWrong2Candidates({
+          infos: probe.infos,
+          correctUsi,
+          actualMoveUsi,
+          threshold,
+          turnAtS,
+          randomSeed: t * 1000 + wrongProbeMultiPv,
+        });
+
+        for (const candidate of candidatesForWrong2) {
+          const wrongUsi = candidate.info.pv[0];
+          if (!wrongUsi || triedWrongMoves.has(wrongUsi)) continue;
+          triedWrongMoves.add(wrongUsi);
+
+          console.log(`pass2 candidate row${t + 1} wrongFinal start move=${wrongUsi}`);
+          const wrongFinalTimer = startTimer();
+          const wrongFinal = await analyzeMove({
+            engine,
             positionCommand: positionCommandS,
-            depth: wrongProbeDepth,
+            depth: finalDepth,
             pvPlies,
-            label: `scan-pass2-t${t}-wrongProbe-d${wrongProbeDepth}-mp${mp}`,
+            moveUsi: wrongUsi,
+            perfLabel: `${candidateLabel}|wrong2-${wrongUsi}-d${finalDepth}`,
           });
-          console.log(`pass2 candidate row${t + 1} wrongProbe done mp=${mp}`);
-          const candidatesForWrong2 = listWrong2Candidates({
-            infos: probe.infos,
-            correctUsi,
-            actualMoveUsi,
+          wrongFinalMs += wrongFinalTimer();
+          console.log(`pass2 candidate row${t + 1} wrongFinal done move=${wrongUsi}`);
+          if (wrongFinal) gathered = mergeUniqueByMove(gathered, [wrongFinal]);
+
+          const summary = summarizeWrong2Potential({
+            infos: gathered,
+            wrong1Usi: actualMoveUsi,
             threshold,
             turnAtS,
-            randomSeed: t * 1000 + mp,
           });
-
-          for (const candidate of candidatesForWrong2) {
-            const wrongUsi = candidate.info.pv[0];
-            if (!wrongUsi || triedWrongMoves.has(wrongUsi)) continue;
-            triedWrongMoves.add(wrongUsi);
-
-            console.log(`pass2 candidate row${t + 1} wrongFinal start move=${wrongUsi}`);
-            const wrongFinal = await analyzeMove({
-              engine,
-              positionCommand: positionCommandS,
-              depth: finalDepth,
-              pvPlies,
-              moveUsi: wrongUsi,
-              perfLabel: `${candidateLabel}|wrong2-${wrongUsi}-d${finalDepth}`,
-            });
-            console.log(`pass2 candidate row${t + 1} wrongFinal done move=${wrongUsi}`);
-            if (wrongFinal) gathered = mergeUniqueByMove(gathered, [wrongFinal]);
-
-            const summary = summarizeWrong2Potential({
-              infos: gathered,
-              wrong1Usi: actualMoveUsi,
-              threshold,
-              turnAtS,
-            });
-            if (summary.foundWrong2) {
-              selectedWrongInfo = wrongFinal;
-              ok = true;
-              break;
-            }
+          if (summary.foundWrong2) {
+            selectedWrongInfo = wrongFinal;
+            ok = true;
+            break;
           }
-
-          if (ok) break;
         }
 
         if (!ok) {
@@ -556,6 +564,10 @@ export async function scanGame(args: {
       giveUpReason = error?.message ?? String(error);
       console.log(`pass2 candidate row${t + 1} failed: ${giveUpReason}`);
     }
+
+    console.log(
+      `pass2 timing row${t + 1}: total=${candidateTimer()}ms best=${bestMs}ms actual=${actualMs}ms wrongProbe=${wrongProbeMs}ms wrongFinal=${wrongFinalMs}ms`,
+    );
 
     const rootSfenRaw = buildRootSfenWithMoveNumber(initialSfen, moves, t - 1);
     const rootSfen = correctRootSfenMeta({

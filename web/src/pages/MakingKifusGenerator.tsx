@@ -290,7 +290,7 @@ const MakingKifusGenerator: React.FC = () => {
     try {
       const username = questImportForm.username.trim();
       if (!username) throw new Error('将棋クエストのユーザー名を入力してください');
-      const requestedCount = parseRequiredInt(questImportForm.requestedCount, '取得件数', 1, 50);
+      const requestedCount = parseRequiredInt(questImportForm.requestedCount, '取得件数', 1, 1000);
       if (!questImportForm.mode) throw new Error('モードを選択してください');
 
       setQuestImportPhase('fetching');
@@ -551,10 +551,10 @@ const MakingKifusGenerator: React.FC = () => {
                 label="取得件数"
                 value={questImportForm.requestedCount}
                 onChange={(next) => updateQuestImport('requestedCount', next)}
-                placeholder="1〜50"
+                placeholder="1〜1000"
                 type="number"
                 min={1}
-                max={50}
+                max={1000}
                 disabled={questImportPhase !== 'idle'}
               />
               <label className="flex flex-col gap-1">
