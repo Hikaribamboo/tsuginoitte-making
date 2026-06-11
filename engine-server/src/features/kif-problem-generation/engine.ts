@@ -19,6 +19,67 @@ type AnalyzeResult = {
   bestmove: string | null;
 };
 
+type InfoProgress = {
+  depth: number | null;
+  seldepth: number | null;
+  nodes: number | null;
+  nps: number | null;
+  timeMs: number | null;
+  hashfull: number | null;
+  currentMove: string | null;
+  score: string | null;
+  pvFirstMove: string | null;
+};
+
+function tokenNumber(tokens: string[], name: string): number | null {
+  const index = tokens.indexOf(name);
+  if (index < 0) return null;
+  const value = Number(tokens[index + 1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function tokenString(tokens: string[], name: string): string | null {
+  const index = tokens.indexOf(name);
+  return index >= 0 ? tokens[index + 1] ?? null : null;
+}
+
+function parseInfoProgress(line: string): InfoProgress {
+  const tokens = line.trim().split(/\s+/);
+  const scoreIndex = tokens.indexOf("score");
+  const pvIndex = tokens.indexOf("pv");
+  const score =
+    scoreIndex >= 0 && tokens[scoreIndex + 1] && tokens[scoreIndex + 2]
+      ? `${tokens[scoreIndex + 1]} ${tokens[scoreIndex + 2]}`
+      : null;
+
+  return {
+    depth: tokenNumber(tokens, "depth"),
+    seldepth: tokenNumber(tokens, "seldepth"),
+    nodes: tokenNumber(tokens, "nodes"),
+    nps: tokenNumber(tokens, "nps"),
+    timeMs: tokenNumber(tokens, "time"),
+    hashfull: tokenNumber(tokens, "hashfull"),
+    currentMove: tokenString(tokens, "currmove"),
+    score,
+    pvFirstMove: pvIndex >= 0 ? tokens[pvIndex + 1] ?? null : null,
+  };
+}
+
+function formatInfoProgress(progress: InfoProgress | null): string {
+  if (!progress) return "depth=- seldepth=- nodes=- nps=- engineTime=- hashfull=- currmove=- score=- pv=-";
+  return [
+    `depth=${progress.depth ?? "-"}`,
+    `seldepth=${progress.seldepth ?? "-"}`,
+    `nodes=${progress.nodes ?? "-"}`,
+    `nps=${progress.nps ?? "-"}`,
+    `engineTime=${progress.timeMs ?? "-"}ms`,
+    `hashfull=${progress.hashfull ?? "-"}`,
+    `currmove=${progress.currentMove ?? "-"}`,
+    `score=${progress.score ?? "-"}`,
+    `pv=${progress.pvFirstMove ?? "-"}`,
+  ].join(" ");
+}
+
 function parseInfoLine(line: string): PvInfo | null {
   if (!line.startsWith("info ")) return null;
   if (!line.includes(" score ")) return null;
@@ -201,19 +262,41 @@ export class UsiEngine {
     const forcedMove = args.searchMoves?.length === 1 ? args.searchMoves[0] : null;
     let stopReason: string | null = null;
     let stopSent = false;
+    let infoLineCount = 0;
+    let lastInfoAt: number | null = null;
+    let lastProgress: InfoProgress | null = null;
+    let maxReportedDepth = 0;
+    const startedAt = Date.now();
+    const tag = args.label ?? "unlabeled";
+    const searchMoves = args.searchMoves?.join(",") || "all";
+    const diagnosticsEnabled = args.maxDurationMs != null;
 
     const end = startTimer();
 
+    if (diagnosticsEnabled) {
+      console.log(
+        `[ENGINE-ANALYZE] start label=${tag} targetDepth=${args.depth} multiPv=${this.currentMultiPv ?? "unknown"} searchMoves=${searchMoves} maxDurationMs=${args.maxDurationMs} position="${args.positionCommand}"`,
+      );
+    }
     this.write(args.positionCommand);
 
     return new Promise((resolve, reject) => {
       let forceStopTimer: NodeJS.Timeout | null = null;
+      const logProgress = (event: string) => {
+        if (!diagnosticsEnabled) return;
+        const now = Date.now();
+        console.log(
+          `[ENGINE-ANALYZE] ${event} label=${tag} state=${stopSent ? "stopping" : "searching"} elapsed=${now - startedAt}ms infoLines=${infoLineCount} maxDepth=${maxReportedDepth || "-"} lastInfoAgo=${lastInfoAt == null ? "none" : `${now - lastInfoAt}ms`} ${formatInfoProgress(lastProgress)}`,
+        );
+      };
       const requestStop = (reason: string) => {
         if (stopSent) return;
         stopSent = true;
         stopReason = reason;
+        logProgress(`stop-sent reason="${reason}"`);
         this.write("stop");
         forceStopTimer = setTimeout(() => {
+          logProgress(`kill reason="bestmove not received within ${engineConfig.stopTimeoutMs}ms after stop"`);
           this.proc.kill();
         }, engineConfig.stopTimeoutMs);
       };
@@ -221,25 +304,39 @@ export class UsiEngine {
         args.maxDurationMs != null
           ? setTimeout(() => requestStop(`analysis exceeded ${args.maxDurationMs}ms`), args.maxDurationMs)
           : null;
+      const progressTimer = diagnosticsEnabled ? setInterval(() => logProgress("progress"), 10_000) : null;
 
       this.pendingReject = reject;
       this.pendingCleanup = () => {
         if (durationTimer) clearTimeout(durationTimer);
         if (forceStopTimer) clearTimeout(forceStopTimer);
+        if (progressTimer) clearInterval(progressTimer);
       };
 
       this.onLine = (line) => {
         if (line.startsWith("info ")) {
+          infoLineCount += 1;
+          lastInfoAt = Date.now();
+          if (line.startsWith("info string ")) {
+            if (diagnosticsEnabled) console.log(`[ENGINE-ANALYZE] info-string label=${tag} line="${line}"`);
+            return;
+          }
+          const progress = parseInfoProgress(line);
+          const reachedTargetDepth = progress.depth != null && progress.depth >= args.depth && maxReportedDepth < args.depth;
+          lastProgress = progress;
+          if (progress.depth != null) maxReportedDepth = Math.max(maxReportedDepth, progress.depth);
+          if (reachedTargetDepth) logProgress("target-depth-reported");
           const info = parseInfoLine(line);
           if (info) {
             latest.set(info.multipv, { ...info, pv: info.pv.slice(0, args.pvPlies) });
-            if (args.stopWhen?.(info)) requestStop("analysis stop condition matched");
+            if (args.stopWhen?.(info)) requestStop(`analysis stop condition matched evalType=${info.evalType} eval=${info.eval}`);
           }
           return;
         }
 
         if (line.startsWith("bestmove ")) {
           bestmove = line.split(/\s+/)[1] ?? null;
+          logProgress(`bestmove-received bestmove=${bestmove ?? "-"}`);
 
           this.onLine = undefined;
           this.clearPending();
@@ -253,8 +350,8 @@ export class UsiEngine {
             .sort((a, b) => a.multipv - b.multipv);
 
           const ms = end();
-          const tag = args.label ? `|${args.label}` : "";
-          perfMark(`engine.analyze${tag}`, ms);
+          const perfTag = args.label ? `|${args.label}` : "";
+          perfMark(`engine.analyze${perfTag}`, ms);
 
           if (stopReason) {
             reject(new Error(stopReason));
