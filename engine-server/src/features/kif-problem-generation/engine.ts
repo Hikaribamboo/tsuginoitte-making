@@ -266,6 +266,7 @@ export class UsiEngine {
     let lastInfoAt: number | null = null;
     let lastProgress: InfoProgress | null = null;
     let maxReportedDepth = 0;
+    let maxObservedMultiPv = 0;
     const startedAt = Date.now();
     const tag = args.label ?? "unlabeled";
     const searchMoves = args.searchMoves?.join(",") || "all";
@@ -286,7 +287,7 @@ export class UsiEngine {
         if (!diagnosticsEnabled) return;
         const now = Date.now();
         console.log(
-          `[ENGINE-ANALYZE] ${event} label=${tag} state=${stopSent ? "stopping" : "searching"} elapsed=${now - startedAt}ms infoLines=${infoLineCount} maxDepth=${maxReportedDepth || "-"} lastInfoAgo=${lastInfoAt == null ? "none" : `${now - lastInfoAt}ms`} ${formatInfoProgress(lastProgress)}`,
+          `[ENGINE-ANALYZE] ${event} label=${tag} state=${stopSent ? "stopping" : "searching"} requestedMultiPv=${this.currentMultiPv ?? "unknown"} observedMaxMultiPv=${maxObservedMultiPv || "-"} elapsed=${now - startedAt}ms infoLines=${infoLineCount} maxDepth=${maxReportedDepth || "-"} lastInfoAgo=${lastInfoAt == null ? "none" : `${now - lastInfoAt}ms`} ${formatInfoProgress(lastProgress)}`,
         );
       };
       const requestStop = (reason: string) => {
@@ -328,6 +329,7 @@ export class UsiEngine {
           if (reachedTargetDepth) logProgress("target-depth-reported");
           const info = parseInfoLine(line);
           if (info) {
+            maxObservedMultiPv = Math.max(maxObservedMultiPv, info.multipv);
             latest.set(info.multipv, { ...info, pv: info.pv.slice(0, args.pvPlies) });
             if (args.stopWhen?.(info)) requestStop(`analysis stop condition matched evalType=${info.evalType} eval=${info.eval}`);
           }
