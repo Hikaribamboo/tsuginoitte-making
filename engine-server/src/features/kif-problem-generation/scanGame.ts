@@ -405,16 +405,13 @@ export async function scanGame(args: {
   const results: ScanResult[] = [];
   const acceptedTs: number[] = [];
   const pass2LogItems: Pass2LogItem[] = [];
-  let attemptedPass2 = 0;
 
   for (const c of pass2Targets) {
-    if (results.length >= (config.maxScanResultsPerGame ?? 9999)) break;
-    if (attemptedPass2 >= config.maxCandidates) break;
+    if (results.length >= config.maxProblemsPerGame) break;
     const skippedByAcceptedGap = acceptedTs.some((acceptedT) => c.t > acceptedT && c.t - acceptedT < acceptedGap);
     if (skippedByAcceptedGap) {
       continue;
     }
-    attemptedPass2 += 1;
 
     const candidateLabel = `scanGame.pass2.t${c.t}`;
     const { t, introMoveUsi, actualMoveUsi } = c;
