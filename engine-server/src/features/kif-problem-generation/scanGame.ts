@@ -11,7 +11,6 @@ type Color = "b" | "w";
 
 type Candidate = {
   t: number;
-  diff: number;
   introMoveUsi: string;
   actualMoveUsi: string;
 };
@@ -392,7 +391,7 @@ export async function scanGame(args: {
     }
 
     if (isCandidate) {
-      candidates.push({ t, diff: signedDiff, introMoveUsi, actualMoveUsi });
+      candidates.push({ t, introMoveUsi, actualMoveUsi });
       pass1LogItems.push({ t });
     }
   }
@@ -400,18 +399,15 @@ export async function scanGame(args: {
   console.log(`pass1抽出: ${pass1LogItems.map((x) => x.t + 1).join(",") || "なし"}`);
 
   const pass2Targets = candidates.slice().sort((a, b) => a.t - b.t);
-  const acceptedGap = config.finalize.minCandidateGapPlies ?? 30;
+  const minCandidateGapPlies = config.finalize.minCandidateGapPlies;
 
   const results: ScanResult[] = [];
-  const acceptedTs: number[] = [];
   const pass2LogItems: Pass2LogItem[] = [];
+  let nextPass2T = 0;
 
   for (const c of pass2Targets) {
     if (results.length >= config.maxProblemsPerGame) break;
-    const skippedByAcceptedGap = acceptedTs.some((acceptedT) => c.t > acceptedT && c.t - acceptedT < acceptedGap);
-    if (skippedByAcceptedGap) {
-      continue;
-    }
+    if (c.t < nextPass2T) continue;
 
     const candidateLabel = `scanGame.pass2.t${c.t}`;
     const { t, introMoveUsi, actualMoveUsi } = c;
@@ -433,6 +429,7 @@ export async function scanGame(args: {
     let gathered: PvInfo[] = [];
     let giveUpReason: string | null = null;
     let ok = false;
+    let finalBest: PvInfo | null = null;
     let actualInfo: PvInfo | null = null;
     let selectedWrongInfo: PvInfo | null = null;
 
@@ -449,7 +446,7 @@ export async function scanGame(args: {
       });
       console.log(`pass2 candidate row${t + 1} best done`);
       gathered = mergeUniqueByMove(gathered, bestAnalysis.infos);
-      const finalBest = pickBestCpInfo(bestAnalysis.infos);
+      finalBest = pickBestCpInfo(bestAnalysis.infos);
       const correctUsi = finalBest?.pv[0] ?? null;
       console.log(`pass2 best row${t + 1} d${finalDepth} ${finalBest ? formatMoveEval(finalBest, turnAtS) : "-"}`);
 
@@ -569,7 +566,7 @@ export async function scanGame(args: {
 
     if (ok) {
       results.push({ t, rootSfen, introMoveUsi, actualMoveUsi, infos: gathered });
-      acceptedTs.push(t);
+      nextPass2T = t + minCandidateGapPlies;
     }
 
     pass2LogItems.push({

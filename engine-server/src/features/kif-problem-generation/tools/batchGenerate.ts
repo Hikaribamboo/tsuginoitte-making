@@ -60,7 +60,7 @@ export async function main() {
   const engine = createUsiEngineClient(enginePath, engineEvalDir);
 
   console.log(
-    `設定: pass1 depth=${config.scan.depth} minDiff=${config.scan.minDiff} pass2 depth=${config.finalize.depth} minDiff=${config.finalize.minDiff}`,
+    `設定: pass1 depth=${config.scan.depth} minDiff=${config.scan.minDiff} pass2 depth=${config.finalize.depth} minDiff=${config.finalize.minDiff} maxProblemsPerGame=${config.maxProblemsPerGame} minCandidateGapPlies=${config.finalize.minCandidateGapPlies}`,
   );
 
   await engine.init({

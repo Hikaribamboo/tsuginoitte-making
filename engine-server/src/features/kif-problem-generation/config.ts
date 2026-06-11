@@ -38,14 +38,8 @@ export const config = {
     rejectIfBestTooGoodCp: 2400,
   },
 
-  // 一局から検査する作問候補の最大数
-  maxCandidates: envInt("AMTS_MAX_CANDIDATES", 20, 1, 300),
-
   // 一局から作成する問題の最大数
   maxProblemsPerGame: envInt("AMTS_MAX_PROBLEMS_PER_GAME", 3, 1, 50),
-
-  // 一局の最初の解析から保持する候補の最大数
-  maxScanResultsPerGame: envInt("AMTS_MAX_SCAN_RESULTS_PER_GAME", 12, 1, 200),
 
   batch: {
     // 一回の処理で取得する棋譜数

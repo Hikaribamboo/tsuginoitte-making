@@ -9,7 +9,6 @@ export type KifProblemSettings = {
   enginePath?: string | null;
   batchSize?: number | null;
   maxProblemsPerGame?: number | null;
-  maxScanResultsPerGame?: number | null;
   finalizeDepth?: number | null;
   minDiff?: number | null;
   maxDiff?: number | null;
@@ -69,7 +68,6 @@ export async function runKifProblemJob(args: KifProblemJobArgs): Promise<KifProb
   if (settings.enginePath) env.ENGINE_PATH = settings.enginePath;
   if (settings.batchSize != null) env.AMTS_BATCH_SIZE = String(settings.batchSize);
   if (settings.maxProblemsPerGame != null) env.AMTS_MAX_PROBLEMS_PER_GAME = String(settings.maxProblemsPerGame);
-  if (settings.maxScanResultsPerGame != null) env.AMTS_MAX_SCAN_RESULTS_PER_GAME = String(settings.maxScanResultsPerGame);
   if (settings.finalizeDepth != null) env.AMTS_FINALIZE_DEPTH = String(settings.finalizeDepth);
   if (settings.minDiff != null) env.AMTS_FINALIZE_MIN_DIFF = String(settings.minDiff);
   if (settings.generateRunName) env.AMTS_SP_RUN_NAME = settings.generateRunName;

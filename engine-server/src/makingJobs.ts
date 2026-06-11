@@ -33,7 +33,6 @@ type KifsJobInput = {
     whiteMovetimeMs?: number;
     batchSize?: number;
     maxProblemsPerGame?: number;
-    maxScanResultsPerGame?: number;
     finalizeDepth?: number;
     minDiff?: number;
   };
@@ -139,7 +138,6 @@ function parseKifsJobSettings(input: KifsJobInput['settings']) {
     whiteMovetimeMs: numberOrNull(input?.whiteMovetimeMs, 1, 3600000),
     batchSize: numberOrNull(input?.batchSize, 1, 5000),
     maxProblemsPerGame: numberOrNull(input?.maxProblemsPerGame, 1, 50),
-    maxScanResultsPerGame: numberOrNull(input?.maxScanResultsPerGame, 1, 200),
     finalizeDepth: numberOrNull(input?.finalizeDepth, 1, 80),
     minDiff: numberOrNull(input?.minDiff, 1, 10000),
   };
@@ -174,6 +172,7 @@ async function runCommand(
         line.startsWith('pass2 sfen') ||
         line.startsWith('kifu sfen:') ||
         line.startsWith('作問結果:') ||
+        line.startsWith('[batchGenerate]') ||
         line.startsWith('致命的エラー:')
       );
     };

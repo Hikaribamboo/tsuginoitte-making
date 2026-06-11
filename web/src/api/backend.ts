@@ -200,7 +200,6 @@ export interface StartKifsJobInput {
     whiteMovetimeMs?: number;
     batchSize?: number;
     maxProblemsPerGame?: number;
-    maxScanResultsPerGame?: number;
     finalizeDepth?: number;
     minDiff?: number;
   };

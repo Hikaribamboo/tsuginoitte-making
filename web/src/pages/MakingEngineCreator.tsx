@@ -52,7 +52,6 @@ type BookFormState = {
 type KifsFormState = {
   batchSize: string;
   maxProblemsPerGame: string;
-  maxScanResultsPerGame: string;
   finalizeDepth: string;
   minDiff: string;
 };
@@ -108,7 +107,6 @@ const BOOK_FILE_OPTIONS: Array<{ value: BookFormState['bookFile']; label: string
 const DEFAULT_KIFS_FORM: KifsFormState = {
   batchSize: '10',
   maxProblemsPerGame: '3',
-  maxScanResultsPerGame: '12',
   finalizeDepth: '26',
   minDiff: '200',
 };
@@ -627,7 +625,6 @@ function KifsSettingsForm({
         <div className="grid gap-2 md:grid-cols-2">
           <FieldInput label="count (claim件数)" value={value.batchSize} onChange={(next) => update('batchSize', next)} />
           <FieldInput label="maxProblemsPerGame" value={value.maxProblemsPerGame} onChange={(next) => update('maxProblemsPerGame', next)} />
-          <FieldInput label="maxScanResultsPerGame" value={value.maxScanResultsPerGame} onChange={(next) => update('maxScanResultsPerGame', next)} />
           <FieldInput label="finalizeDepth" value={value.finalizeDepth} onChange={(next) => update('finalizeDepth', next)} />
           <FieldInput label="minDiff" value={value.minDiff} onChange={(next) => update('minDiff', next)} />
         </div>
@@ -743,7 +740,6 @@ function buildKifsPayload(value: KifsFormState) {
     runBatchGenerate: true,
     batchSize: parseRequiredInt(value.batchSize, 'batchSize', 1),
     maxProblemsPerGame: parseRequiredInt(value.maxProblemsPerGame, 'maxProblemsPerGame', 1),
-    maxScanResultsPerGame: parseRequiredInt(value.maxScanResultsPerGame, 'maxScanResultsPerGame', 1),
     finalizeDepth: parseRequiredInt(value.finalizeDepth, 'finalizeDepth', 26),
     minDiff: parseRequiredInt(value.minDiff, 'minDiff', 1),
   };
