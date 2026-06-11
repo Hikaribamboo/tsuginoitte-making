@@ -78,6 +78,11 @@ export async function main() {
     if (error) throw error;
 
     const kifus = (data ?? []) as KifuRow[];
+    console.log(
+      `claim_making_kifus: requested=${config.batch.generateBatchSize} claimed=${kifus.length}${
+        kifus.length > 0 ? ` ids=${kifus.map((kifu) => kifu.id).join(',')}` : ''
+      }`,
+    );
     if (kifus.length === 0) {
       return;
     }

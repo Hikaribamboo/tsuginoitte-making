@@ -978,15 +978,8 @@ const PasteProblemCreator: React.FC = () => {
           cp: rawCp,
           userColor: parsed?.sideToMove ?? 'sente',
         });
-        const fullPv = buildLegalChoicePv({
-          rootSfen,
-          introMoves,
-          choiceUsi: choice.usi,
-          enginePv: result.pv,
-          maxMoves: 13,
-        });
-        const line = fullPv.slice(1, 13);
-        const labels = pvToJapanese(fullPv, displaySfen || rootSfen, Math.min(fullPv.length, 13));
+        const line = result.pv.slice(0, 13);
+        const labels = pvToJapanese(line, afterChoiceSfen, line.length);
         const readingText = `*検討 depth ${CHOICE_EVAL_DEPTH} 評価値 ${rawCp} 読み筋 ${labels.join(' ')}`;
         console.log('[choice-eval] formatted', {
           slot,
@@ -999,7 +992,6 @@ const PasteProblemCreator: React.FC = () => {
           choiceMoves,
           choiceUsi: choice.usi,
           enginePv: result.pv,
-          fullPv,
           storedLine: line,
           labels,
           readingText,
