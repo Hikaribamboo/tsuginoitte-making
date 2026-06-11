@@ -18,7 +18,9 @@ export type EngineInitOptions = {
   multipv: number;
   disableBook: boolean;
   threads?: number;
+  cores?: number;
   hashMb?: number;
+  pvIntervalMs?: number;
   ponder?: boolean;
 };
 

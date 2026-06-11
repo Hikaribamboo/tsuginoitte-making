@@ -137,7 +137,9 @@ export class UsiEngine {
     multipv: number;
     disableBook: boolean;
     threads?: number;
+    cores?: number;
     hashMb?: number;
+    pvIntervalMs?: number;
     ponder?: boolean;
   }) {
     this.write("usi");
@@ -148,7 +150,9 @@ export class UsiEngine {
     }
 
     if (args.threads != null) this.write(`setoption name Threads value ${args.threads}`);
+    if (args.cores != null) this.write(`setoption name Cores value ${args.cores}`);
     if (args.hashMb != null) this.write(`setoption name USI_Hash value ${args.hashMb}`);
+    if (args.pvIntervalMs != null) this.write(`setoption name PvInterval value ${args.pvIntervalMs}`);
     if (args.ponder != null) this.write(`setoption name USI_Ponder value ${args.ponder ? "true" : "false"}`);
 
     for (const [name, value] of Object.entries(engineConfig.usiOptions)) {
