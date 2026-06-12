@@ -436,8 +436,8 @@ export async function scanGame(args: {
     const pvPlies = Math.max(config.finalize.pvPlies, 9);
     const finalDepth = config.finalize.depth;
     const maxDepthRunMs = config.finalize.maxDepthRunMs;
-    const wrongProbeDepth = Math.min(16, finalDepth);
-    const wrongProbeMultiPv = 5;
+    const wrongProbeDepth = Math.min(config.finalize.wrongProbeDepthCap, finalDepth);
+    const wrongProbeMultiPv = config.finalize.wrongProbeMultiPv;
     const threshold = config.finalize.minDiff;
 
     const rejectIfBestTooBadCp = config.finalize.rejectIfBestTooBadCp;

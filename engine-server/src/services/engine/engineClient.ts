@@ -1,6 +1,10 @@
 import path from 'path';
 import { existsSync } from 'fs';
-import { UsiEngine, defaultEnginePath } from '../../features/kif-problem-generation/engine.js';
+import {
+  UsiEngine,
+  defaultEnginePath,
+  type AnalyzeDiagnostics,
+} from '../../features/kif-problem-generation/engine.js';
 
 export type PvInfo = {
   multipv: number;
@@ -12,6 +16,7 @@ export type PvInfo = {
 export type AnalyzeResult = {
   infos: PvInfo[];
   bestmove: string | null;
+  diagnostics: AnalyzeDiagnostics;
 };
 
 export type AnalyzeArgs = {
@@ -22,6 +27,7 @@ export type AnalyzeArgs = {
   label?: string;
   maxDurationMs?: number;
   stopWhen?: (info: PvInfo) => boolean;
+  logDiagnostics?: boolean;
 };
 
 export type EngineInitOptions = {

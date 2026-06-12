@@ -42,6 +42,12 @@ export const config = {
 
     // 1回のdepth探索が難局面で長時間停止し続けるのを防ぐ上限
     maxDepthRunMs: envInt("AMTS_MAX_DEPTH_RUN_MS", 5 * 60 * 1000, 10_000, 60 * 60 * 1000),
+
+    // 不正解候補の列挙は最終確定探索より軽く保つため、depth 16を上限にする
+    wrongProbeDepthCap: 16,
+
+    // 不正解候補の列挙で取得する候補手数
+    wrongProbeMultiPv: 5,
   },
 
   // 一局から作成する問題の最大数

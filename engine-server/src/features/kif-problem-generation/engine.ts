@@ -14,10 +14,35 @@ export type PvInfo = {
   pv: string[];
 };
 
-type AnalyzeResult = {
+export type AnalyzeDiagnostics = {
+  wallMs: number;
+  bestmove: string | null;
+  maxDepth: number | null;
+  lastDepth: number | null;
+  seldepth: number | null;
+  nodes: number | null;
+  nps: number | null;
+  hashfull: number | null;
+  lastScore: string | null;
+  pvFirstMove: string | null;
+  timeout: boolean;
+};
+
+export type AnalyzeResult = {
   infos: PvInfo[];
   bestmove: string | null;
+  diagnostics: AnalyzeDiagnostics;
 };
+
+export class AnalyzeError extends Error {
+  diagnostics: AnalyzeDiagnostics;
+
+  constructor(message: string, diagnostics: AnalyzeDiagnostics) {
+    super(message);
+    this.name = "AnalyzeError";
+    this.diagnostics = diagnostics;
+  }
+}
 
 type InfoProgress = {
   depth: number | null;
@@ -65,8 +90,23 @@ function parseInfoProgress(line: string): InfoProgress {
   };
 }
 
+function mergeInfoProgress(previous: InfoProgress | null, current: InfoProgress): InfoProgress {
+  if (!previous) return current;
+  return {
+    depth: current.depth ?? previous.depth,
+    seldepth: current.seldepth ?? previous.seldepth,
+    nodes: current.nodes ?? previous.nodes,
+    nps: current.nps ?? previous.nps,
+    timeMs: current.timeMs ?? previous.timeMs,
+    hashfull: current.hashfull ?? previous.hashfull,
+    currentMove: current.currentMove ?? previous.currentMove,
+    score: current.score ?? previous.score,
+    pvFirstMove: current.pvFirstMove ?? previous.pvFirstMove,
+  };
+}
+
 function formatInfoProgress(progress: InfoProgress | null): string {
-  if (!progress) return "depth=- seldepth=- nodes=- nps=- engineTime=- hashfull=- currmove=- score=- pv=-";
+  if (!progress) return "depth=- seldepth=- nodes=- nps=- engineTime=- hashfull=- currmove=- score=- pvFirstMove=-";
   return [
     `depth=${progress.depth ?? "-"}`,
     `seldepth=${progress.seldepth ?? "-"}`,
@@ -76,7 +116,22 @@ function formatInfoProgress(progress: InfoProgress | null): string {
     `hashfull=${progress.hashfull ?? "-"}`,
     `currmove=${progress.currentMove ?? "-"}`,
     `score=${progress.score ?? "-"}`,
-    `pv=${progress.pvFirstMove ?? "-"}`,
+    `pvFirstMove=${progress.pvFirstMove ?? "-"}`,
+  ].join(" ");
+}
+
+function formatAnalyzeDiagnostics(diagnostics: AnalyzeDiagnostics): string {
+  return [
+    `wallMs=${diagnostics.wallMs}`,
+    `bestmove=${diagnostics.bestmove ?? "-"}`,
+    `maxDepth=${diagnostics.maxDepth ?? "-"}`,
+    `lastDepth=${diagnostics.lastDepth ?? "-"}`,
+    `nodes=${diagnostics.nodes ?? "-"}`,
+    `nps=${diagnostics.nps ?? "-"}`,
+    `hashfull=${diagnostics.hashfull ?? "-"}`,
+    `lastScore=${diagnostics.lastScore ?? "-"}`,
+    `pvFirstMove=${diagnostics.pvFirstMove ?? "-"}`,
+    `timeout=${diagnostics.timeout}`,
   ].join(" ");
 }
 
@@ -150,7 +205,7 @@ export class UsiEngine {
 
     this.proc.on("exit", (code, signal) => {
       const reason = `engine exited code=${code ?? "none"} signal=${signal ?? "none"}`;
-      console.log("[ENGINE-EXIT]", code);
+      console.error("[ENGINE-EXIT]", code);
       this.failPending(reason);
     });
   }
@@ -256,6 +311,7 @@ export class UsiEngine {
     label?: string;
     maxDurationMs?: number;
     stopWhen?: (info: PvInfo) => boolean;
+    logDiagnostics?: boolean;
   }): Promise<AnalyzeResult> {
     const latest: Map<number, PvInfo> = new Map();
     let bestmove: string | null = null;
@@ -270,7 +326,24 @@ export class UsiEngine {
     const startedAt = Date.now();
     const tag = args.label ?? "unlabeled";
     const searchMoves = args.searchMoves?.join(",") || "all";
-    const diagnosticsEnabled = args.maxDurationMs != null;
+    const diagnosticsEnabled = args.logDiagnostics ?? args.maxDurationMs != null;
+    const getDiagnostics = (): AnalyzeDiagnostics => ({
+      wallMs: Date.now() - startedAt,
+      bestmove,
+      maxDepth: maxReportedDepth || null,
+      lastDepth: lastProgress?.depth ?? null,
+      seldepth: lastProgress?.seldepth ?? null,
+      nodes: lastProgress?.nodes ?? null,
+      nps: lastProgress?.nps ?? null,
+      hashfull: lastProgress?.hashfull ?? null,
+      lastScore: lastProgress?.score ?? null,
+      pvFirstMove: lastProgress?.pvFirstMove ?? null,
+      timeout: stopReason?.startsWith("analysis exceeded ") ?? false,
+    });
+    const analyzeError = (reason: string): AnalyzeError => {
+      const diagnostics = getDiagnostics();
+      return new AnalyzeError(`${reason}; ${formatAnalyzeDiagnostics(diagnostics)}`, diagnostics);
+    };
 
     const end = startTimer();
 
@@ -307,7 +380,7 @@ export class UsiEngine {
           : null;
       const progressTimer = diagnosticsEnabled ? setInterval(() => logProgress("progress"), 10_000) : null;
 
-      this.pendingReject = reject;
+      this.pendingReject = (error) => reject(analyzeError(error.message));
       this.pendingCleanup = () => {
         if (durationTimer) clearTimeout(durationTimer);
         if (forceStopTimer) clearTimeout(forceStopTimer);
@@ -324,7 +397,7 @@ export class UsiEngine {
           }
           const progress = parseInfoProgress(line);
           const reachedTargetDepth = progress.depth != null && progress.depth >= args.depth && maxReportedDepth < args.depth;
-          lastProgress = progress;
+          lastProgress = mergeInfoProgress(lastProgress, progress);
           if (progress.depth != null) maxReportedDepth = Math.max(maxReportedDepth, progress.depth);
           if (reachedTargetDepth) logProgress("target-depth-reported");
           const info = parseInfoLine(line);
@@ -356,10 +429,14 @@ export class UsiEngine {
           perfMark(`engine.analyze${perfTag}`, ms);
 
           if (stopReason) {
-            reject(new Error(stopReason));
+            const error = analyzeError(stopReason);
+            if (diagnosticsEnabled) {
+              console.log(`[ENGINE-ANALYZE] bestmove-rejected label=${tag} ${formatAnalyzeDiagnostics(error.diagnostics)}`);
+            }
+            reject(error);
             return;
           }
-          resolve({ infos, bestmove });
+          resolve({ infos, bestmove, diagnostics: getDiagnostics() });
         }
       };
 

@@ -57,9 +57,15 @@ export async function main() {
     auth: { persistSession: false },
   });
 
-  console.log(
-    `設定: pass1 depth=${config.scan.depth} minDiff=${config.scan.minDiff} pass2 depth=${config.finalize.depth} minDiff=${config.finalize.minDiff} maxDepthRunMs=${config.finalize.maxDepthRunMs} maxProblemsPerGame=${config.maxProblemsPerGame} minCandidateGapPlies=${config.finalize.minCandidateGapPlies} threads=${engineConfig.threads} cores=${engineConfig.cores} hashMb=${engineConfig.hashMb}`,
-  );
+  console.log(`設定: ${JSON.stringify({
+    problemGeneration: config,
+    engine: {
+      ...engineConfig,
+      enginePath,
+      engineEvalDir,
+      effectivePvIntervalMs: Math.max(engineConfig.pvIntervalMs, 1000),
+    },
+  })}`);
 
   {
     const { data, error } = await supabase.rpc("claim_making_kifus", {

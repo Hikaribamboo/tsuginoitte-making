@@ -175,6 +175,7 @@ async function runCommand(
         line.startsWith('pass2 timing') ||
         line.startsWith('kifu sfen:') ||
         line.startsWith('作問結果:') ||
+        line.startsWith('[ENGINE-ANALYZE]') ||
         line.startsWith('[batchGenerate]') ||
         line.startsWith('致命的エラー:')
       );
