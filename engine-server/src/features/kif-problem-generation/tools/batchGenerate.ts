@@ -68,14 +68,14 @@ export async function main() {
   })}`);
 
   {
-    const { data, error } = await supabase.rpc("claim_making_kifus", {
+    const { data, error } = await supabase.rpc("claim_random_making_kifus", {
       batch_size: config.batch.generateBatchSize,
     });
     if (error) throw error;
 
     const kifus = (data ?? []) as KifuRow[];
     console.log(
-      `claim_making_kifus: requested=${config.batch.generateBatchSize} claimed=${kifus.length}${
+      `claim_random_making_kifus: requested=${config.batch.generateBatchSize} claimed=${kifus.length}${
         kifus.length > 0 ? ` ids=${kifus.map((kifu) => kifu.id).join(',')}` : ''
       }`,
     );
