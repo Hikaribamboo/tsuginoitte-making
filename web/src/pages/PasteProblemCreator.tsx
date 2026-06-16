@@ -9,6 +9,7 @@ import ReadingLineModal from '../components/ReadingLineModal';
 import MobileExplanationEditor from '../components/MobileExplanationEditor';
 import PositionEditor from '../components/PositionEditor';
 import TagSelector from '../components/TagSelector';
+import NewModeTagSelector from '../components/NewModeTagSelector';
 import AnalysisPanel from '../components/AnalysisPanel';
 import type { BestMove } from '../components/AnalysisPanel';
 import Toggle from '../components/Toggle';
@@ -19,9 +20,10 @@ import { cpToWinRatePercent } from '../lib/eval-percent';
 import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches, extractBranchProblems } from '../lib/kif-parser';
 import type { KifBranch, KifTreeNode } from '../lib/kif-parser';
 import { saveProblem, getNextDisplayNo, saveMultipleProblems, saveLearningProblem } from '../api/problems';
-import { getWorkspace, saveWorkspaceDraft, deleteWorkspace } from '../api/workspaces';
+import { getWorkspace, saveWorkspaceDraft, deleteWorkspace, hideWorkspaceFromList } from '../api/workspaces';
 import { evaluatePosition, generateExplanations, startAnalysisStream, stopAnalysis, type AnalysisLine } from '../api/backend';
 import { AVAILABLE_TAGS, DEFAULT_PROMPT } from '../lib/constants';
+import { saveLastNewModeTags } from '../lib/new-mode-tags';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
 import type { ChoiceDraft } from '../types/problem';
 import type { Side, HandPieceType, PieceType } from '../types/shogi';
@@ -79,6 +81,7 @@ interface PasteDraft {
   rootEvalCp: number | null;
   rootEvalPercent: number | null;
   savedAt: string;
+  mode?: 'next_move' | 'joseki' | 'new_mode';
   imagePositionSource?: {
     imageItemId?: string;
     fileName?: string;
@@ -209,7 +212,7 @@ const PasteProblemCreator: React.FC = () => {
   const [showDeleteWorkspaceConfirm, setShowDeleteWorkspaceConfirm] = useState(false);
   const [savedProblemId, setSavedProblemId] = useState<number | null>(null);
   const [imagePositionSource, setImagePositionSource] = useState<PasteDraft['imagePositionSource']>(null);
-  const [preferredSaveMode, setPreferredSaveMode] = useState<'next_move' | 'joseki'>('next_move');
+  const [preferredSaveMode, setPreferredSaveMode] = useState<'next_move' | 'joseki' | 'new_mode'>('next_move');
 
   // ---- Choice drafts ----
   const [choices, setChoices] = useState<Record<SlotKey, ChoiceDraft>>(
@@ -243,6 +246,7 @@ const PasteProblemCreator: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [registeringJoseki, setRegisteringJoseki] = useState(false);
+  const [savingNewMode, setSavingNewMode] = useState(false);
   const [josekiSaveWarning, setJosekiSaveWarning] = useState('');
   const [savingBranches, setSavingBranches] = useState(false);
   const [message, setMessage] = useState('');
@@ -492,9 +496,10 @@ const PasteProblemCreator: React.FC = () => {
     problemRating,
     rootEvalCp,
     rootEvalPercent,
+    mode: preferredSaveMode,
     imagePositionSource,
     savedAt: new Date().toISOString(),
-  }), [kifText, rootSfen, kifMoves, introMoveUsi, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent, imagePositionSource]);
+  }), [kifText, rootSfen, kifMoves, introMoveUsi, choices, readingLineInputs, prompt, tags, displayNo, problemRating, rootEvalCp, rootEvalPercent, preferredSaveMode, imagePositionSource]);
 
   const lastSavedRef = React.useRef<string>('');
 
@@ -558,7 +563,11 @@ const PasteProblemCreator: React.FC = () => {
           setRootEvalPercent(d.rootEvalPercent ?? null);
           setImagePositionSource(d.imagePositionSource ?? null);
           // If this draft was created from an image, prefer joseki mode by default
-          if (d.imagePositionSource) setPreferredSaveMode('joseki');
+          if (d.mode === 'new_mode' || d.mode === 'joseki' || d.mode === 'next_move') {
+            setPreferredSaveMode(d.mode);
+          } else if (d.imagePositionSource) {
+            setPreferredSaveMode('joseki');
+          }
           const sig = draftSignature({
             ...d,
             choices: d.choices ?? {
@@ -573,6 +582,7 @@ const PasteProblemCreator: React.FC = () => {
             problemRating: d.problemRating ?? 1500,
             rootEvalCp: d.rootEvalCp ?? null,
             rootEvalPercent: d.rootEvalPercent ?? null,
+            mode: d.mode ?? (d.imagePositionSource ? 'joseki' : 'next_move'),
             imagePositionSource: d.imagePositionSource ?? null,
             savedAt: d.savedAt ?? new Date().toISOString(),
             kifText: d.kifText ?? '',
@@ -627,6 +637,9 @@ const PasteProblemCreator: React.FC = () => {
     try {
       const draft = buildDraft();
       await saveWorkspaceDraft(workspaceId, draft as unknown as Record<string, unknown>);
+      if (draft.mode === 'new_mode') {
+        saveLastNewModeTags(draft.tags);
+      }
       const sig = draftSignature(draft);
       lastSavedRef.current = sig;
       setHasUnsavedChanges(false);
@@ -1586,12 +1599,12 @@ const PasteProblemCreator: React.FC = () => {
     return selectedVisibleTagCount === 0 ? `${base}(タグなし)` : base;
   }, [selectedVisibleTagCount]);
 
-  const validate = (): string[] => {
+  const validate = ({ requireIncorrectChoices = true } = {}): string[] => {
     const errors: string[] = [];
     if (!rootSfen) errors.push('局面が読み込まれていません');
     if (!choices.correct.usi) errors.push('正解手が未設定です');
-    if (!choices.incorrect1.usi) errors.push('不正解手１が未設定です');
-    if (!choices.incorrect2.usi) errors.push('不正解手２が未設定です');
+    if (requireIncorrectChoices && !choices.incorrect1.usi) errors.push('不正解手１が未設定です');
+    if (requireIncorrectChoices && !choices.incorrect2.usi) errors.push('不正解手２が未設定です');
     const usis = [choices.correct.usi, choices.incorrect1.usi, choices.incorrect2.usi].filter(
       Boolean,
     );
@@ -1829,6 +1842,52 @@ const PasteProblemCreator: React.FC = () => {
       setMessage(`定跡登録エラー: ${e.message}`);
     } finally {
       setRegisteringJoseki(false);
+    }
+  };
+
+  const handleSaveNewModeDraft = async () => {
+    if (!workspaceId) {
+      setMessage('下書きを開いたときだけ新モードで保存できます');
+      return;
+    }
+
+    const errors = validate({ requireIncorrectChoices: false });
+    if (errors.length > 0) {
+      setMessage(errors.join('\n'));
+      return;
+    }
+
+    setPreferredSaveMode('new_mode');
+    setSavingNewMode(true);
+    setMessage('');
+
+    try {
+      const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
+      const correctEvalCp = choices.correct.eval_cp;
+      const correctEvalPercent = choices.correct.eval_percent;
+      const draft: PasteDraft = {
+        ...buildDraft(),
+        rootSfen: rootSfenForSave,
+        introMoveUsi: introMovesUsi[introMovesUsi.length - 1] ?? '',
+        kifMoves: [],
+        prompt: prompt.trim() || DEFAULT_PROMPT,
+        rootEvalCp: correctEvalCp,
+        rootEvalPercent: correctEvalPercent,
+        mode: 'new_mode',
+        savedAt: new Date().toISOString(),
+      };
+
+      await saveWorkspaceDraft(workspaceId, draft as unknown as Record<string, unknown>);
+      saveLastNewModeTags(draft.tags);
+      lastSavedRef.current = draftSignature(draft);
+      setHasUnsavedChanges(false);
+      setSavedProblemId(null);
+      setMessage('新モードとして下書きDBに保存しました');
+      setShowDeleteWsModal(true);
+    } catch (e: any) {
+      setMessage(`新モード保存エラー: ${e.message}`);
+    } finally {
+      setSavingNewMode(false);
     }
   };
 
@@ -2127,7 +2186,11 @@ const PasteProblemCreator: React.FC = () => {
               {isPositionEditing && (
                 <PositionEditor rootSfen={rootSfen} onChange={handleRootSfenChange} />
               )}
-              <TagSelector selected={tags} onChange={setTags} defaultExpanded />
+              {preferredSaveMode === 'new_mode' ? (
+                <NewModeTagSelector selected={tags} onChange={setTags} />
+              ) : (
+                <TagSelector selected={tags} onChange={setTags} defaultExpanded />
+              )}
             </div>
           </details>
 
@@ -2148,6 +2211,9 @@ const PasteProblemCreator: React.FC = () => {
             </button>
             <button type="button" className="is-joseki" onClick={handleRegisterJoseki} disabled={registeringJoseki}>
               {registeringJoseki ? '保存中...' : '定跡保存'}
+            </button>
+            <button type="button" className="is-thinking" onClick={handleSaveNewModeDraft} disabled={!workspaceId || savingNewMode}>
+              {savingNewMode ? '保存中...' : '新モード'}
             </button>
             <button type="button" className="is-thinking" onClick={handleSave} disabled={saving}>
               {saving ? '保存中...' : '思考保存'}
@@ -2526,7 +2592,11 @@ const PasteProblemCreator: React.FC = () => {
 
           <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-sky-200/80 bg-white/75 p-3 shadow-sm backdrop-blur-sm">
             <div className="min-h-0 overflow-y-auto pr-1">
-              <TagSelector selected={tags} onChange={setTags} />
+              {preferredSaveMode === 'new_mode' ? (
+                <NewModeTagSelector selected={tags} onChange={setTags} />
+              ) : (
+                <TagSelector selected={tags} onChange={setTags} />
+              )}
 
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {workspaceId && (
@@ -2561,6 +2631,13 @@ const PasteProblemCreator: React.FC = () => {
                   className="col-span-2 h-10 rounded-lg border-amber-500 bg-amber-500 px-3 text-[13px] font-semibold text-white hover:bg-amber-600"
                 >
                   {registeringJoseki ? '登録中...' : (selectedVisibleTagCount === 0 ? '定跡モードで保存(タグなし)' : '定跡モードで保存')}
+                </button>
+                <button
+                  onClick={handleSaveNewModeDraft}
+                  disabled={!workspaceId || savingNewMode}
+                  className="col-span-2 h-10 rounded-lg border-fuchsia-500 bg-fuchsia-500 px-3 text-[13px] font-semibold text-white hover:bg-fuchsia-600 disabled:opacity-60"
+                >
+                  {savingNewMode ? '保存中...' : (selectedVisibleTagCount === 0 ? '新モードで保存(タグなし)' : '新モードで保存')}
                 </button>
                 {josekiSaveWarning ? (
                   <div className="col-span-2 -mt-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] font-medium text-amber-800">
@@ -2722,9 +2799,13 @@ const PasteProblemCreator: React.FC = () => {
           >
             <h3 className="text-base font-semibold mb-2">保存完了</h3>
             <p className="text-[13px] text-gray-600 mb-4">
-              問題を保存しました{savedProblemId != null ? ` (problem_id: ${savedProblemId})` : ''}。
+              {savedProblemId != null
+                ? `問題を保存しました (problem_id: ${savedProblemId})。`
+                : '新モードとして下書きDBに保存しました。'}
               <br />
-              この下書きを削除しますか？
+              {savedProblemId != null
+                ? 'この下書きを削除しますか？'
+                : '下書き一覧から削除しますか？新モード一覧には残ります。'}
             </p>
             <div className="flex justify-end gap-2">
               <button
@@ -2740,7 +2821,11 @@ const PasteProblemCreator: React.FC = () => {
                 type="button"
                 onClick={async () => {
                   try {
-                    await deleteWorkspace(workspaceId);
+                    if (savedProblemId == null) {
+                      await hideWorkspaceFromList(workspaceId);
+                    } else {
+                      await deleteWorkspace(workspaceId);
+                    }
                   } catch { /* ignore */ }
                   setShowDeleteWsModal(false);
                   navigate('/workspaces');

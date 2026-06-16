@@ -59,8 +59,9 @@ const MakingHome: React.FC = () => {
       (acc, row) => ({
         nextMove: acc.nextMove + row.nextMoveCount,
         joseki: acc.joseki + row.josekiCount,
+        newMode: acc.newMode + row.newModeCount,
       }),
-      { nextMove: 0, joseki: 0 },
+      { nextMove: 0, joseki: 0, newMode: 0 },
     ),
     [dailyCounts],
   );
@@ -90,11 +91,13 @@ const MakingHome: React.FC = () => {
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-base font-semibold text-slate-900">日別作成数</h3>
-              <p className="mt-1 text-xs text-slate-600">過去20日間の本番問題作成数です。</p>
+              <p className="mt-1 text-xs text-slate-600">過去20日間の本番問題・新モード下書き作成数です。</p>
             </div>
             <div className="rounded-md bg-white px-2 py-1 text-right text-xs text-slate-600">
-              <div>計 {totals.nextMove + totals.joseki}</div>
-              <div className="text-[11px]">思考 {totals.nextMove} / 定跡 {totals.joseki}</div>
+              <div>計 {totals.nextMove + totals.joseki + totals.newMode}</div>
+              <div className="text-[11px]">
+                思考 {totals.nextMove} / 定跡 {totals.joseki} / 新 {totals.newMode}
+              </div>
             </div>
           </div>
 
@@ -114,6 +117,7 @@ const MakingHome: React.FC = () => {
                     <th className="border-b border-slate-200 px-3 py-2">日付</th>
                     <th className="border-b border-slate-200 px-3 py-2 text-right">思考</th>
                     <th className="border-b border-slate-200 px-3 py-2 text-right">定跡</th>
+                    <th className="border-b border-slate-200 px-3 py-2 text-right">新</th>
                     <th className="border-b border-slate-200 px-3 py-2 text-right">合計</th>
                   </tr>
                 </thead>
@@ -129,8 +133,11 @@ const MakingHome: React.FC = () => {
                       <td className="border-b border-slate-100 px-3 py-2 text-right font-mono text-xs text-slate-900">
                         {row.josekiCount}
                       </td>
+                      <td className="border-b border-slate-100 px-3 py-2 text-right font-mono text-xs text-slate-900">
+                        {row.newModeCount}
+                      </td>
                       <td className="border-b border-slate-100 px-3 py-2 text-right font-mono text-xs font-semibold text-slate-900">
-                        {row.nextMoveCount + row.josekiCount}
+                        {row.nextMoveCount + row.josekiCount + row.newModeCount}
                       </td>
                     </tr>
                   ))}

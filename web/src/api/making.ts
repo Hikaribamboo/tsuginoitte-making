@@ -10,7 +10,7 @@ import type {
   UpsertMakingDraftChoiceInput,
 } from '../types/making';
 
-const MAKING_MODES: ReadonlySet<MakingMode> = new Set(['next_move', 'joseki']);
+const MAKING_MODES: ReadonlySet<MakingMode> = new Set(['next_move', 'joseki', 'new_mode']);
 const MAKING_SOURCE_TYPES: ReadonlySet<MakingSourceType> = new Set([
   'manual',
   'pasted_kifu',

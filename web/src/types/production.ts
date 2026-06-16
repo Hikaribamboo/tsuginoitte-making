@@ -1,4 +1,4 @@
-export type ProductionProblemMode = 'next_move' | 'joseki';
+export type ProductionProblemMode = 'next_move' | 'joseki' | 'new_mode';
 
 export interface ProductionProblem {
   problemId: number;

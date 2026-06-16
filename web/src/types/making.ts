@@ -1,4 +1,4 @@
-export type MakingMode = 'next_move' | 'joseki';
+export type MakingMode = 'next_move' | 'joseki' | 'new_mode';
 
 export type MakingSourceType =
   | 'manual'

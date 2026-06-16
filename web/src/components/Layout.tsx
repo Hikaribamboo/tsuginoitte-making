@@ -24,6 +24,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     { path: '/making', label: '作問スタジオ' },
     { path: '/workspaces', label: '下書き一覧' },
     { path: '/production', label: '本番問題' },
+    { path: '/new-mode', label: '新モード' },
   ];
 
   const setMobileMode = React.useCallback((enabled: boolean) => {
@@ -121,6 +122,9 @@ function isActivePath(pathname: string, tabPath: string): boolean {
   }
   if (tabPath === '/production') {
     return pathname === '/production' || pathname === '/making/production';
+  }
+  if (tabPath === '/new-mode') {
+    return pathname === '/new-mode';
   }
   return pathname === tabPath || pathname.startsWith(`${tabPath}/`);
 }

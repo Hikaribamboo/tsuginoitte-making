@@ -4,7 +4,7 @@ import { INITIAL_SFEN } from '../lib/sfen';
 
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 
-type DraftMode = 'next_move' | 'joseki';
+type DraftMode = 'next_move' | 'joseki' | 'new_mode';
 
 type DraftPayload = Record<string, unknown>;
 
@@ -74,6 +74,10 @@ function getSourcePayload(row: DraftProblemRow): Record<string, unknown> {
 function getDraftPayload(row: DraftProblemRow): DraftPayload {
   const payload = getSourcePayload(row);
   return isRecord(payload.draft_payload) ? payload.draft_payload : {};
+}
+
+function isWorkspaceHidden(row: DraftProblemRow): boolean {
+  return getSourcePayload(row).workspace_hidden === true;
 }
 
 function workspaceName(row: DraftProblemRow): string {
@@ -194,6 +198,7 @@ async function fetchChoicesByDraftProblemIds(ids: number[]): Promise<Map<number,
 }
 
 function draftMode(draft: DraftPayload): DraftMode {
+  if (draft.mode === 'new_mode') return 'new_mode';
   return draft.mode === 'joseki' ? 'joseki' : 'next_move';
 }
 
@@ -272,8 +277,9 @@ export async function listWorkspaces(): Promise<Workspace[]> {
   if (error) throw error;
 
   const rows = (data ?? []) as DraftProblemRow[];
-  const choicesById = await fetchChoicesByDraftProblemIds(rows.map((row) => row.id));
-  return rows.map((row) => rowToWorkspace(row, choicesById.get(row.id) ?? []));
+  const visibleRows = rows.filter((row) => !isWorkspaceHidden(row));
+  const choicesById = await fetchChoicesByDraftProblemIds(visibleRows.map((row) => row.id));
+  return visibleRows.map((row) => rowToWorkspace(row, choicesById.get(row.id) ?? []));
 }
 
 /** Create a new authoring draft. */
@@ -331,6 +337,31 @@ export async function renameWorkspace(id: string, name: string): Promise<void> {
       source_payload: {
         ...sourcePayload,
         workspace_name: name,
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', draftProblemId);
+  if (error) throw error;
+}
+
+/** Hide a draft from the workspace list without deleting its DB row. */
+export async function hideWorkspaceFromList(id: string): Promise<void> {
+  const draftProblemId = parseDraftProblemId(id);
+  const { data, error: fetchError } = await supabase
+    .from('making_draft_problems')
+    .select('source_payload')
+    .eq('id', draftProblemId)
+    .single();
+  if (fetchError) throw fetchError;
+
+  const sourcePayload = isRecord(data?.source_payload) ? data.source_payload : {};
+  const { error } = await supabase
+    .from('making_draft_problems')
+    .update({
+      source_payload: {
+        ...sourcePayload,
+        workspace_hidden: true,
+        workspace_hidden_at: new Date().toISOString(),
       },
       updated_at: new Date().toISOString(),
     })

@@ -25,6 +25,10 @@ const App: React.FC = () => {
           <Route path="/making/kifus" element={<MakingKifusGenerator />} />
           <Route path="/making/production" element={<ProductionReview />} />
           <Route path="/production" element={<ProductionReview />} />
+          <Route
+            path="/new-mode"
+            element={<ProductionReview fixedMode="new_mode" title="新モード一覧" emptyText="新モードの下書きがありません。" />}
+          />
           <Route path="*" element={<Navigate to="/making" replace />} />
         </Routes>
       </Layout>

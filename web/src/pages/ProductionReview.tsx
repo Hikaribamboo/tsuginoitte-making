@@ -6,8 +6,10 @@ import {
   listProductionProblems,
   updateProductionProblemById,
 } from '../api/production';
+import NewModeTagSelector from '../components/NewModeTagSelector';
 import PositionEditor from '../components/PositionEditor';
 import { TAG_CATEGORIES } from '../lib/constants';
+import { saveLastNewModeTags } from '../lib/new-mode-tags';
 import {
   getProductionValidationSummary,
   summarizeProductionIssues,
@@ -83,7 +85,17 @@ const HAND_KANJI: Record<HandPieceType, string> = {
   P: '歩',
 };
 
-const ProductionReview: React.FC = () => {
+interface ProductionReviewProps {
+  fixedMode?: ProductionProblemMode;
+  title?: string;
+  emptyText?: string;
+}
+
+const ProductionReview: React.FC<ProductionReviewProps> = ({
+  fixedMode,
+  title = '本番問題一覧',
+  emptyText = '条件に合う問題がありません。',
+}) => {
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -98,7 +110,7 @@ const ProductionReview: React.FC = () => {
   const [selectedProblemMode, setSelectedProblemMode] = useState<ProductionProblemMode | null>(null);
   const [detail, setDetail] = useState<ProductionProblemDetail | null>(null);
   const [detailDraft, setDetailDraft] = useState<ProductionProblemDetail | null>(null);
-  const [mode, setMode] = useState<'all' | ProductionProblemMode>('all');
+  const [mode, setMode] = useState<'all' | ProductionProblemMode>(fixedMode ?? 'all');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [draftQuery, setDraftQuery] = useState('');
   const [query, setQuery] = useState('');
@@ -117,7 +129,7 @@ const ProductionReview: React.FC = () => {
       setListError('');
 
       const rows = await listProductionProblems({
-        mode,
+        mode: fixedMode ?? mode,
         status,
         query,
         limit: 500,
@@ -131,7 +143,7 @@ const ProductionReview: React.FC = () => {
         return;
       }
 
-      const choices = await listProductionChoicesByProblemIds(rows.map((row) => row.problemId), mode);
+      const choices = await listProductionChoicesByProblemIds(rows.map((row) => row.problemId), fixedMode ?? mode);
       const groupedChoices = groupByProblemId(choices);
       const baseSummaryMap: Record<string, ProductionValidationSummary> = {};
 
@@ -250,7 +262,7 @@ const ProductionReview: React.FC = () => {
   const handleClear = () => {
     setDraftQuery('');
     setQuery('');
-    setMode('all');
+    setMode(fixedMode ?? 'all');
     setStatus('all');
   };
 
@@ -343,6 +355,9 @@ const ProductionReview: React.FC = () => {
         },
         detailDraft.choices,
       );
+      if (detailDraft.mode === 'new_mode') {
+        saveLastNewModeTags(detailDraft.tags);
+      }
       setDetail(updated);
       setDetailDraft(updated);
       await loadList();
@@ -368,7 +383,7 @@ const ProductionReview: React.FC = () => {
     setSaveError('');
 
     try {
-      await deleteProductionProblemEverywhere(detailDraft.problemId);
+      await deleteProductionProblemEverywhere(detailDraft.problemId, detailDraft.mode);
       setDetail(null);
       setDetailDraft(null);
       setSelectedProblemId(null);
@@ -386,7 +401,7 @@ const ProductionReview: React.FC = () => {
       <div className="production-review-layout flex h-full">
         <aside className="production-review-sidebar w-[220px] shrink-0 border-r border-sky-200/80 bg-white/75 backdrop-blur-sm">
           <div className="border-b border-sky-200/70 px-4 py-3">
-            <h2 className="text-xl font-semibold text-slate-900">本番問題一覧</h2>
+            <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
             <div className="mt-1 text-xs text-sky-700">{items.length.toLocaleString('ja-JP')} 件</div>
           </div>
 
@@ -407,20 +422,22 @@ const ProductionReview: React.FC = () => {
               />
             </label>
 
-            <label className="block">
-              <div className="mb-1 text-xs text-slate-600">mode</div>
-              <select
-                className="h-9 w-full rounded-lg border border-sky-200 bg-white px-3 text-sm text-slate-900"
-                value={mode}
-                onChange={(event) => setMode(event.target.value as 'all' | ProductionProblemMode)}
-              >
-                {MODE_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {!fixedMode ? (
+              <label className="block">
+                <div className="mb-1 text-xs text-slate-600">mode</div>
+                <select
+                  className="h-9 w-full rounded-lg border border-sky-200 bg-white px-3 text-sm text-slate-900"
+                  value={mode}
+                  onChange={(event) => setMode(event.target.value as 'all' | ProductionProblemMode)}
+                >
+                  {MODE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
 
             <label className="block">
               <div className="mb-1 text-xs text-slate-600">status</div>
@@ -460,7 +477,7 @@ const ProductionReview: React.FC = () => {
 
             {items.length === 0 ? (
               <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
-                条件に合う問題がありません。
+                {emptyText}
               </div>
             ) : (
               <div className="space-y-2">
@@ -870,12 +887,23 @@ const ProductionReview: React.FC = () => {
                       />
                     </label>
 
-                    <TagEditor
-                      tags={detailDraft.tags}
-                      onChange={(nextTags) =>
-                        setDetailDraft((current) => (current ? { ...current, tags: nextTags } : current))
-                      }
-                    />
+                    <div className="mt-3">
+                      {detailDraft.mode === 'new_mode' ? (
+                        <NewModeTagSelector
+                          selected={detailDraft.tags}
+                          onChange={(nextTags) =>
+                            setDetailDraft((current) => (current ? { ...current, tags: nextTags } : current))
+                          }
+                        />
+                      ) : (
+                        <TagEditor
+                          tags={detailDraft.tags}
+                          onChange={(nextTags) =>
+                            setDetailDraft((current) => (current ? { ...current, tags: nextTags } : current))
+                          }
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
               </section>

@@ -14,6 +14,8 @@ import {
   type KifBranchParseResult,
 } from '../lib/kif-parser';
 import TagSelector from '../components/TagSelector';
+import NewModeTagSelector from '../components/NewModeTagSelector';
+import { getLastNewModeTags, saveLastNewModeTags } from '../lib/new-mode-tags';
 
 const WorkspaceList: React.FC = () => {
   const navigate = useNavigate();
@@ -30,7 +32,7 @@ const WorkspaceList: React.FC = () => {
   const [pasteText, setPasteText] = useState('');
   const [pasteError, setPasteError] = useState('');
   const [pasteTags, setPasteTags] = useState<string[]>([]);
-  const [pasteSaveMode, setPasteSaveMode] = useState<'next_move' | 'joseki'>('next_move');
+  const [pasteSaveMode, setPasteSaveMode] = useState<'next_move' | 'joseki' | 'new_mode'>('next_move');
   const [parsedBranchResult, setParsedBranchResult] = useState<KifBranchParseResult | null>(null);
   const [parsedBranchCount, setParsedBranchCount] = useState(0);
 
@@ -151,7 +153,7 @@ const WorkspaceList: React.FC = () => {
         readingLineInputs: { correct: '', incorrect1: '', incorrect2: '' },
         prompt: '',
         tags: pasteTags,
-        // 保存モード: 'next_move' = 次の一手, 'joseki' = 定跡
+        // 保存モード: 'next_move' = 次の一手, 'joseki' = 定跡, 'new_mode' = 新モード
         mode: pasteSaveMode,
         displayNo: null,
         problemRating: 1500,
@@ -159,6 +161,9 @@ const WorkspaceList: React.FC = () => {
         rootEvalPercent: null,
         savedAt: new Date().toISOString(),
       });
+      if (pasteSaveMode === 'new_mode') {
+        saveLastNewModeTags(pasteTags);
+      }
 
       setPasteText('');
       setPasteTags([]);
@@ -260,6 +265,9 @@ const WorkspaceList: React.FC = () => {
             introMovesUsi: bp.introMovesUsi,
           },
         });
+        if (pasteSaveMode === 'new_mode') {
+          saveLastNewModeTags(pasteTags);
+        }
       }
 
       setPasteText('');
@@ -381,7 +389,11 @@ const WorkspaceList: React.FC = () => {
         {hasPasteContent && (
           <>
             <div className="mt-2">
-              <TagSelector selected={pasteTags} onChange={setPasteTags} />
+              {pasteSaveMode === 'new_mode' ? (
+                <NewModeTagSelector selected={pasteTags} onChange={setPasteTags} />
+              ) : (
+                <TagSelector selected={pasteTags} onChange={setPasteTags} />
+              )}
             </div>
             <div className="mt-2 flex items-center gap-3 text-[13px]">
               <div className="flex items-center gap-1">
@@ -407,6 +419,21 @@ const WorkspaceList: React.FC = () => {
                   className="mr-1"
                 />
                 <label htmlFor="saveMode-joseki">定跡</label>
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  id="saveMode-new"
+                  type="radio"
+                  name="saveMode"
+                  value="new_mode"
+                  checked={pasteSaveMode === 'new_mode'}
+                  onChange={() => {
+                    setPasteSaveMode('new_mode');
+                    setPasteTags(getLastNewModeTags());
+                  }}
+                  className="mr-1"
+                />
+                <label htmlFor="saveMode-new">新モード</label>
               </div>
             </div>
             <div className="flex gap-2 mt-2 flex-wrap">
@@ -546,7 +573,7 @@ const WorkspaceList: React.FC = () => {
                     )}
                     {d?.mode && (
                       <span className="rounded bg-indigo-100 px-1.5 py-0 text-[10px] text-indigo-700">
-                        {d.mode === 'joseki' ? '定跡' : '次の一手'}
+                        {d.mode === 'new_mode' ? '新モード' : d.mode === 'joseki' ? '定跡' : '次の一手'}
                       </span>
                     )}
                     {d?.imagePositionSource && (

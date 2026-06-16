@@ -1,6 +1,6 @@
 // ---- Learning Mode ----
 
-export type LearningMode = "next_move" | "joseki";
+export type LearningMode = "next_move" | "joseki" | "new_mode";
 
 // ---- Problem & Choice types matching Supabase schema ----
 
