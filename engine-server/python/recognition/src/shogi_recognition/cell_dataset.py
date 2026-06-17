@@ -6,7 +6,7 @@ from pathlib import Path
 
 import cv2
 
-from .class_map import class_to_idx
+from .class_map import class_to_dir_name, class_to_idx
 from .sfen import expand_sfen_to_board_labels, SfenError
 
 
@@ -136,7 +136,7 @@ def create_cell_dataset(
 
             rank = row_index + 1
             file_num = 9 - col_index
-            output_dir = dataset_root / "cells" / split / label
+            output_dir = dataset_root / "cells" / split / class_to_dir_name[label]
             output_dir.mkdir(parents=True, exist_ok=True)
             output_name = f"{image_id}_r{rank}_f{file_num}.png"
             output_path = output_dir / output_name

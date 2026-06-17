@@ -25,6 +25,7 @@ TEXT_COLOR = (245, 245, 245)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Preview a cropRect overlay with a 9x9 grid")
     parser.add_argument("--id", required=True, help="image id without extension")
+    parser.add_argument("--dataset-root", default=str(ROOT), help="dataset root directory")
     parser.add_argument("--x", type=int, help="cropRect x")
     parser.add_argument("--y", type=int, help="cropRect y")
     parser.add_argument("--width", type=int, help="cropRect width")
@@ -55,7 +56,7 @@ def corners_to_crop_rect(corners: list[list[float]]) -> tuple[int, int, int, int
     return x_min, y_min, x_max - x_min, y_max - y_min
 
 
-def resolve_crop_rect(args: argparse.Namespace, image_id: str) -> tuple[int, int, int, int]:
+def resolve_crop_rect(args: argparse.Namespace, dataset_root: Path, image_id: str) -> tuple[int, int, int, int]:
     if args.size is not None:
         if args.x is None or args.y is None:
             raise ValueError("--size requires both --x and --y")
@@ -66,7 +67,7 @@ def resolve_crop_rect(args: argparse.Namespace, image_id: str) -> tuple[int, int
             raise ValueError("when specifying coordinates, provide --x --y --width --height")
         return args.x, args.y, args.width, args.height
 
-    metadata = load_metadata(ROOT / "metadata" / f"{image_id}.json")
+    metadata = load_metadata(dataset_root / "metadata" / f"{image_id}.json")
     crop_rect = metadata.get("cropRect")
     if isinstance(crop_rect, dict):
         x = int(crop_rect.get("x", 0))
@@ -111,12 +112,15 @@ def render_preview(image: np.ndarray, x: int, y: int, width_rect: int, height_re
 
 def main() -> None:
     args = parse_args()
-    source_image_path = ROOT / "raw" / f"{args.id}.png"
-    reports_dir = ROOT / "reports"
+    dataset_root = Path(args.dataset_root)
+    if not dataset_root.is_absolute():
+        dataset_root = ROOT / dataset_root
+    source_image_path = dataset_root / "raw" / f"{args.id}.png"
+    reports_dir = dataset_root / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     image = load_image(source_image_path)
-    x, y, width_rect, height_rect = resolve_crop_rect(args, args.id)
+    x, y, width_rect, height_rect = resolve_crop_rect(args, dataset_root, args.id)
     preview = render_preview(image, x, y, width_rect, height_rect)
     output_path = reports_dir / f"{args.id}_crop_rect_preview.png"
 

@@ -57,6 +57,17 @@ const STATUS_CLASS: Record<ImagePositionItem['status'], string> = {
   error: 'bg-red-100 text-red-700',
 };
 
+type RecognitionModelVariant = 'normal' | 'kio';
+
+const MODEL_VARIANT_LABEL: Record<RecognitionModelVariant, string> = {
+  normal: 'ノーマル',
+  kio: '棋桜',
+};
+
+function normalizeModelVariant(value: ImagePositionItem['recognitionModelVariant']): RecognitionModelVariant {
+  return value === 'kio' ? 'kio' : 'normal';
+}
+
 function sortItems(items: ImagePositionItem[]): ImagePositionItem[] {
   return [...items].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
 }
@@ -319,6 +330,7 @@ const ImagePositionCreator: React.FC = () => {
           status: 'idle',
           issues: [],
           recognitionNotes: [],
+          recognitionModelVariant: 'normal',
           createdAt: now,
           updatedAt: now,
         };
@@ -337,15 +349,17 @@ const ImagePositionCreator: React.FC = () => {
   const handleRecognize = useCallback(async (id: string) => {
     const item = itemsRef.current.find((candidate) => candidate.id === id);
     if (!item) return;
+    const modelVariant = normalizeModelVariant(item.recognitionModelVariant);
 
     await patchItem(id, {
       status: 'recognizing',
       issues: [],
       recognitionNotes: [],
+      recognitionModelVariant: modelVariant,
     });
 
     try {
-      const result = await recognizeShogiPosition(item.imageDataUrl);
+      const result = await recognizeShogiPosition(item.imageDataUrl, modelVariant);
       const sfen = normalizeRecognizedSfen(result.sfen);
       if (!sfen) {
         throw new Error('画像認識結果にSFENが含まれていません');
@@ -362,6 +376,7 @@ const ImagePositionCreator: React.FC = () => {
         recognitionSquares: result.squares ?? [],
         recognitionPieceBox: result.pieceBox ?? [],
         recognitionValidationIssues: result.validationIssues ?? [],
+        recognitionModelVariant: result.modelVariant ?? modelVariant,
         recognitionModel: result.model,
         recognitionConfidence: result.confidence,
         recognizedAt: new Date().toISOString(),
@@ -595,6 +610,7 @@ const ImagePositionCreator: React.FC = () => {
               key={item.id}
               item={item}
               onMemoChange={(memo) => void patchItem(item.id, { memo })}
+              onModelVariantChange={(recognitionModelVariant) => void patchItem(item.id, { recognitionModelVariant })}
               onRecognize={() => void handleRecognize(item.id)}
               onOpen={() => setActiveId(item.id)}
               onDelete={() => void handleDelete(item.id)}
@@ -609,6 +625,7 @@ const ImagePositionCreator: React.FC = () => {
 interface ImagePositionCardProps {
   item: ImagePositionItem;
   onMemoChange: (memo: string) => void;
+  onModelVariantChange: (modelVariant: RecognitionModelVariant) => void;
   onRecognize: () => void;
   onOpen: () => void;
   onDelete: () => void;
@@ -617,12 +634,14 @@ interface ImagePositionCardProps {
 const ImagePositionCard: React.FC<ImagePositionCardProps> = ({
   item,
   onMemoChange,
+  onModelVariantChange,
   onRecognize,
   onOpen,
   onDelete,
 }) => {
   const shownIssues = item.issues.slice(0, 3);
   const canRecognize = item.status !== 'recognizing';
+  const modelVariant = normalizeModelVariant(item.recognitionModelVariant);
   return (
     <div className="border border-gray-200 rounded-lg bg-white/85 p-3 flex flex-col gap-2">
       <div className="flex gap-2">
@@ -668,6 +687,29 @@ const ImagePositionCard: React.FC<ImagePositionCardProps> = ({
           {item.recognitionNotes.slice(0, 2).join(' / ')}
         </div>
       )}
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="grid grid-cols-2 gap-1 w-[164px]">
+          {(['normal', 'kio'] as const).map((variant) => (
+            <button
+              key={variant}
+              type="button"
+              onClick={() => onModelVariantChange(variant)}
+              disabled={!canRecognize}
+              className={modelVariant === variant
+                ? 'bg-slate-800 text-white border-slate-800 hover:bg-slate-700'
+                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}
+            >
+              {MODEL_VARIANT_LABEL[variant]}
+            </button>
+          ))}
+        </div>
+        {item.recognitionModel && (
+          <div className="text-[10px] text-gray-500 truncate" title={item.recognitionModel}>
+            {MODEL_VARIANT_LABEL[modelVariant]} / {item.recognitionModel}
+          </div>
+        )}
+      </div>
 
       {shownIssues.length > 0 && (
         <div className="flex flex-col gap-1">
@@ -1185,6 +1227,7 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
           fileName: item.fileName,
           memo: item.memo,
           recognitionModel: item.recognitionModel ?? null,
+          recognitionModelVariant: item.recognitionModelVariant ?? null,
           recognitionConfidence: item.recognitionConfidence ?? null,
           recognitionNotes: item.recognitionNotes,
           issues,

@@ -6,7 +6,11 @@ import os from 'os';
 import { ShogiEngine } from '../engine.js';
 import { cancelMakingJob, getMakingJob, listMakingJobs, startMakingJob } from '../makingJobs.js';
 import { listMakingPathOptions } from '../makingOptions.js';
-import { resolvePredictionModelPath, runLocalShogiPrediction } from '../features/recognition/recognition.service.js';
+import {
+  normalizeRecognitionModelVariant,
+  resolvePredictionModelPathForVariant,
+  runLocalShogiPrediction,
+} from '../features/recognition/recognition.service.js';
 import { fetchShogiQuestGames, type ShogiQuestMode } from '../features/shogi-quest/shogiQuest.service.js';
 
 type UnifiedJobKind = 'book-problem' | 'kif-problem' | 'kifs-generation';
@@ -137,12 +141,14 @@ export function createEngineApp(engine: ShogiEngine): Express {
     }
 
     try {
-      const parsed = await runLocalShogiPrediction(image);
-      const modelPath = resolvePredictionModelPath();
+      const modelVariant = normalizeRecognitionModelVariant(req.body?.modelVariant);
+      const parsed = await runLocalShogiPrediction(image, modelVariant);
+      const modelPath = resolvePredictionModelPathForVariant(modelVariant);
       res.json({
         ...parsed,
         confidence: typeof parsed.confidence === 'number' ? parsed.confidence : undefined,
         notes: Array.isArray(parsed.notes) ? parsed.notes.map(String) : [],
+        modelVariant,
         model: path.basename(modelPath),
         raw: parsed,
       });

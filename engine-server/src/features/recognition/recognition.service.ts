@@ -12,6 +12,8 @@ type PythonInvocation = {
   prefixArgs: string[];
 };
 
+export type ShogiRecognitionModelVariant = 'normal' | 'kio';
+
 function resolveShogiDatasetRoot(): string {
   const fromEnv = process.env.SHOGI_DATASET_ROOT?.trim();
   if (fromEnv) return fromEnv;
@@ -31,6 +33,44 @@ export function resolvePredictionScriptPath(): string {
 
 export function resolvePredictionModelPath(): string {
   return process.env.SHOGI_PREDICTION_MODEL ?? path.join(resolveShogiDatasetRoot(), 'models', 'resnet18_shogi_piece_classifier.pt');
+}
+
+export function normalizeRecognitionModelVariant(value: unknown): ShogiRecognitionModelVariant {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (normalized === 'kio' || normalized === 'kiou' || normalized === '棋桜') return 'kio';
+  return 'normal';
+}
+
+export function resolvePredictionDatasetRoot(variant: ShogiRecognitionModelVariant = 'normal'): string {
+  if (variant === 'kio') {
+    return process.env.SHOGI_KIO_DATASET_ROOT ?? path.join(resolveShogiDatasetRoot(), 'datasets', 'kio');
+  }
+  return resolveShogiDatasetRoot();
+}
+
+export function resolvePredictionModelPathForVariant(variant: ShogiRecognitionModelVariant = 'normal'): string {
+  if (variant === 'kio') {
+    return process.env.SHOGI_KIO_PREDICTION_MODEL
+      ?? path.join(resolvePredictionDatasetRoot('kio'), 'models', 'resnet18_shogi_piece_classifier_kio.pt');
+  }
+  return resolvePredictionModelPath();
+}
+
+export function resolveFallbackSourceId(variant: ShogiRecognitionModelVariant = 'normal'): string {
+  if (variant === 'kio') {
+    return process.env.SHOGI_KIO_PREDICTION_FALLBACK_SOURCE_ID ?? '001';
+  }
+  return process.env.SHOGI_PREDICTION_FALLBACK_SOURCE_ID ?? '002';
+}
+
+function appendPredictionThresholdArgs(args: string[], variant: ShogiRecognitionModelVariant): void {
+  if (variant !== 'kio') return;
+
+  const lowConfidence = process.env.SHOGI_KIO_LOW_CONFIDENCE_THRESHOLD ?? '0.35';
+  const top2Margin = process.env.SHOGI_KIO_TOP2_MARGIN_THRESHOLD ?? '0.02';
+  args.push('--low-confidence-threshold', lowConfidence);
+  args.push('--top2-margin-threshold', top2Margin);
+  args.push('--cell-margin', process.env.SHOGI_KIO_CELL_MARGIN ?? '0');
 }
 
 function decodeDataUrlImage(dataUrl: string): Buffer {
@@ -164,11 +204,18 @@ async function runPython(args: string[]): Promise<{ stdout: string; stderr: stri
   );
 }
 
-export async function runLocalShogiPrediction(imageDataUrl: string): Promise<any> {
+export async function runLocalShogiPrediction(
+  imageDataUrl: string,
+  variant: ShogiRecognitionModelVariant = 'normal',
+): Promise<any> {
   const scriptPath = resolvePredictionScriptPath();
-  const modelPath = resolvePredictionModelPath();
+  const datasetRoot = resolvePredictionDatasetRoot(variant);
+  const modelPath = resolvePredictionModelPathForVariant(variant);
   if (!existsSync(scriptPath)) {
     throw new Error(`prediction script not found: ${scriptPath}`);
+  }
+  if (!existsSync(datasetRoot)) {
+    throw new Error(`prediction dataset root not found: ${datasetRoot}`);
   }
   if (!existsSync(modelPath)) {
     throw new Error(`prediction model not found: ${modelPath}`);
@@ -179,12 +226,13 @@ export async function runLocalShogiPrediction(imageDataUrl: string): Promise<any
   try {
     const imageBuffer = decodeDataUrlImage(imageDataUrl);
     await writeFile(imagePath, imageBuffer);
-    const args = [scriptPath, '--image', imagePath, '--model', modelPath];
-    const fallbackSourceId = process.env.SHOGI_PREDICTION_FALLBACK_SOURCE_ID ?? '002';
-    const fallbackMetadataPath = path.join(resolveShogiDatasetRoot(), 'metadata', `${fallbackSourceId}.json`);
+    const args = [scriptPath, '--dataset-root', datasetRoot, '--image', imagePath, '--model', modelPath];
+    const fallbackSourceId = resolveFallbackSourceId(variant);
+    const fallbackMetadataPath = path.join(datasetRoot, 'metadata', `${fallbackSourceId}.json`);
     if (existsSync(fallbackMetadataPath)) {
       args.push('--fallback-source-id', fallbackSourceId);
     }
+    appendPredictionThresholdArgs(args, variant);
 
     const { stdout, stderr, commandLine } = await runPython(args);
     console.log(`[recognize] predictor command: ${commandLine}`);

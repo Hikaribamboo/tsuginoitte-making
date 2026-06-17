@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import csv
 import json
 from pathlib import Path
@@ -37,6 +38,7 @@ from shogi_recognition.train import (  # noqa: E402
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a shogi piece classifier from generated cell crops")
+    parser.add_argument("--dataset-root", default=str(ROOT), help="dataset root directory")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -45,7 +47,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-val-ids", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--manifest", default=str(ROOT / "manifests" / "cells.csv"), help="path to cells manifest CSV")
+    parser.add_argument("--manifest", default="manifests/cells.csv", help="path to cells manifest CSV")
+    parser.add_argument("--output-model", default="models/resnet18_shogi_piece_classifier.pt", help="output checkpoint path")
+    parser.add_argument("--class-balanced-loss", action="store_true", help="weight classes inversely to their training frequency")
     return parser.parse_args()
 
 
@@ -84,14 +88,34 @@ def write_class_accuracy_csv(path: Path, totals: dict[str, int], correct: dict[s
             writer.writerow([label, total, ok, f"{acc:.6f}"])
 
 
+def build_class_weights(train_samples, device: torch.device) -> torch.Tensor:
+    counts = Counter(sample.label_idx for sample in train_samples)
+    total = sum(counts.values())
+    class_count = len(class_names)
+    weights = []
+    for index in range(class_count):
+        count = counts.get(index, 0)
+        weight = total / (class_count * count) if count > 0 else 0.0
+        weights.append(weight)
+
+    non_zero = [weight for weight in weights if weight > 0]
+    mean_weight = sum(non_zero) / len(non_zero) if non_zero else 1.0
+    normalized = [weight / mean_weight if weight > 0 else 0.0 for weight in weights]
+    return torch.tensor(normalized, dtype=torch.float32, device=device)
+
+
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
 
+    dataset_root = Path(args.dataset_root)
+    if not dataset_root.is_absolute():
+        dataset_root = ROOT / dataset_root
+
     manifest_path = Path(args.manifest)
     if not manifest_path.is_absolute():
-        manifest_path = ROOT / manifest_path
-    samples = load_cell_samples(ROOT, manifest_path)
+        manifest_path = dataset_root / manifest_path
+    samples = load_cell_samples(dataset_root, manifest_path)
     if len(samples) == 0:
         raise RuntimeError("no training samples found in manifests/cells.csv")
 
@@ -145,7 +169,8 @@ def main() -> None:
 
     device = resolve_device()
     model = build_resnet18_classifier(num_classes=len(class_names), pretrained=True).to(device)
-    criterion = nn.CrossEntropyLoss()
+    class_weights = build_class_weights(train_samples, device) if args.class_balanced_loss else None
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     epoch_logs: list[dict] = []
@@ -175,7 +200,9 @@ def main() -> None:
     if best_state is None:
         best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
 
-    model_path = ROOT / "models" / "resnet18_shogi_piece_classifier.pt"
+    model_path = Path(args.output_model)
+    if not model_path.is_absolute():
+        model_path = dataset_root / model_path
     model_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
@@ -198,7 +225,7 @@ def main() -> None:
         device,
     )
 
-    reports_dir = ROOT / "reports"
+    reports_dir = dataset_root / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     train_log = {

@@ -129,6 +129,7 @@ export interface RecognizeShogiPositionResponse {
   sfen: string;
   confidence?: number;
   notes?: string[];
+  modelVariant?: 'normal' | 'kio';
   model?: string;
   squares?: import('../lib/image-position-store').RecognitionSquare[];
   pieceBox?: import('../lib/image-position-store').RecognitionPieceBoxItem[];
@@ -138,11 +139,12 @@ export interface RecognizeShogiPositionResponse {
 
 export async function recognizeShogiPosition(
   imageDataUrl: string,
+  modelVariant: 'normal' | 'kio' = 'normal',
 ): Promise<RecognizeShogiPositionResponse> {
   const res = await fetch(`${ENGINE_API}/api/recognize-shogi-position`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: imageDataUrl }),
+    body: JSON.stringify({ image: imageDataUrl, modelVariant }),
   });
 
   const data = await res.json().catch(() => ({}));

@@ -17,12 +17,16 @@ from shogi_recognition.board_crop import save_board_crop  # noqa: E402
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Crop a shogi board image from a raw screenshot")
     parser.add_argument("--id", required=True, help="image id without extension")
+    parser.add_argument("--dataset-root", default=str(ROOT), help="dataset root directory")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    result = save_board_crop(ROOT, args.id)
+    dataset_root = Path(args.dataset_root)
+    if not dataset_root.is_absolute():
+        dataset_root = ROOT / dataset_root
+    result = save_board_crop(dataset_root, args.id)
     print(result.output_path)
     print(json.dumps(
         {

@@ -27,6 +27,7 @@ GRID_LINE_THICKNESS = 2
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Preview board crop and generated cells for a dataset image")
     parser.add_argument("--id", required=True, help="image id without extension")
+    parser.add_argument("--dataset-root", default=str(ROOT), help="dataset root directory")
     return parser.parse_args()
 
 
@@ -122,7 +123,9 @@ def render_cells_preview(dataset_root: Path, rows: list[dict[str, str]]) -> np.n
 
 def main() -> None:
     args = parse_args()
-    dataset_root = ROOT
+    dataset_root = Path(args.dataset_root)
+    if not dataset_root.is_absolute():
+        dataset_root = ROOT / dataset_root
     image_id = args.id
 
     rows = load_rows(dataset_root, image_id)

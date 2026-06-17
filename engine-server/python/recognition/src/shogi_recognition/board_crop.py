@@ -21,6 +21,7 @@ class CropMetadata:
     orientation: str = "normal"
     sideToMove: str = "b"
     hasHands: bool = False
+    sourceImageSize: dict[str, int] | None = None
     cropRect: dict[str, int] | list[int] | None = None
     boardCorners: list[list[int]] | None = None
     note: str = ""
@@ -46,6 +47,7 @@ def load_metadata(metadata_path: Path, image_id: str) -> CropMetadata:
             "orientation": "normal",
             "sideToMove": "b",
             "hasHands": False,
+            "sourceImageSize": None,
             "cropRect": None,
             "boardCorners": None,
             "note": "",
@@ -60,6 +62,7 @@ def load_metadata(metadata_path: Path, image_id: str) -> CropMetadata:
         orientation=str(raw.get("orientation", "normal")),
         sideToMove=str(raw.get("sideToMove", "b")),
         hasHands=bool(raw.get("hasHands", False)),
+        sourceImageSize=raw.get("sourceImageSize") or raw.get("imageSize"),
         cropRect=raw.get("cropRect"),
         boardCorners=raw.get("boardCorners"),
         note=str(raw.get("note", "")),
@@ -200,22 +203,14 @@ def save_board_crop(dataset_root: Path, image_id: str) -> BoardCropResult:
         height = normalized["height"]
         if width <= 0 or height <= 0:
             raise ValueError("cropRect must have positive width and height")
-        if width != height:
-            warnings.warn(
-                f"cropRect is not square for {image_id}: width={width}, height={height}; using square side={max(width, height)}",
-                stacklevel=2,
-            )
-            side = max(width, height)
-        else:
-            side = width
         x = max(x, 0)
         y = max(y, 0)
-        crop = image[y : y + side, x : x + side]
+        crop = image[y : y + height, x : x + width]
         if crop.size == 0:
             raise ValueError("cropRect produced an empty crop")
-        board = cv2.resize(crop, (DEFAULT_BOARD_OUTPUT_SIZE, DEFAULT_BOARD_OUTPUT_SIZE), interpolation=cv2.INTER_CUBIC)
+        board = crop
         method = "cropRect"
-        crop_rect = {"x": x, "y": y, "width": side, "height": side}
+        crop_rect = {"x": x, "y": y, "width": width, "height": height}
     else:
         corners = _detect_board_corners(image)
         if corners is not None:

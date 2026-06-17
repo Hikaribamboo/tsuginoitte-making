@@ -25,10 +25,12 @@ from shogi_recognition.piece_validation import LOW_CONFIDENCE_THRESHOLD, TOP2_MA
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Predict a shogi SFEN from a raw board image")
+    parser.add_argument("--dataset-root", default=str(ROOT), help="dataset root directory")
     parser.add_argument("--id", help="image id without extension")
     parser.add_argument("--image", help="path to a raw image")
     parser.add_argument("--model", default=str(ROOT / "models" / "resnet18_shogi_piece_classifier.pt"), help="path to the trained model checkpoint")
     parser.add_argument("--fallback-source-id", default=None, help="metadata source id used when the image metadata is missing")
+    parser.add_argument("--cell-margin", type=float, default=0.12, help="cell inset ratio used when splitting the board")
     parser.add_argument("--low-confidence-threshold", type=float, default=LOW_CONFIDENCE_THRESHOLD)
     parser.add_argument("--top2-margin-threshold", type=float, default=TOP2_MARGIN_THRESHOLD)
     parser.add_argument("--write-artifacts", action="store_true", help="write preview images and prediction JSON under reports/")
@@ -37,13 +39,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    image_path = Path(args.image) if args.image else ROOT / "raw" / f"{args.id}.png"
+    dataset_root = Path(args.dataset_root)
+    if not dataset_root.is_absolute():
+        dataset_root = ROOT / dataset_root
+    image_path = Path(args.image) if args.image else dataset_root / "raw" / f"{args.id}.png"
     image_id = args.id or image_path.stem
     model_path = Path(args.model)
     if not model_path.is_absolute():
-        model_path = ROOT / model_path
+        model_path = dataset_root / model_path
     if not image_path.is_absolute():
-        image_path = ROOT / image_path
+        image_path = dataset_root / image_path
 
     thresholds = Thresholds(
         low_confidence=args.low_confidence_threshold,
@@ -56,11 +61,12 @@ def main() -> None:
     write_artifacts = args.write_artifacts or should_write_prediction_artifacts()
 
     result = run_prediction(
-        dataset_root=ROOT,
+        dataset_root=dataset_root,
         image_id=image_id,
         image_path=image_path,
         model_path=model_path,
         fallback_source_id=fallback_source_id,
+        cell_margin=args.cell_margin,
         thresholds=thresholds,
         write_artifacts=write_artifacts,
     )
@@ -72,13 +78,13 @@ def main() -> None:
             raise FileNotFoundError(f"failed to read board crop: {board_crop_path}")
 
         board_grid = render_board_grid(board_image, result["squares"])
-        board_cells = split_board_cells(board_image)
+        board_cells = split_board_cells(board_image, margin_ratio=args.cell_margin)
         cells_preview = render_cells_preview(board_cells, result["squares"])
 
-        board_grid_path = ROOT / "reports" / f"{image_id}_prediction_board_grid.png"
-        cells_preview_path = ROOT / "reports" / f"{image_id}_prediction_cells_preview.png"
-        debug_board_grid_path = ROOT / "reports" / "debug_prediction_board_grid.png"
-        debug_cells_montage_path = ROOT / "reports" / "debug_07_cells_montage.png"
+        board_grid_path = dataset_root / "reports" / f"{image_id}_prediction_board_grid.png"
+        cells_preview_path = dataset_root / "reports" / f"{image_id}_prediction_cells_preview.png"
+        debug_board_grid_path = dataset_root / "reports" / "debug_prediction_board_grid.png"
+        debug_cells_montage_path = dataset_root / "reports" / "debug_07_cells_montage.png"
         board_grid_path.parent.mkdir(parents=True, exist_ok=True)
 
         if not cv2.imwrite(str(board_grid_path), board_grid):
@@ -98,7 +104,7 @@ def main() -> None:
             "cellsMontage": str(debug_cells_montage_path),
         }
 
-        prediction_json_path = ROOT / "reports" / f"{image_id}_prediction.json"
+        prediction_json_path = dataset_root / "reports" / f"{image_id}_prediction.json"
         result["predictionJsonPath"] = str(prediction_json_path)
         prediction_json_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

@@ -16,6 +16,9 @@
     "kif-problem:bench:row69-best": "npm run kif-problem:bench -- --position \"position sfen ln1g4l/1ks6/pppsPB1pp/3pg4/5N1PP/2P2P3/PPBP5/LSG6/KNG1+p1+r1L b RPsn2p 69\" --depth 26",
     "kif-problem:bench:row81-actual": "npm run kif-problem:bench -- --position \"position sfen lnSGR3l/k1s6/pppsP2pp/3pg4/5N1PP/2P2P3/PPBPb4/LS7/KNG3+r1L b 2Pgn2p 81\" --depth 26 --move 6a6b",
     "kif-problem:bench:row86-wrong-final": "npm run kif-problem:bench -- --position \"position sfen lnS1R3l/k1sG5/pppsP2pp/3pg4/5N1PP/2P2P3/PPBP5/LB7/KN+r5L w 2P2gsn2p 86\" --depth 26 --move 7i4i",
+    "recognition:kio:build": "cd python/recognition && python3 scripts/build_dataset_batch.py --dataset-root datasets/kio --inner-margin 0",
+    "recognition:kio:manifest": "cd python/recognition && python3 scripts/rebuild_manifest_from_folders.py --dataset-root datasets/kio",
+    "recognition:kio:train": "cd python/recognition && python3 scripts/train_classifier.py --dataset-root datasets/kio --output-model datasets/kio/models/resnet18_shogi_piece_classifier_kio.pt",
     "dev:with-web-build": "cd ../web && npm run build && cd ../engine-server && npm run dev"
   },
   "dependencies": {

@@ -54,6 +54,7 @@ export interface ImagePositionItem {
   recognitionSquares?: RecognitionSquare[];
   recognitionPieceBox?: RecognitionPieceBoxItem[];
   recognitionValidationIssues?: RecognitionValidationIssue[];
+  recognitionModelVariant?: 'normal' | 'kio';
   recognitionModel?: string;
   recognitionConfidence?: number;
   createdAt: string;

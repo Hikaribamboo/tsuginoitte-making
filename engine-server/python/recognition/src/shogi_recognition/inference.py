@@ -148,6 +148,15 @@ def _center_square_crop_raw(image: np.ndarray) -> tuple[np.ndarray, dict[str, in
 def _metadata_source_image_size(dataset_root: Path, metadata_source_id: str | None) -> dict[str, int] | None:
     if not metadata_source_id:
         return None
+    metadata_path = dataset_root / "metadata" / f"{metadata_source_id}.json"
+    if metadata_path.exists():
+        metadata = load_metadata(metadata_path, metadata_source_id)
+        raw_size = metadata.sourceImageSize
+        if isinstance(raw_size, dict):
+            width = int(raw_size.get("width", 0))
+            height = int(raw_size.get("height", 0))
+            if width > 0 and height > 0:
+                return {"width": width, "height": height}
     source_image_path = dataset_root / "raw" / f"{metadata_source_id}.png"
     if not source_image_path.exists():
         return None
@@ -389,7 +398,7 @@ def crop_board_image(
         if crop.size == 0:
             raise ValueError("cropRect produced an empty crop")
         crop_rect = {"x": x, "y": y, "width": width, "height": height}
-        board = cv2.resize(crop, (DEFAULT_BOARD_OUTPUT_SIZE, DEFAULT_BOARD_OUTPUT_SIZE), interpolation=cv2.INTER_CUBIC)
+        board = crop
         debug_log = _crop_debug_payload(
             image_path=image_path,
             input_size=input_size,
@@ -584,6 +593,7 @@ def run_prediction(
     image_path: Path,
     model_path: Path,
     fallback_source_id: str | None = None,
+    cell_margin: float = CELL_MARGIN,
     thresholds: Thresholds | None = None,
     write_artifacts: bool = False,
 ) -> dict[str, Any]:
@@ -602,7 +612,7 @@ def run_prediction(
         if not cv2.imwrite(str(board_crop_path), board_image):
             raise IOError(f"failed to write board crop: {board_crop_path}")
 
-    board_cells = split_board_cells(board_image)
+    board_cells = split_board_cells(board_image, margin_ratio=cell_margin)
     predictions = predict_cells(loaded_model.model, loaded_model.class_names, board_cells, loaded_model.device)
     validated = validate_predictions(predictions, thresholds=thresholds)
 
@@ -620,6 +630,7 @@ def run_prediction(
         "debugImages": crop_info.get("debugImages", {}),
         "debugLog": crop_info.get("debugLog", {}),
         "metadataSourceId": metadata_source_id,
+        "cellMargin": cell_margin,
     }
 
 
