@@ -56,6 +56,13 @@ export interface Workspace {
   draft: Record<string, unknown> | null;
 }
 
+export interface NewModeRootSfenDuplicate {
+  id: string;
+  displayNo: number | null;
+  prompt: string;
+  updatedAt: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -422,6 +429,52 @@ export async function saveWorkspaceDraft(
     .from('making_draft_choices')
     .upsert(choiceRows, { onConflict: 'draft_problem_id,choice_id' });
   if (choicesError) throw choicesError;
+}
+
+function textArraysEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+export async function findNewModeDraftByRootSfenAndIntro(
+  rootSfen: string,
+  introMovesUsi: string[],
+  excludeId?: string | null,
+): Promise<NewModeRootSfenDuplicate | null> {
+  const normalizedRootSfen = rootSfen.trim();
+  const normalizedIntroMovesUsi = introMovesUsi.map((move) => move.trim()).filter(Boolean);
+  if (!normalizedRootSfen || normalizedIntroMovesUsi.length === 0) return null;
+
+  const excludeDraftProblemId = excludeId ? parseDraftProblemId(excludeId) : null;
+  let query = supabase
+    .from('making_draft_problems')
+    .select('id, display_no, prompt, intro_moves_usi, updated_at')
+    .eq('mode', 'new_mode')
+    .eq('root_sfen', normalizedRootSfen)
+    .order('updated_at', { ascending: false })
+    .limit(100);
+
+  if (excludeDraftProblemId !== null) {
+    query = query.neq('id', excludeDraftProblemId);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  const duplicate = ((data ?? []) as Array<{
+    id: number;
+    display_no: number | null;
+    prompt: string | null;
+    intro_moves_usi: string[] | null;
+    updated_at: string | null;
+  }>).find((row) => textArraysEqual(asStringArray(row.intro_moves_usi), normalizedIntroMovesUsi));
+
+  if (!duplicate) return null;
+
+  return {
+    id: String(duplicate.id),
+    displayNo: duplicate.display_no == null ? null : Number(duplicate.display_no),
+    prompt: duplicate.prompt ?? '',
+    updatedAt: duplicate.updated_at ?? '',
+  };
 }
 
 /** Get a single authoring draft by making_draft_problems.id. */

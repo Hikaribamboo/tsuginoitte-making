@@ -20,7 +20,13 @@ import { cpToWinRatePercent } from '../lib/eval-percent';
 import { parseKifRecord, parseReadingLine, parseKifRecordWithBranches, extractBranchProblems } from '../lib/kif-parser';
 import type { KifBranch, KifTreeNode } from '../lib/kif-parser';
 import { saveProblem, getNextDisplayNo, saveMultipleProblems, saveLearningProblem } from '../api/problems';
-import { getWorkspace, saveWorkspaceDraft, deleteWorkspace, hideWorkspaceFromList } from '../api/workspaces';
+import {
+  getWorkspace,
+  saveWorkspaceDraft,
+  deleteWorkspace,
+  hideWorkspaceFromList,
+  findNewModeDraftByRootSfenAndIntro,
+} from '../api/workspaces';
 import { evaluatePosition, generateExplanations, startAnalysisStream, stopAnalysis, type AnalysisLine } from '../api/backend';
 import { AVAILABLE_TAGS, DEFAULT_PROMPT } from '../lib/constants';
 import { saveLastNewModeTags } from '../lib/new-mode-tags';
@@ -248,6 +254,7 @@ const PasteProblemCreator: React.FC = () => {
   const [registeringJoseki, setRegisteringJoseki] = useState(false);
   const [savingNewMode, setSavingNewMode] = useState(false);
   const [josekiSaveWarning, setJosekiSaveWarning] = useState('');
+  const [newModeSaveWarnings, setNewModeSaveWarnings] = useState<string[]>([]);
   const [savingBranches, setSavingBranches] = useState(false);
   const [message, setMessage] = useState('');
   const [showPreview, setShowPreview] = useState(false);
@@ -1857,12 +1864,35 @@ const PasteProblemCreator: React.FC = () => {
       return;
     }
 
+    const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
+    const warnings: string[] = [];
+    if (introMovesUsi.length === 0) {
+      warnings.push('intro が未入力です。新モードで保存するには初手を1手以上入れてください。');
+    }
+
+    try {
+      const duplicate = await findNewModeDraftByRootSfenAndIntro(rootSfenForSave, introMovesUsi, workspaceId);
+      if (duplicate) {
+        const displayNo = duplicate.displayNo == null ? '-' : String(duplicate.displayNo);
+        warnings.push(
+          `同じ root_sfen と intro の新モード問題がすでにあります（ID: ${duplicate.id}, No: ${displayNo}）。`,
+        );
+      }
+    } catch (e: any) {
+      setMessage(`新モード保存前チェックエラー: ${e.message}`);
+      return;
+    }
+
+    if (warnings.length > 0) {
+      setNewModeSaveWarnings(warnings);
+      return;
+    }
+
     setPreferredSaveMode('new_mode');
     setSavingNewMode(true);
     setMessage('');
 
     try {
-      const { rootSfenForSave, introMovesUsi } = buildSaveRootAndIntro();
       const correctEvalCp = choices.correct.eval_cp;
       const correctEvalPercent = choices.correct.eval_percent;
       const draft: PasteDraft = {
@@ -2785,6 +2815,35 @@ const PasteProblemCreator: React.FC = () => {
           line={buildReplayLine(choices[replaySlot], introMoveUsi)}
           onClose={() => setReplaySlot(null)}
         />
+      )}
+
+      {/* New-mode save warning modal */}
+      {newModeSaveWarnings.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setNewModeSaveWarnings([])}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl p-5 w-full max-w-[420px] mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-2 text-base font-semibold">保存できません</h3>
+            <div className="mb-4 space-y-2 text-[13px] text-gray-600">
+              {newModeSaveWarnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setNewModeSaveWarnings([])}
+                className="rounded bg-slate-900 px-4 py-1.5 text-[13px] font-semibold text-white hover:bg-slate-800"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Post-save: delete workspace? modal */}
