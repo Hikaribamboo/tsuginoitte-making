@@ -22,6 +22,7 @@ interface BoardProps {
   onCellDoubleClick?: (row: number, col: number) => void;
   onCellDrop?: (row: number, col: number, payload: string) => void;
   onHandPieceClick?: (side: Side, pieceType: HandPieceType) => void;
+  onHandDrop?: (side: Side, payload: string) => void;
   selectedHandPiece?: { side: Side; type: HandPieceType } | null;
   showAllHandPieces?: boolean;
   mobile?: boolean;
@@ -45,6 +46,7 @@ const Board: React.FC<BoardProps> = ({
   onCellDoubleClick,
   onCellDrop,
   onHandPieceClick,
+  onHandDrop,
   selectedHandPiece,
   showAllHandPieces = false,
   mobile = false,
@@ -60,6 +62,7 @@ const Board: React.FC<BoardProps> = ({
           side="gote"
           hand={goteHand}
           onClick={onHandPieceClick}
+          onDrop={onHandDrop}
           selectedType={selectedHandPiece?.side === 'gote' ? selectedHandPiece.type : null}
           showAll={showAllHandPieces}
         />
@@ -109,6 +112,7 @@ const Board: React.FC<BoardProps> = ({
           side="sente"
           hand={senteHand}
           onClick={onHandPieceClick}
+          onDrop={onHandDrop}
           selectedType={selectedHandPiece?.side === 'sente' ? selectedHandPiece.type : null}
           showAll={showAllHandPieces}
           controls={mobileBottomControls}
@@ -127,6 +131,7 @@ const Board: React.FC<BoardProps> = ({
         side="gote"
         hand={goteHand}
         onClick={onHandPieceClick}
+        onDrop={onHandDrop}
         label="☖持駒"
         selectedType={selectedHandPiece?.side === 'gote' ? selectedHandPiece.type : null}
         showAll={showAllHandPieces}
@@ -208,6 +213,7 @@ const Board: React.FC<BoardProps> = ({
         side="sente"
         hand={senteHand}
         onClick={onHandPieceClick}
+        onDrop={onHandDrop}
         label="☗持駒"
         selectedType={selectedHandPiece?.side === 'sente' ? selectedHandPiece.type : null}
         showAll={showAllHandPieces}
@@ -227,15 +233,28 @@ interface HandDisplayProps {
   side: Side;
   hand: HandPieces;
   onClick?: (side: Side, type: HandPieceType) => void;
+  onDrop?: (side: Side, payload: string) => void;
   label: string;
   selectedType?: HandPieceType | null;
   showAll?: boolean;
 }
 
-const HandDisplay: React.FC<HandDisplayProps> = ({ side, hand, onClick, label, selectedType = null, showAll = false }) => {
+const HandDisplay: React.FC<HandDisplayProps> = ({ side, hand, onClick, onDrop, label, selectedType = null, showAll = false }) => {
   const pieces = showAll ? HAND_ORDER : HAND_ORDER.filter((t) => hand[t] > 0);
   return (
-    <div className={`min-w-[58px] rounded-lg border border-sky-300/50 bg-sky-50/75 p-2 shadow-sm backdrop-blur-[1px] ${side === 'sente' ? 'self-end' : 'self-start'}`}>
+    <div
+      className={`min-w-[58px] rounded-lg border border-sky-300/50 bg-sky-50/75 p-2 shadow-sm backdrop-blur-[1px] ${onDrop ? 'transition-colors hover:bg-sky-100/85' : ''} ${side === 'sente' ? 'self-end' : 'self-start'}`}
+      onDragOver={(e) => {
+        if (!onDrop) return;
+        e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (!onDrop) return;
+        e.preventDefault();
+        const payload = e.dataTransfer.getData('application/json') || e.dataTransfer.getData('text/plain');
+        if (payload) onDrop(side, payload);
+      }}
+    >
       <div className="text-[11px] text-slate-500 mb-1 whitespace-nowrap leading-none">{label}</div>
       <div className="flex flex-col gap-0.5">
         {pieces.length === 0 && <span className="text-[11px] text-gray-400">なし</span>}
@@ -262,13 +281,26 @@ const MobileHandDisplay: React.FC<Omit<HandDisplayProps, 'label'> & { controls?:
   side,
   hand,
   onClick,
+  onDrop,
   selectedType = null,
   showAll = false,
   controls,
 }) => {
   const pieces = showAll ? HAND_ORDER : HAND_ORDER.filter((type) => hand[type] > 0);
   return (
-    <div className={`mobile-hand-row ${side === 'gote' ? 'mobile-hand-row-gote' : 'mobile-hand-row-sente'}`}>
+    <div
+      className={`mobile-hand-row ${side === 'gote' ? 'mobile-hand-row-gote' : 'mobile-hand-row-sente'}`}
+      onDragOver={(e) => {
+        if (!onDrop) return;
+        e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (!onDrop) return;
+        e.preventDefault();
+        const payload = e.dataTransfer.getData('application/json') || e.dataTransfer.getData('text/plain');
+        if (payload) onDrop(side, payload);
+      }}
+    >
       <span className="mobile-hand-label">{side === 'gote' ? '相手' : '自分'}</span>
       <div className="mobile-hand-pieces">
         {pieces.length === 0 && <span className="mobile-hand-empty">持ち駒なし</span>}

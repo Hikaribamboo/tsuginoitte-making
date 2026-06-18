@@ -68,6 +68,14 @@ function normalizeModelVariant(value: ImagePositionItem['recognitionModelVariant
   return value === 'kio' ? 'kio' : 'normal';
 }
 
+function normalizeBoardFacingSide(value: ImagePositionItem['boardFacingSide']): Side {
+  return value === 'gote' ? 'gote' : 'sente';
+}
+
+function oppositeSide(side: Side): Side {
+  return side === 'sente' ? 'gote' : 'sente';
+}
+
 function sortItems(items: ImagePositionItem[]): ImagePositionItem[] {
   return [...items].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
 }
@@ -193,9 +201,51 @@ type PieceSelection =
   | { source: 'box'; type: PieceType; piece: Piece };
 type BoardCell = { row: number; col: number };
 type MoveRegistrationMode = 'intro' | 'correct' | null;
+type PieceBoxDragPayload = { source: 'pieceBox'; type: PieceType };
 
 function cloneHand(hand: HandPieces): HandPieces {
   return { ...hand };
+}
+
+function rotateBoardAndSwapSides(board: BoardType): BoardType {
+  const next: BoardType = Array.from({ length: 9 }, () => Array.from({ length: 9 }, () => null));
+  for (let row = 0; row < 9; row++) {
+    for (let col = 0; col < 9; col++) {
+      const piece = board[row][col];
+      if (!piece) continue;
+      next[8 - row][8 - col] = {
+        ...piece,
+        side: oppositeSide(piece.side),
+      };
+    }
+  }
+  return next;
+}
+
+function flipSfenBoardFacing(sfen: string): string {
+  const state = parseSfen(sfen);
+  return boardToSfen(
+    rotateBoardAndSwapSides(state.board),
+    state.sideToMove,
+    cloneHand(state.goteHand),
+    cloneHand(state.senteHand),
+    state.moveNumber,
+  );
+}
+
+function encodePieceBoxDragPayload(type: PieceType): string {
+  return JSON.stringify({ source: 'pieceBox', type } satisfies PieceBoxDragPayload);
+}
+
+function parsePieceBoxDragPayload(payload: string): PieceBoxDragPayload | null {
+  try {
+    const parsed = JSON.parse(payload) as Partial<PieceBoxDragPayload>;
+    if (parsed.source !== 'pieceBox') return null;
+    if (!parsed.type || !PIECE_TYPES.includes(parsed.type)) return null;
+    return { source: 'pieceBox', type: parsed.type };
+  } catch {
+    return null;
+  }
 }
 
 function isHandPieceType(type: PieceType): type is HandPieceType {
@@ -331,6 +381,7 @@ const ImagePositionCreator: React.FC = () => {
           issues: [],
           recognitionNotes: [],
           recognitionModelVariant: 'normal',
+          boardFacingSide: 'sente',
           createdAt: now,
           updatedAt: now,
         };
@@ -350,17 +401,22 @@ const ImagePositionCreator: React.FC = () => {
     const item = itemsRef.current.find((candidate) => candidate.id === id);
     if (!item) return;
     const modelVariant = normalizeModelVariant(item.recognitionModelVariant);
+    const boardFacingSide = normalizeBoardFacingSide(item.boardFacingSide);
 
     await patchItem(id, {
       status: 'recognizing',
       issues: [],
       recognitionNotes: [],
       recognitionModelVariant: modelVariant,
+      boardFacingSide,
     });
 
     try {
       const result = await recognizeShogiPosition(item.imageDataUrl, modelVariant);
-      const sfen = normalizeRecognizedSfen(result.sfen);
+      const recognizedSfen = normalizeRecognizedSfen(result.sfen);
+      const sfen = recognizedSfen && boardFacingSide === 'gote'
+        ? flipSfenBoardFacing(recognizedSfen)
+        : recognizedSfen;
       if (!sfen) {
         throw new Error('画像認識結果にSFENが含まれていません');
       }
@@ -388,6 +444,31 @@ const ImagePositionCreator: React.FC = () => {
         recognitionNotes: [],
       });
     }
+  }, [patchItem]);
+
+  const updateBoardFacingSide = useCallback(async (id: string, boardFacingSide: Side) => {
+    const item = itemsRef.current.find((candidate) => candidate.id === id);
+    if (!item) return;
+    const current = normalizeBoardFacingSide(item.boardFacingSide);
+    if (current === boardFacingSide) {
+      await patchItem(id, { boardFacingSide });
+      return;
+    }
+
+    const patch: Partial<ImagePositionItem> = {
+      boardFacingSide,
+      introMoveUsi: '',
+      correctMoveUsi: '',
+      correctMoveLabel: '',
+    };
+    if (item.sfen) {
+      const sfen = flipSfenBoardFacing(item.sfen);
+      const issues = validateSfenPosition(sfen);
+      patch.sfen = sfen;
+      patch.issues = issues;
+      patch.status = hasBlockingPositionIssue(issues) ? 'error' : 'ready';
+    }
+    await patchItem(id, patch);
   }, [patchItem]);
 
   const handleDelete = useCallback(async (id: string) => {
@@ -421,6 +502,7 @@ const ImagePositionCreator: React.FC = () => {
         <ImagePositionDetail
           item={activeItem}
           patchItem={patchItem}
+          onBoardFacingSideChange={(boardFacingSide) => void updateBoardFacingSide(activeItem.id, boardFacingSide)}
           onBack={() => setActiveId(null)}
           onAskDeleteSourceImage={(id) => {
             setDeleteCandidateId(id);
@@ -611,6 +693,7 @@ const ImagePositionCreator: React.FC = () => {
               item={item}
               onMemoChange={(memo) => void patchItem(item.id, { memo })}
               onModelVariantChange={(recognitionModelVariant) => void patchItem(item.id, { recognitionModelVariant })}
+              onBoardFacingSideChange={(boardFacingSide) => void updateBoardFacingSide(item.id, boardFacingSide)}
               onRecognize={() => void handleRecognize(item.id)}
               onOpen={() => setActiveId(item.id)}
               onDelete={() => void handleDelete(item.id)}
@@ -626,6 +709,7 @@ interface ImagePositionCardProps {
   item: ImagePositionItem;
   onMemoChange: (memo: string) => void;
   onModelVariantChange: (modelVariant: RecognitionModelVariant) => void;
+  onBoardFacingSideChange: (boardFacingSide: Side) => void;
   onRecognize: () => void;
   onOpen: () => void;
   onDelete: () => void;
@@ -635,6 +719,7 @@ const ImagePositionCard: React.FC<ImagePositionCardProps> = ({
   item,
   onMemoChange,
   onModelVariantChange,
+  onBoardFacingSideChange,
   onRecognize,
   onOpen,
   onDelete,
@@ -642,6 +727,7 @@ const ImagePositionCard: React.FC<ImagePositionCardProps> = ({
   const shownIssues = item.issues.slice(0, 3);
   const canRecognize = item.status !== 'recognizing';
   const modelVariant = normalizeModelVariant(item.recognitionModelVariant);
+  const boardFacingSide = normalizeBoardFacingSide(item.boardFacingSide);
   return (
     <div className="border border-gray-200 rounded-lg bg-white/85 p-3 flex flex-col gap-2">
       <div className="flex gap-2">
@@ -711,6 +797,28 @@ const ImagePositionCard: React.FC<ImagePositionCardProps> = ({
         )}
       </div>
 
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold text-gray-600">こちら向き</div>
+        <div className="grid w-[164px] grid-cols-2 gap-1">
+          {([
+            ['sente', '先手'],
+            ['gote', '後手'],
+          ] as const).map(([side, label]) => (
+            <button
+              key={side}
+              type="button"
+              onClick={() => onBoardFacingSideChange(side)}
+              disabled={!canRecognize}
+              className={boardFacingSide === side
+                ? 'bg-amber-600 text-white border-amber-600 hover:bg-amber-700'
+                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {shownIssues.length > 0 && (
         <div className="flex flex-col gap-1">
           {shownIssues.map((issue, idx) => (
@@ -757,6 +865,7 @@ const ImagePositionCard: React.FC<ImagePositionCardProps> = ({
 interface ImagePositionDetailProps {
   item: ImagePositionItem;
   patchItem: (id: string, patch: Partial<ImagePositionItem>) => Promise<void>;
+  onBoardFacingSideChange: (boardFacingSide: Side) => void;
   onBack: () => void;
   onAskDeleteSourceImage: (id: string) => void;
 }
@@ -764,11 +873,13 @@ interface ImagePositionDetailProps {
 const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
   item,
   patchItem,
+  onBoardFacingSideChange,
   onBack,
   onAskDeleteSourceImage,
 }) => {
   const navigate = useNavigate();
   const parsed = useMemo(() => parseSfen(item.sfen ?? EMPTY_SFEN), [item.sfen]);
+  const boardFacingSide = normalizeBoardFacingSide(item.boardFacingSide);
   const currentSfen = item.sfen ?? EMPTY_SFEN;
   const displaySfen = useMemo(() => {
     const introMoveUsi = item.introMoveUsi?.trim();
@@ -1164,6 +1275,24 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
     });
   }, [moveMode, rulePieceBox]);
 
+  const handleHandDrop = useCallback((side: Side, payload: string) => {
+    if (moveMode) return;
+    const parsedPayload = parsePieceBoxDragPayload(payload);
+    if (!parsedPayload) return;
+    const type = parsedPayload.type;
+    if (!isHandPieceType(type)) return;
+    const count = rulePieceBox[type];
+    if (count <= 0) return;
+
+    const board = cloneBoard(displayParsed.board);
+    const senteHand = cloneHand(displayParsed.senteHand);
+    const goteHand = cloneHand(displayParsed.goteHand);
+    const hand = side === 'sente' ? senteHand : goteHand;
+    hand[type] = Math.min(99, hand[type] + count);
+    setSelection(null);
+    commitState({ ...displayParsed, board, senteHand, goteHand }, { clearMoveRegistration: true });
+  }, [commitState, displayParsed, moveMode, rulePieceBox]);
+
   const handlePieceBoxReturnClick = useCallback(() => {
     if (moveMode) return;
     if (!selection || selection.source === 'box') {
@@ -1228,6 +1357,7 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
           memo: item.memo,
           recognitionModel: item.recognitionModel ?? null,
           recognitionModelVariant: item.recognitionModelVariant ?? null,
+          boardFacingSide: item.boardFacingSide ?? null,
           recognitionConfidence: item.recognitionConfidence ?? null,
           recognitionNotes: item.recognitionNotes,
           issues,
@@ -1322,24 +1452,46 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
 
         <section className="min-w-0 flex flex-col gap-3">
           <div className="border border-gray-200 rounded-lg bg-white/85 p-3 overflow-x-auto">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="text-[12px] font-semibold text-gray-600">手番</div>
-              <div className="grid w-[184px] grid-cols-2 gap-1">
-                {([
-                  ['sente', '先手'],
-                  ['gote', '後手'],
-                ] as const).map(([side, label]) => (
-                  <button
-                    key={side}
-                    type="button"
-                    onClick={() => updateSideToMove(side)}
-                    className={displayParsed.sideToMove === side
-                      ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}
-                  >
-                    {label}
-                  </button>
-                ))}
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="text-[12px] font-semibold text-gray-600">こちら向き</div>
+                <div className="grid w-[184px] grid-cols-2 gap-1">
+                  {([
+                    ['sente', '先手'],
+                    ['gote', '後手'],
+                  ] as const).map(([side, label]) => (
+                    <button
+                      key={side}
+                      type="button"
+                      onClick={() => onBoardFacingSideChange(side)}
+                      className={boardFacingSide === side
+                        ? 'bg-amber-600 text-white border-amber-600 hover:bg-amber-700'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="text-[12px] font-semibold text-gray-600">手番</div>
+                <div className="grid w-[184px] grid-cols-2 gap-1">
+                  {([
+                    ['sente', '先手'],
+                    ['gote', '後手'],
+                  ] as const).map(([side, label]) => (
+                    <button
+                      key={side}
+                      type="button"
+                      onClick={() => updateSideToMove(side)}
+                      className={displayParsed.sideToMove === side
+                        ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             <Board
@@ -1353,6 +1505,7 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
               onCellClick={handleCellClick}
               onCellDoubleClick={handleCellDoubleClick}
               onHandPieceClick={handleHandPieceClick}
+              onHandDrop={handleHandDrop}
             />
             {promotionChoice && (
               <div className="mt-3 flex items-center gap-2 rounded border border-amber-300 bg-amber-50 px-2 py-2">
@@ -1420,6 +1573,16 @@ const ImagePositionDetail: React.FC<ImagePositionDetailProps> = ({
                     key={type}
                     role="button"
                     tabIndex={0}
+                    draggable={isHandPieceType(type) && !moveMode}
+                    onDragStart={(e) => {
+                      if (!isHandPieceType(type) || moveMode || rulePieceBox[type] <= 0) {
+                        e.preventDefault();
+                        return;
+                      }
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('application/json', encodePieceBoxDragPayload(type));
+                      e.dataTransfer.setData('text/plain', encodePieceBoxDragPayload(type));
+                    }}
                     onClick={() => handlePieceBoxClick(type)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {

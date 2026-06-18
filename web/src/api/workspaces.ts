@@ -1,4 +1,5 @@
 import { supabase } from './rpc';
+import { stopAnalysis } from './backend';
 import { DEFAULT_PROMPT } from '../lib/constants';
 import { INITIAL_SFEN } from '../lib/sfen';
 
@@ -440,6 +441,12 @@ export async function getWorkspace(id: string): Promise<Workspace | null> {
 
 /** Delete an authoring draft. */
 export async function deleteWorkspace(id: string): Promise<void> {
+  try {
+    await stopAnalysis();
+  } catch {
+    // Deleting a draft should not fail just because the engine server is unavailable.
+  }
+
   const draftProblemId = parseDraftProblemId(id);
   const { error: choicesError } = await supabase
     .from('making_draft_choices')

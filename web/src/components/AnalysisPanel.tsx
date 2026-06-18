@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { startAnalysisStream, type AnalysisLine } from '../api/backend';
+import { startAnalysisStream, stopAnalysis as stopRemoteAnalysis, type AnalysisLine } from '../api/backend';
 import { pvToJapanese } from '../lib/usi-to-label';
 import { parseSfen } from '../lib/sfen';
 
@@ -38,6 +38,7 @@ function parseBestMove(pv: string[]): BestMove | null {
 
 const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandidateMoves, headerExtra }) => {
   const [analyzing, setAnalyzing] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [lines, setLines] = useState<Map<number, AnalysisLine>>(new Map());
   const [depth, setDepth] = useState(0);
   const [error, setError] = useState('');
@@ -60,13 +61,17 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
         timerRef.current = null;
       }
       eventSourceRef.current?.close();
+      if (eventSourceRef.current) {
+        void stopRemoteAnalysis().catch(() => undefined);
+      }
+      eventSourceRef.current = null;
     };
   }, []);
 
   // When sfen changes while analyzing, restart
   useEffect(() => {
     if (analyzing) {
-      stopAnalysis();
+      void stopAnalysis();
       // Small delay then restart
       const timer = setTimeout(() => {
         startAnalysis();
@@ -77,6 +82,7 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
   }, [sfen]);
 
   const startAnalysis = useCallback(() => {
+    if (stopping) return;
     setError('');
     setLines(new Map());
     setDepth(0);
@@ -109,31 +115,42 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
 
     eventSourceRef.current = es;
     setAnalyzing(true);
-  }, [onBestMove, onCandidateMoves]);
+  }, [onBestMove, onCandidateMoves, stopping]);
 
-  const stopAnalysis = useCallback(() => {
+  const stopAnalysis = useCallback(async () => {
+    setStopping(true);
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    const hadStream = eventSourceRef.current !== null;
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
-    bufferedLinesRef.current = new Map();
-    bufferedDepthRef.current = 0;
-    setAnalyzing(false);
-    setLines(new Map());
-    setDepth(0);
-    onBestMove?.(null);
-    onCandidateMoves?.([]);
-  }, [onBestMove, onCandidateMoves]);
+    try {
+      if (hadStream || analyzing) {
+        await stopRemoteAnalysis();
+      }
+    } catch (error: any) {
+      setError(error?.message ?? '検討停止に失敗しました');
+    } finally {
+      bufferedLinesRef.current = new Map();
+      bufferedDepthRef.current = 0;
+      setAnalyzing(false);
+      setStopping(false);
+      setLines(new Map());
+      setDepth(0);
+      onBestMove?.(null);
+      onCandidateMoves?.([]);
+    }
+  }, [analyzing, onBestMove, onCandidateMoves]);
 
   const toggleAnalysis = useCallback(() => {
-    if (analyzing) {
-      stopAnalysis();
+    if (analyzing || stopping) {
+      void stopAnalysis();
     } else {
       startAnalysis();
     }
-  }, [analyzing, startAnalysis, stopAnalysis]);
+  }, [analyzing, startAnalysis, stopAnalysis, stopping]);
 
   const sortedLines = useMemo(
     () => Array.from(lines.values()).sort((a, b) => a.multipv - b.multipv),
@@ -168,9 +185,10 @@ const AnalysisPanel: React.FC<AnalysisPanelProps> = ({ sfen, onBestMove, onCandi
       <div className="flex items-center gap-3 mb-2">
         <button
           onClick={toggleAnalysis}
+          disabled={stopping}
           className={analyzing ? 'bg-red-600 text-white border-red-600 hover:bg-red-700' : 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'}
         >
-          {analyzing ? '⏹ 検討停止' : '▶ 検討開始'}
+          {stopping ? '停止中...' : analyzing ? '⏹ 検討停止' : '▶ 検討開始'}
         </button>
         {analyzing && <span className="text-xs text-gray-400">深さ: {depth}</span>}
         {headerExtra}
