@@ -234,8 +234,15 @@ const ProductionReview: React.FC<ProductionReviewProps> = ({
   );
 
   const selectedSummary = useMemo(() => {
-    if (detailDraft) return getProductionDetailValidationSummaryWithLineIssues(detailDraft);
-    if (selectedRow) return itemSummaryMap[productionItemKey(selectedRow)] ?? summarizeProductionIssues([]);
+    const listSummary = selectedRow ? itemSummaryMap[productionItemKey(selectedRow)] : null;
+    if (detailDraft) {
+      const detailSummary = getProductionDetailValidationSummaryWithLineIssues(detailDraft);
+      if (detailSummary.issues.length > 0 || !listSummary || listSummary.issues.length === 0) {
+        return detailSummary;
+      }
+      return listSummary;
+    }
+    if (listSummary) return listSummary;
     return summarizeProductionIssues([]);
   }, [detailDraft, itemSummaryMap, selectedRow]);
 

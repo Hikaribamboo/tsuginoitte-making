@@ -9,6 +9,7 @@ import MakingHome from './pages/MakingHome';
 import ProductionReview from './pages/ProductionReview';
 import MakingEngineCreator from './pages/MakingEngineCreator';
 import MakingKifusGenerator from './pages/MakingKifusGenerator';
+import NewModeLibrary from './pages/NewModeLibrary';
 
 const App: React.FC = () => {
   return (
@@ -25,10 +26,7 @@ const App: React.FC = () => {
           <Route path="/making/kifus" element={<MakingKifusGenerator />} />
           <Route path="/making/production" element={<ProductionReview />} />
           <Route path="/production" element={<ProductionReview />} />
-          <Route
-            path="/new-mode"
-            element={<ProductionReview fixedMode="new_mode" title="新モード一覧" emptyText="新モードの下書きがありません。" />}
-          />
+          <Route path="/new-mode" element={<NewModeLibrary />} />
           <Route path="*" element={<Navigate to="/making" replace />} />
         </Routes>
       </Layout>
