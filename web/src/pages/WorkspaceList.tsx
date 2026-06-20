@@ -23,6 +23,14 @@ import {
   type PasteSaveMode,
   type WorkspaceModeFilter,
 } from '../lib/paste-save-mode';
+import ConfirmModal from '../components/ConfirmModal';
+
+type ConfirmDialog = {
+  title: string;
+  message: React.ReactNode;
+  confirmLabel: string;
+  onConfirm: () => Promise<void>;
+};
 
 const WorkspaceList: React.FC = () => {
   const navigate = useNavigate();
@@ -35,6 +43,8 @@ const WorkspaceList: React.FC = () => {
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
   const [sortKey, setSortKey] = useState<'newest' | 'oldest' | 'rating-asc' | 'rating-desc' | 'name-asc' | 'name-desc'>('newest');
   const [modeFilter, setModeFilter] = useState<WorkspaceModeFilter>(() => getLastWorkspaceModeFilter());
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   // Inline KIF paste state
   const [pasteText, setPasteText] = useState('');
@@ -315,14 +325,31 @@ const WorkspaceList: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(`「${name}」を削除しますか？`)) return;
+  const runConfirmAction = async () => {
+    if (!confirmDialog) return;
+    setConfirmBusy(true);
     try {
-      await deleteWorkspace(id);
-      setWorkspaces((prev) => prev.filter((w) => w.id !== id));
-    } catch (e: any) {
-      setError(e.message);
+      await confirmDialog.onConfirm();
+      setConfirmDialog(null);
+    } finally {
+      setConfirmBusy(false);
     }
+  };
+
+  const handleDelete = (id: string, name: string) => {
+    setConfirmDialog({
+      title: '下書き削除',
+      message: `「${name}」を削除しますか？`,
+      confirmLabel: '削除する',
+      onConfirm: async () => {
+        try {
+          await deleteWorkspace(id);
+          setWorkspaces((prev) => prev.filter((w) => w.id !== id));
+        } catch (e: any) {
+          setError(e.message);
+        }
+      },
+    });
   };
 
   const toggleWorkspaceSelection = (workspaceId: string) => {
@@ -344,20 +371,26 @@ const WorkspaceList: React.FC = () => {
 
   const handleDeleteSelected = async () => {
     if (selectedWorkspaceIds.length === 0) return;
-    if (!window.confirm(`${selectedWorkspaceIds.length}件の下書きを削除しますか？`)) return;
-
-    setDeletingSelected(true);
-    try {
-      for (const workspaceId of selectedWorkspaceIds) {
-        await deleteWorkspace(workspaceId);
-      }
-      setWorkspaces((prev) => prev.filter((workspace) => !selectedWorkspaceIds.includes(workspace.id)));
-      setSelectedWorkspaceIds([]);
-    } catch (e: any) {
-      setError(e?.message ?? '下書きの一括削除に失敗しました');
-    } finally {
-      setDeletingSelected(false);
-    }
+    const idsToDelete = [...selectedWorkspaceIds];
+    setConfirmDialog({
+      title: '下書き一括削除',
+      message: `${idsToDelete.length}件の下書きを削除しますか？`,
+      confirmLabel: '削除する',
+      onConfirm: async () => {
+        setDeletingSelected(true);
+        try {
+          for (const workspaceId of idsToDelete) {
+            await deleteWorkspace(workspaceId);
+          }
+          setWorkspaces((prev) => prev.filter((workspace) => !idsToDelete.includes(workspace.id)));
+          setSelectedWorkspaceIds([]);
+        } catch (e: any) {
+          setError(e?.message ?? '下書きの一括削除に失敗しました');
+        } finally {
+          setDeletingSelected(false);
+        }
+      },
+    });
   };
 
   const formatDate = (iso: string) => {
@@ -562,6 +595,21 @@ const WorkspaceList: React.FC = () => {
             );
           })}
         </div>
+      )}
+      {confirmDialog && (
+        <ConfirmModal
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          confirmLabel={confirmDialog.confirmLabel}
+          danger
+          busy={confirmBusy}
+          onConfirm={() => {
+            void runConfirmAction();
+          }}
+          onCancel={() => {
+            if (!confirmBusy) setConfirmDialog(null);
+          }}
+        />
       )}
     </div>
   );
