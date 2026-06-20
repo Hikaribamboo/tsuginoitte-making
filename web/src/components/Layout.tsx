@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { MobileModeProvider } from './MobileModeContext';
+import { hasStorageValue, readStorageString, writeStorageString } from '../lib/storage';
 
 const MOBILE_MODE_STORAGE_KEY = 'making-mobile-mode';
 
@@ -9,13 +10,13 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
   const autoMobileRef = React.useRef(
     typeof window !== 'undefined'
-      && window.localStorage.getItem(MOBILE_MODE_STORAGE_KEY) === null
+      && !hasStorageValue(MOBILE_MODE_STORAGE_KEY)
       && window.matchMedia('(max-width: 768px), (pointer: coarse)').matches,
   );
   const autoWorkspaceRedirectRef = React.useRef(autoMobileRef.current);
   const [mobileMode, setMobileModeState] = React.useState(() => {
     if (typeof window === 'undefined') return false;
-    const stored = window.localStorage.getItem(MOBILE_MODE_STORAGE_KEY);
+    const stored = readStorageString(MOBILE_MODE_STORAGE_KEY);
     if (stored !== null) return stored === 'true';
     return autoMobileRef.current;
   });
@@ -29,7 +30,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const setMobileMode = React.useCallback((enabled: boolean) => {
     setMobileModeState(enabled);
-    window.localStorage.setItem(MOBILE_MODE_STORAGE_KEY, String(enabled));
+    writeStorageString(MOBILE_MODE_STORAGE_KEY, String(enabled));
   }, []);
 
   React.useEffect(() => {
@@ -39,7 +40,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   React.useEffect(() => {
     if (!autoWorkspaceRedirectRef.current) return;
-    window.localStorage.setItem(MOBILE_MODE_STORAGE_KEY, 'true');
+    writeStorageString(MOBILE_MODE_STORAGE_KEY, 'true');
     if (location.pathname === '/workspaces') {
       autoWorkspaceRedirectRef.current = false;
       return;

@@ -1,3 +1,5 @@
+import { readStorageJson, writeStorageJson } from './storage';
+
 const KNOWN_TAGS_KEY = 'making:new-mode-tags';
 const LAST_SELECTED_TAGS_KEY = 'making:new-mode-last-selected-tags';
 
@@ -18,18 +20,11 @@ function normalizeTags(tags: unknown): string[] {
 }
 
 function readStoredTags(key: string): string[] {
-  if (typeof window === 'undefined') return [];
-
-  try {
-    return normalizeTags(JSON.parse(window.localStorage.getItem(key) ?? '[]'));
-  } catch {
-    return [];
-  }
+  return normalizeTags(readStorageJson<unknown>(key, []));
 }
 
 function writeStoredTags(key: string, tags: string[]): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(key, JSON.stringify(normalizeTags(tags)));
+  writeStorageJson(key, normalizeTags(tags));
 }
 
 export function getNewModeKnownTags(): string[] {
