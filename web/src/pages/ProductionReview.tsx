@@ -8,14 +8,14 @@ import {
 } from '../api/production';
 import NewModeTagSelector from '../components/NewModeTagSelector';
 import PositionEditor from '../components/PositionEditor';
+import ProductionIssueList from '../components/ProductionIssueList';
+import ProductionQualityBadge from '../components/ProductionQualityBadge';
 import { TAG_CATEGORIES } from '../lib/constants';
 import { saveLastNewModeTags } from '../lib/new-mode-tags';
 import {
   getProductionValidationSummary,
   summarizeProductionIssues,
   type ProductionValidationIssue,
-  type ProductionValidationSeverity,
-  type ProductionValidationStatus,
   type ProductionValidationSummary,
 } from '../lib/productionValidation';
 import { applyUsiMove, boardToSfen, parseSfen } from '../lib/sfen';
@@ -510,7 +510,7 @@ const ProductionReview: React.FC<ProductionReviewProps> = ({
                         <div className="text-sm font-semibold text-slate-900">
                           No.{item.displayNo ?? '-'} / ID {item.problemId}
                         </div>
-                        <QualityBadge summary={summary} />
+                        <ProductionQualityBadge summary={summary} />
                       </div>
 
                       <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-600">
@@ -550,7 +550,7 @@ const ProductionReview: React.FC<ProductionReviewProps> = ({
                     <div className="mt-1 text-xs text-sky-700">ID {detailDraft.problemId}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <QualityBadge summary={selectedSummary} />
+                    <ProductionQualityBadge summary={selectedSummary} />
                     <button
                       type="button"
                       className="h-9 rounded-lg border border-rose-300 bg-white px-4 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
@@ -915,27 +915,7 @@ const ProductionReview: React.FC<ProductionReviewProps> = ({
                 </div>
               </section>
 
-              <section className="rounded-xl border border-sky-200/80 bg-white/75 p-4 shadow-sm backdrop-blur-sm">
-                <div className="mb-2 text-sm font-semibold text-slate-900">issue 一覧</div>
-                {selectedIssues.length === 0 ? (
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
-                    issue はありません。
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {selectedIssues.map((issue, index) => (
-                      <div key={`${issue.rule_code}-${index}`} className={`rounded-lg border p-3 text-sm ${issueClass(issue.severity)}`}>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-semibold uppercase">{issue.severity}</span>
-                          <span className="font-mono text-[11px] opacity-80">{issue.rule_code}</span>
-                        </div>
-                        <div className="mt-1 text-sm">{issue.message}</div>
-                        <div className="mt-1 text-xs opacity-80">{issue.field_path}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
+              <ProductionIssueList issues={selectedIssues} />
             </div>
           )}
         </main>
@@ -1340,37 +1320,6 @@ function Field({ label, value, mono = false }: { label: string; value: React.Rea
       <div className={`mt-1 text-sm text-slate-900 ${mono ? 'break-all font-mono text-xs' : ''}`}>{value}</div>
     </div>
   );
-}
-
-function QualityBadge({ summary }: { summary: ProductionValidationSummary }) {
-  return (
-    <span className={`inline-flex h-6 items-center rounded-full px-2 text-[11px] font-semibold ${badgeClass(summary.status)}`}>
-      {validationStatusLabel(summary.status)}
-      {summary.status !== 'ok' ? (
-        <span className="ml-1 font-normal opacity-75">
-          E{summary.errorCount}/W{summary.warningCount}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-function validationStatusLabel(status: ProductionValidationStatus): string {
-  if (status === 'error') return 'エラー';
-  if (status === 'warning') return '警告';
-  return 'OK';
-}
-
-function badgeClass(status: ProductionValidationStatus): string {
-  if (status === 'error') return 'bg-rose-100 text-rose-700';
-  if (status === 'warning') return 'bg-amber-100 text-amber-700';
-  return 'bg-emerald-100 text-emerald-700';
-}
-
-function issueClass(severity: ProductionValidationSeverity): string {
-  if (severity === 'error') return 'border-rose-200 bg-rose-50 text-rose-800';
-  if (severity === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800';
-  return 'border-sky-200 bg-sky-50 text-sky-800';
 }
 
 function getProductionDetailValidationSummaryWithLineIssues(
