@@ -13,8 +13,7 @@ import {
   extractBranchProblems,
   type KifBranchParseResult,
 } from '../lib/kif-parser';
-import TagSelector from '../components/TagSelector';
-import NewModeTagSelector from '../components/NewModeTagSelector';
+import WorkspaceKifPasteBox from '../components/WorkspaceKifPasteBox';
 import { getLastNewModeTags, saveLastNewModeTags } from '../lib/new-mode-tags';
 import {
   getLastPasteSaveMode,
@@ -371,137 +370,38 @@ const WorkspaceList: React.FC = () => {
     });
   };
 
-  const hasPasteContent = pasteText.trim().length > 0;
-
   return (
     <div className="workspace-list-page mx-auto w-full max-w-[1600px]">
       <div className="mb-4">
         <h2 className="text-lg font-semibold">下書き一覧</h2>
       </div>
 
-      {/* Inline KIF paste area */}
-      <div className="border border-blue-200 bg-blue-50/40 rounded-lg p-3 mb-3">
-        <textarea
-          className="text-[11px] font-mono leading-tight w-full rounded border border-gray-300 p-2"
-          rows={6}
-          placeholder="KIF棋譜 / SFEN を貼り付け"
-          value={pasteText}
-          onChange={(e) => {
-            setPasteText(e.target.value);
-            resetParsedBranchState();
-            setPasteError('');
-          }}
-          onPaste={(e) => {
-            const pasted = e.clipboardData.getData('text/plain');
-            if (pasted) {
-              e.preventDefault();
-              setPasteText(pasted);
-              validateAndShowParsedKif(pasted);
-            }
-          }}
-        />
-        {pasteError && (
-          <div
-            className={
-              pasteError.startsWith('✓')
-                ? 'text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded mt-1'
-                : 'text-[10px] text-red-600 bg-red-50 px-1.5 py-0.5 rounded mt-1'
-            }
-          >
-            {pasteError}
-          </div>
-        )}
-        <div className="flex gap-1 mt-1">
-          <button
-            type="button"
-            onClick={handlePasteFromClipboard}
-            className="text-[11px] px-2 py-0.5 bg-blue-100 border border-blue-300 hover:bg-blue-200 rounded"
-          >
-            📋 貼り付け
-          </button>
-        </div>
-        {hasPasteContent && (
-          <>
-            <div className="mt-2">
-              {pasteSaveMode === 'new_mode' ? (
-                <NewModeTagSelector selected={pasteTags} onChange={setPasteTags} />
-              ) : (
-                <TagSelector selected={pasteTags} onChange={setPasteTags} />
-              )}
-            </div>
-            <div className="mt-2 flex items-center gap-3 text-[13px]">
-              <div className="flex items-center gap-1">
-                <input
-                  id="saveMode-next"
-                  type="radio"
-                  name="saveMode"
-                  value="next_move"
-                  checked={pasteSaveMode === 'next_move'}
-                  onChange={() => selectPasteSaveMode('next_move')}
-                  className="mr-1"
-                />
-                <label htmlFor="saveMode-next">次の一手</label>
-              </div>
-              <div className="flex items-center gap-1">
-                <input
-                  id="saveMode-joseki"
-                  type="radio"
-                  name="saveMode"
-                  value="joseki"
-                  checked={pasteSaveMode === 'joseki'}
-                  onChange={() => selectPasteSaveMode('joseki')}
-                  className="mr-1"
-                />
-                <label htmlFor="saveMode-joseki">定跡</label>
-              </div>
-              <div className="flex items-center gap-1">
-                <input
-                  id="saveMode-new"
-                  type="radio"
-                  name="saveMode"
-                  value="new_mode"
-                  checked={pasteSaveMode === 'new_mode'}
-                  onChange={() => selectPasteSaveMode('new_mode')}
-                  className="mr-1"
-                />
-                <label htmlFor="saveMode-new">新モード</label>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-2 flex-wrap">
-              {parsedBranchCount > 0 && (
-                <button
-                  type="button"
-                  onClick={handlePasteAndSaveAllBranches}
-                  disabled={creating || savingBranches}
-                  className="bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 text-[12px] px-3 py-1 rounded disabled:opacity-50"
-                >
-                  {savingBranches ? '保存中...' : `🌳 分岐（${parsedBranchCount}個） 全てを保存する`}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={handlePasteAndSave}
-                disabled={creating || savingBranches}
-                className="bg-blue-600 text-white border-blue-600 hover:bg-blue-700 text-[12px] px-3 py-1 rounded disabled:opacity-50"
-              >
-                {creating ? '保存中...' : '保存'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPasteText('');
-                  setPasteError('');
-                  setPasteTags([]);
-                  resetParsedBranchState();
-                }}
-                className="text-[12px] px-3 py-1"
-              >
-                クリア
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+      <WorkspaceKifPasteBox
+        pasteText={pasteText}
+        pasteError={pasteError}
+        pasteTags={pasteTags}
+        pasteSaveMode={pasteSaveMode}
+        parsedBranchCount={parsedBranchCount}
+        creating={creating}
+        savingBranches={savingBranches}
+        onPasteTextChange={(text) => {
+          setPasteText(text);
+          resetParsedBranchState();
+        }}
+        onParsedPaste={validateAndShowParsedKif}
+        onPasteErrorClear={() => setPasteError('')}
+        onTagsChange={setPasteTags}
+        onModeChange={selectPasteSaveMode}
+        onPasteFromClipboard={handlePasteFromClipboard}
+        onSave={handlePasteAndSave}
+        onSaveAllBranches={handlePasteAndSaveAllBranches}
+        onClear={() => {
+          setPasteText('');
+          setPasteError('');
+          setPasteTags([]);
+          resetParsedBranchState();
+        }}
+      />
 
       <div className="workspace-list-controls flex items-center justify-between mb-2">
         {error && (
