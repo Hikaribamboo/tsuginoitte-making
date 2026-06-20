@@ -23,25 +23,22 @@ import {
 import { applyUsiMove, boardToSfen, EMPTY_SFEN, parseSfen, toUsiSquare } from '../lib/sfen';
 import { usiToLabel } from '../lib/usi-to-label';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
-import type { Board as BoardType, HandPieceType, HandPieces, Piece, PieceType, Side } from '../types/shogi';
+import type { Board as BoardType, HandPieceType, HandPieces, PieceType, Side } from '../types/shogi';
 import {
   CAN_PROMOTE,
-  HAND_PIECE_TYPES,
   PIECE_KANJI,
   PROMOTED_KANJI,
 } from '../types/shogi';
-
-const PIECE_TYPES: PieceType[] = ['K', 'R', 'B', 'G', 'S', 'N', 'L', 'P'];
-const TOTAL_PIECES: Record<PieceType, number> = {
-  K: 2,
-  R: 2,
-  B: 2,
-  G: 4,
-  S: 4,
-  N: 4,
-  L: 4,
-  P: 18,
-};
+import {
+  cloneBoard,
+  cloneHand,
+  isHandPieceType,
+  missingPieceCounts,
+  PIECE_TYPES,
+  rotatePieceVariant,
+  selectionMatchesBoard,
+  type PieceSelection,
+} from '../lib/position-editor-utils';
 
 const STATUS_LABEL: Record<ImagePositionItem['status'], string> = {
   idle: '未生成',
@@ -191,21 +188,9 @@ async function fileToResizedDataUrl(file: File): Promise<string> {
   });
 }
 
-function cloneBoard(board: BoardType): BoardType {
-  return board.map((row) => row.map((piece) => (piece ? { ...piece } : null)));
-}
-
-type PieceSelection =
-  | { source: 'board'; row: number; col: number; piece: Piece }
-  | { source: 'hand'; side: Side; type: HandPieceType; piece: Piece }
-  | { source: 'box'; type: PieceType; piece: Piece };
 type BoardCell = { row: number; col: number };
 type MoveRegistrationMode = 'intro' | 'correct' | null;
 type PieceBoxDragPayload = { source: 'pieceBox'; type: PieceType };
-
-function cloneHand(hand: HandPieces): HandPieces {
-  return { ...hand };
-}
 
 function rotateBoardAndSwapSides(board: BoardType): BoardType {
   const next: BoardType = Array.from({ length: 9 }, () => Array.from({ length: 9 }, () => null));
@@ -246,58 +231,6 @@ function parsePieceBoxDragPayload(payload: string): PieceBoxDragPayload | null {
   } catch {
     return null;
   }
-}
-
-function isHandPieceType(type: PieceType): type is HandPieceType {
-  return type !== 'K';
-}
-
-function rotatePieceVariant(piece: Piece): Piece {
-  if (!CAN_PROMOTE[piece.type]) {
-    return { ...piece, side: piece.side === 'sente' ? 'gote' : 'sente' };
-  }
-  if (!piece.promoted) {
-    return { ...piece, promoted: true };
-  }
-  if (piece.side === 'sente') {
-    return { ...piece, side: 'gote', promoted: false };
-  }
-  return { ...piece, side: 'sente', promoted: false };
-}
-
-function countPositionPieces(board: BoardType, senteHand: HandPieces, goteHand: HandPieces): Record<PieceType, number> {
-  const counts: Record<PieceType, number> = {
-    K: 0,
-    R: 0,
-    B: 0,
-    G: 0,
-    S: 0,
-    N: 0,
-    L: 0,
-    P: 0,
-  };
-
-  for (const row of board) {
-    for (const piece of row) {
-      if (piece) counts[piece.type] += 1;
-    }
-  }
-  for (const type of HAND_PIECE_TYPES) {
-    counts[type] += senteHand[type] + goteHand[type];
-  }
-  return counts;
-}
-
-function missingPieceCounts(board: BoardType, senteHand: HandPieces, goteHand: HandPieces): Record<PieceType, number> {
-  const counts = countPositionPieces(board, senteHand, goteHand);
-  return PIECE_TYPES.reduce((acc, type) => {
-    acc[type] = Math.max(0, TOTAL_PIECES[type] - counts[type]);
-    return acc;
-  }, {} as Record<PieceType, number>);
-}
-
-function selectionMatchesBoard(selection: PieceSelection | null, row: number, col: number): boolean {
-  return selection?.source === 'board' && selection.row === row && selection.col === col;
 }
 
 const ImagePositionCreator: React.FC = () => {

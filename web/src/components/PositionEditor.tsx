@@ -1,100 +1,25 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { boardToSfen, parseSfen } from '../lib/sfen';
 import {
-  CAN_PROMOTE,
-  HAND_PIECE_TYPES,
   PIECE_KANJI,
   type Board as BoardType,
   type HandPieces,
   type HandPieceType,
-  type Piece,
   type PieceType,
   type Side,
 } from '../types/shogi';
+import {
+  cloneBoard,
+  cloneHand,
+  createFullPieceBox,
+  isHandPieceType,
+  missingPieceCounts,
+  PIECE_TYPES,
+  rotatePieceVariant,
+  selectionMatchesBoard,
+  type PieceSelection,
+} from '../lib/position-editor-utils';
 import Board from './Board';
-
-type PieceSelection =
-  | { source: 'board'; row: number; col: number; piece: Piece }
-  | { source: 'hand'; side: Side; type: HandPieceType; piece: Piece }
-  | { source: 'box'; type: PieceType; piece: Piece };
-
-const PIECE_TYPES: PieceType[] = ['K', 'R', 'B', 'G', 'S', 'N', 'L', 'P'];
-const TOTAL_PIECES: Record<PieceType, number> = {
-  K: 2,
-  R: 2,
-  B: 2,
-  G: 4,
-  S: 4,
-  N: 4,
-  L: 4,
-  P: 18,
-};
-
-function cloneBoard(board: BoardType): BoardType {
-  return board.map((row) => row.map((piece) => (piece ? { ...piece } : null)));
-}
-
-function cloneHand(hand: HandPieces): HandPieces {
-  return { ...hand };
-}
-
-function createFullPieceBox(): Record<PieceType, number> {
-  return { ...TOTAL_PIECES };
-}
-
-function isHandPieceType(type: PieceType): type is HandPieceType {
-  return type !== 'K';
-}
-
-function rotatePieceVariant(piece: Piece): Piece {
-  if (!CAN_PROMOTE[piece.type]) {
-    return { ...piece, side: piece.side === 'sente' ? 'gote' : 'sente' };
-  }
-  if (!piece.promoted) {
-    return { ...piece, promoted: true };
-  }
-  if (piece.side === 'sente') {
-    return { ...piece, side: 'gote', promoted: false };
-  }
-  return { ...piece, side: 'sente', promoted: false };
-}
-
-function countPositionPieces(
-  board: BoardType,
-  senteHand: HandPieces,
-  goteHand: HandPieces,
-): Record<PieceType, number> {
-  const counts = PIECE_TYPES.reduce((acc, type) => {
-    acc[type] = 0;
-    return acc;
-  }, {} as Record<PieceType, number>);
-
-  for (const row of board) {
-    for (const piece of row) {
-      if (piece) counts[piece.type] += 1;
-    }
-  }
-  for (const type of HAND_PIECE_TYPES) {
-    counts[type] += senteHand[type] + goteHand[type];
-  }
-  return counts;
-}
-
-function missingPieceCounts(
-  board: BoardType,
-  senteHand: HandPieces,
-  goteHand: HandPieces,
-): Record<PieceType, number> {
-  const counts = countPositionPieces(board, senteHand, goteHand);
-  return PIECE_TYPES.reduce((acc, type) => {
-    acc[type] = Math.max(0, TOTAL_PIECES[type] - counts[type]);
-    return acc;
-  }, {} as Record<PieceType, number>);
-}
-
-function selectionMatchesBoard(selection: PieceSelection | null, row: number, col: number): boolean {
-  return selection?.source === 'board' && selection.row === row && selection.col === col;
-}
 
 export default function PositionEditor({
   rootSfen,
