@@ -16,6 +16,14 @@ import {
 import TagSelector from '../components/TagSelector';
 import NewModeTagSelector from '../components/NewModeTagSelector';
 import { getLastNewModeTags, saveLastNewModeTags } from '../lib/new-mode-tags';
+import {
+  getLastPasteSaveMode,
+  getLastWorkspaceModeFilter,
+  saveLastPasteSaveMode,
+  saveLastWorkspaceModeFilter,
+  type PasteSaveMode,
+  type WorkspaceModeFilter,
+} from '../lib/paste-save-mode';
 
 const WorkspaceList: React.FC = () => {
   const navigate = useNavigate();
@@ -27,14 +35,25 @@ const WorkspaceList: React.FC = () => {
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
   const [sortKey, setSortKey] = useState<'newest' | 'oldest' | 'rating-asc' | 'rating-desc' | 'name-asc' | 'name-desc'>('newest');
+  const [modeFilter, setModeFilter] = useState<WorkspaceModeFilter>(() => getLastWorkspaceModeFilter());
 
   // Inline KIF paste state
   const [pasteText, setPasteText] = useState('');
   const [pasteError, setPasteError] = useState('');
-  const [pasteTags, setPasteTags] = useState<string[]>([]);
-  const [pasteSaveMode, setPasteSaveMode] = useState<'next_move' | 'joseki' | 'new_mode'>('next_move');
+  const [pasteTags, setPasteTags] = useState<string[]>(() => (
+    getLastPasteSaveMode() === 'new_mode' ? getLastNewModeTags() : []
+  ));
+  const [pasteSaveMode, setPasteSaveMode] = useState<PasteSaveMode>(() => getLastPasteSaveMode());
   const [parsedBranchResult, setParsedBranchResult] = useState<KifBranchParseResult | null>(null);
   const [parsedBranchCount, setParsedBranchCount] = useState(0);
+
+  const selectPasteSaveMode = (mode: PasteSaveMode) => {
+    setPasteSaveMode(mode);
+    saveLastPasteSaveMode(mode);
+    if (mode === 'new_mode') {
+      setPasteTags(getLastNewModeTags());
+    }
+  };
 
   const fetchWorkspaces = useCallback(async () => {
     try {
@@ -56,8 +75,16 @@ const WorkspaceList: React.FC = () => {
     setSelectedWorkspaceIds((prev) => prev.filter((id) => workspaces.some((workspace) => workspace.id === id)));
   }, [workspaces]);
 
+  const visibleWorkspaces = useMemo(() => {
+    if (modeFilter === 'all') return workspaces;
+    return workspaces.filter((workspace) => {
+      const draft = workspace.draft as { mode?: unknown } | null;
+      return draft?.mode === modeFilter;
+    });
+  }, [modeFilter, workspaces]);
+
   const sortedWorkspaces = useMemo(() => {
-    const arr = [...workspaces];
+    const arr = [...visibleWorkspaces];
     const getRating = (ws: Workspace) => {
       try {
         const d: any = ws.draft ?? {};
@@ -83,7 +110,12 @@ const WorkspaceList: React.FC = () => {
       default:
         return arr;
     }
-  }, [workspaces, sortKey]);
+  }, [visibleWorkspaces, sortKey]);
+
+  const handleModeFilterChange = (filter: WorkspaceModeFilter) => {
+    setModeFilter(filter);
+    saveLastWorkspaceModeFilter(filter);
+  };
 
 
   const getNextWorkspaceNumber = (items: Workspace[]) => items.reduce((maxNo, ws) => {
@@ -164,9 +196,10 @@ const WorkspaceList: React.FC = () => {
       if (pasteSaveMode === 'new_mode') {
         saveLastNewModeTags(pasteTags);
       }
+      saveLastPasteSaveMode(pasteSaveMode);
 
       setPasteText('');
-      setPasteTags([]);
+      setPasteTags(pasteSaveMode === 'new_mode' ? getLastNewModeTags() : []);
       resetParsedBranchState();
       await fetchWorkspaces();
     } catch (e: any) {
@@ -269,9 +302,10 @@ const WorkspaceList: React.FC = () => {
           saveLastNewModeTags(pasteTags);
         }
       }
+      saveLastPasteSaveMode(pasteSaveMode);
 
       setPasteText('');
-      setPasteTags([]);
+      setPasteTags(pasteSaveMode === 'new_mode' ? getLastNewModeTags() : []);
       resetParsedBranchState();
       setPasteError(`✓ ${branchProblems.length}個の分岐を下書きに保存しました`);
       await fetchWorkspaces();
@@ -403,7 +437,7 @@ const WorkspaceList: React.FC = () => {
                   name="saveMode"
                   value="next_move"
                   checked={pasteSaveMode === 'next_move'}
-                  onChange={() => setPasteSaveMode('next_move')}
+                  onChange={() => selectPasteSaveMode('next_move')}
                   className="mr-1"
                 />
                 <label htmlFor="saveMode-next">次の一手</label>
@@ -415,7 +449,7 @@ const WorkspaceList: React.FC = () => {
                   name="saveMode"
                   value="joseki"
                   checked={pasteSaveMode === 'joseki'}
-                  onChange={() => setPasteSaveMode('joseki')}
+                  onChange={() => selectPasteSaveMode('joseki')}
                   className="mr-1"
                 />
                 <label htmlFor="saveMode-joseki">定跡</label>
@@ -427,10 +461,7 @@ const WorkspaceList: React.FC = () => {
                   name="saveMode"
                   value="new_mode"
                   checked={pasteSaveMode === 'new_mode'}
-                  onChange={() => {
-                    setPasteSaveMode('new_mode');
-                    setPasteTags(getLastNewModeTags());
-                  }}
+                  onChange={() => selectPasteSaveMode('new_mode')}
                   className="mr-1"
                 />
                 <label htmlFor="saveMode-new">新モード</label>
@@ -497,6 +528,20 @@ const WorkspaceList: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <label className="text-[12px] text-gray-600">モード:</label>
+            <select
+              value={modeFilter}
+              onChange={(e) => handleModeFilterChange(e.target.value as WorkspaceModeFilter)}
+              className="text-[12px] border px-2 py-1 rounded"
+            >
+              <option value="all">すべて</option>
+              <option value="next_move">次の一手</option>
+              <option value="joseki">定跡</option>
+              <option value="new_mode">新モード</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
             <label className="flex items-center gap-1 text-[12px] text-gray-600">
               <input
                 type="checkbox"
@@ -521,7 +566,9 @@ const WorkspaceList: React.FC = () => {
         <div className="text-[13px] text-gray-500 py-8 text-center">読み込み中...</div>
       ) : sortedWorkspaces.length === 0 ? (
         <div className="text-[13px] text-gray-500 py-8 text-center border border-dashed border-gray-300 rounded-lg">
-          下書きがありません。上の棋譜欄に貼り付けて保存してください。
+          {workspaces.length === 0
+            ? '下書きがありません。上の棋譜欄に貼り付けて保存してください。'
+            : '選択中のモードに該当する下書きがありません。'}
         </div>
       ) : (
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
