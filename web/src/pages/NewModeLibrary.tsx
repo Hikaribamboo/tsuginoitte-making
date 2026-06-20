@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listProductionChoicesByProblemIds, listProductionProblems } from '../api/production';
+import ShogiBoardPreview from '../components/ShogiBoardPreview';
 import type { ProductionChoice, ProductionProblem } from '../types/production';
-import { parseSfen } from '../lib/sfen';
-import { pieceKanji } from '../types/shogi';
 
 const UNTAGGED_BOOK = 'タグなし';
 const BOOK_COLORS = [
@@ -198,7 +197,12 @@ const NewModeLibrary: React.FC = () => {
                   </div>
                 </div>
 
-                <MiniBoard rootSfen={problem.rootSfen} />
+                <ShogiBoardPreview
+                  sfen={problem.rootSfen}
+                  maxWidth={252}
+                  errorText="盤面を表示できません"
+                  errorMinHeight={180}
+                />
               </button>
             ))}
           </div>
@@ -207,44 +211,5 @@ const NewModeLibrary: React.FC = () => {
     </div>
   );
 };
-
-function MiniBoard({ rootSfen }: { rootSfen: string }) {
-  try {
-    const state = parseSfen(rootSfen);
-    return (
-      <div className="mx-auto w-full max-w-[252px]">
-        <div
-          className="grid overflow-hidden rounded-sm border-2 border-amber-800 bg-amber-200 shadow-sm"
-          style={{ gridTemplateColumns: 'repeat(9, minmax(0, 1fr))' }}
-        >
-          {state.board.map((row, rowIndex) =>
-            row.map((cell, colIndex) => (
-              <div
-                key={`${rowIndex}-${colIndex}`}
-                className="flex aspect-square items-center justify-center border-r border-b border-amber-700/35 bg-[#e5c463] text-[clamp(13px,1.3vw,19px)] font-semibold leading-none text-slate-950"
-                style={{ gridColumn: colIndex + 1, gridRow: rowIndex + 1 }}
-              >
-                {cell ? (
-                  <span
-                    className={cell.promoted ? 'text-rose-700' : ''}
-                    style={{ transform: cell.side === 'gote' ? 'rotate(180deg)' : undefined }}
-                  >
-                    {pieceKanji(cell)}
-                  </span>
-                ) : null}
-              </div>
-            )),
-          )}
-        </div>
-      </div>
-    );
-  } catch {
-    return (
-      <div className="grid min-h-[180px] place-items-center rounded-md border border-rose-200 bg-rose-50 px-3 text-center text-sm font-semibold text-rose-700">
-        盤面を表示できません
-      </div>
-    );
-  }
-}
 
 export default NewModeLibrary;

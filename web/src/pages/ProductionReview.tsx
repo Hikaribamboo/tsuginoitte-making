@@ -10,6 +10,7 @@ import NewModeTagSelector from '../components/NewModeTagSelector';
 import PositionEditor from '../components/PositionEditor';
 import ProductionIssueList from '../components/ProductionIssueList';
 import ProductionQualityBadge from '../components/ProductionQualityBadge';
+import ShogiBoardPreview from '../components/ShogiBoardPreview';
 import { TAG_CATEGORIES } from '../lib/constants';
 import { saveLastNewModeTags } from '../lib/new-mode-tags';
 import {
@@ -19,7 +20,7 @@ import {
   type ProductionValidationSummary,
 } from '../lib/productionValidation';
 import { applyUsiMove, boardToSfen, parseSfen } from '../lib/sfen';
-import { HAND_PIECE_TYPES, pieceKanji, type HandPieces, type HandPieceType, type Side } from '../types/shogi';
+import type { HandPieceType, Side } from '../types/shogi';
 import type {
   ProductionChoice,
   ProductionProblem,
@@ -73,18 +74,6 @@ const EXPLANATION_HELPER_CHARS = [
   '打',
   '同',
 ];
-const PREVIEW_FILE_LABELS = ['９', '８', '７', '６', '５', '４', '３', '２', '１'];
-const PREVIEW_RANK_LABELS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
-const HAND_KANJI: Record<HandPieceType, string> = {
-  R: '飛',
-  B: '角',
-  G: '金',
-  S: '銀',
-  N: '桂',
-  L: '香',
-  P: '歩',
-};
-
 interface ProductionReviewProps {
   fixedMode?: ProductionProblemMode;
   title?: string;
@@ -1132,7 +1121,15 @@ function BoardPreviewWithMoves({
         {editing ? (
           <PositionEditor rootSfen={rootSfen} onChange={onRootSfenChange} />
         ) : (
-          <ReviewPositionBoard sfen={states[clamped] ?? rootSfen} flipped={flipped} />
+          <ShogiBoardPreview
+            sfen={states[clamped] ?? rootSfen}
+            flipped={flipped}
+            cellSize={32}
+            maxWidth={410}
+            showCoordinates
+            showHands
+            showTurn
+          />
         )}
       </div>
       {editing ? null : (
@@ -1181,136 +1178,6 @@ function BoardPreviewWithMoves({
       )}
     </div>
   );
-}
-
-function ReviewPositionBoard({ sfen, flipped }: { sfen: string; flipped: boolean }) {
-  try {
-    const state = parseSfen(sfen);
-    const topSide: Side = flipped ? 'sente' : 'gote';
-    const bottomSide: Side = flipped ? 'gote' : 'sente';
-    const topHand = topSide === 'sente' ? state.senteHand : state.goteHand;
-    const bottomHand = bottomSide === 'sente' ? state.senteHand : state.goteHand;
-    const rowIndexes = flipped ? [8, 7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7, 8];
-    const colIndexes = flipped ? [8, 7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7, 8];
-    const fileLabels = flipped ? [...PREVIEW_FILE_LABELS].reverse() : PREVIEW_FILE_LABELS;
-    const rankLabels = flipped ? [...PREVIEW_RANK_LABELS].reverse() : PREVIEW_RANK_LABELS;
-
-    return (
-      <div className="mx-auto flex w-full max-w-[410px] flex-col gap-2">
-        <HandStrip side={topSide} hand={topHand} placement="top" />
-
-        <div className="flex justify-center">
-          <div className="grid grid-cols-[1fr_auto] gap-x-1">
-            <div
-              className="grid justify-items-center text-[11px] font-semibold text-slate-500"
-              style={{ gridTemplateColumns: 'repeat(9, 32px)' }}
-            >
-              {fileLabels.map((label) => (
-                <span key={label}>{label}</span>
-              ))}
-            </div>
-            <div />
-
-            <div
-              className="grid overflow-hidden rounded-sm border-2 border-amber-800 bg-amber-200 shadow-sm"
-              style={{
-                gridTemplateColumns: 'repeat(9, 32px)',
-                gridTemplateRows: 'repeat(9, 32px)',
-              }}
-            >
-              {rowIndexes.map((row) =>
-                colIndexes.map((col) => {
-                  const cell = state.board[row][col];
-                  return (
-                    <div
-                      key={`${row}-${col}`}
-                      className="flex h-8 w-8 items-center justify-center border-r border-b border-amber-700/35 bg-[#e5c463] text-[20px] font-semibold leading-none text-slate-950"
-                    >
-                      {cell ? (
-                        <span
-                          className={cell.promoted ? 'text-rose-700' : ''}
-                          style={{ transform: cell.side !== bottomSide ? 'rotate(180deg)' : undefined }}
-                        >
-                          {pieceKanji(cell)}
-                        </span>
-                      ) : null}
-                    </div>
-                  );
-                }),
-              )}
-            </div>
-            <div
-              className="grid content-stretch justify-items-center text-[11px] font-semibold text-slate-500"
-              style={{ gridTemplateRows: 'repeat(9, 32px)' }}
-            >
-              {rankLabels.map((label) => (
-                <span key={label} className="flex h-8 items-center">
-                  {label}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <HandStrip side={bottomSide} hand={bottomHand} placement="bottom" />
-
-        <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
-          <span>手番</span>
-          <span className="rounded-full bg-white px-2 py-[2px] font-semibold text-slate-700 ring-1 ring-slate-200">
-            {sideName(state.sideToMove)}
-          </span>
-          <span>{state.moveNumber}手目</span>
-        </div>
-      </div>
-    );
-  } catch {
-    return (
-      <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">
-        盤面を表示できません（root_sfen形式エラー）
-      </div>
-    );
-  }
-}
-
-function HandStrip({
-  side,
-  hand,
-  placement,
-}: {
-  side: Side;
-  hand: HandPieces;
-  placement: 'top' | 'bottom';
-}) {
-  const pieces = HAND_PIECE_TYPES.filter((type) => hand[type] > 0);
-
-  return (
-    <div
-      className={`flex min-h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 shadow-sm ${
-        placement === 'top' ? 'justify-start' : 'justify-end'
-      }`}
-    >
-      <div className="shrink-0 text-xs font-semibold text-slate-500">{sideName(side)} 持ち駒</div>
-      {pieces.length === 0 ? (
-        <div className="text-xs text-slate-400">なし</div>
-      ) : (
-        <div className="flex flex-wrap gap-1">
-          {pieces.map((type) => (
-            <span
-              key={type}
-              className="inline-flex h-7 min-w-7 items-center justify-center rounded border border-amber-300 bg-amber-50 px-1.5 text-sm font-semibold text-slate-900"
-            >
-              {HAND_KANJI[type]}
-              {hand[type] > 1 ? <span className="ml-0.5 text-[11px] font-bold">{hand[type]}</span> : null}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function sideName(side: Side): string {
-  return side === 'sente' ? '先手' : '後手';
 }
 
 function Field({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
