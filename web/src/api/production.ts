@@ -7,6 +7,7 @@ import type {
   ProductionProblemMode,
   UpdateProductionProblemInput,
 } from '../types/production';
+import { normalizeStringArray } from '../lib/data-normalize';
 
 const PROBLEM_SELECT =
   'id, display_no, prompt, root_sfen, root_eval_cp, root_eval_percent, problem_rating, problem_rating_games, tags, correct_choice_id, intro_moves_usi, created_at, updated_at';
@@ -25,11 +26,6 @@ function isMissingColumnError(error: unknown, column: string): boolean {
   return text.includes(`'${column}' column`) || text.includes(`column "${column}"`) || text.includes(column);
 }
 
-function normalizeTextArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === 'string');
-}
-
 function normalizeProblemRow(row: Record<string, unknown>, fallbackMode: ProductionProblemMode): ProductionProblem {
   return {
     problemId: Number(row.id),
@@ -42,9 +38,9 @@ function normalizeProblemRow(row: Record<string, unknown>, fallbackMode: Product
     rootEvalPercent: row.root_eval_percent == null ? null : Number(row.root_eval_percent),
     problemRating: row.problem_rating == null ? null : Number(row.problem_rating),
     problemRatingGames: row.problem_rating_games == null ? null : Number(row.problem_rating_games),
-    tags: normalizeTextArray(row.tags),
+    tags: normalizeStringArray(row.tags),
     correctChoiceId: row.correct_choice_id == null ? 0 : Number(row.correct_choice_id),
-    introMovesUsi: normalizeTextArray(row.intro_moves_usi),
+    introMovesUsi: normalizeStringArray(row.intro_moves_usi),
     createdAt: typeof row.created_at === 'string' ? row.created_at : '',
     updatedAt: typeof row.updated_at === 'string' ? row.updated_at : '',
   };
@@ -58,7 +54,7 @@ function normalizeChoiceRow(row: Record<string, unknown>, mode: ProductionProble
     usi: typeof row.usi === 'string' ? row.usi : '',
     label: typeof row.label === 'string' ? row.label : '',
     explanation: row.explanation == null ? null : String(row.explanation),
-    line: normalizeTextArray(row.line),
+    line: normalizeStringArray(row.line),
     eval_cp: row.eval_cp == null ? null : Number(row.eval_cp),
     eval_percent: row.eval_percent == null ? null : Number(row.eval_percent),
   };

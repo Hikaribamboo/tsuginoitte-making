@@ -2,6 +2,7 @@ import { supabase } from './rpc';
 import { stopAnalysis } from './backend';
 import { DEFAULT_PROMPT } from '../lib/constants';
 import { INITIAL_SFEN } from '../lib/sfen';
+import { finiteNumberOrNull, isRecord, normalizeStringArray } from '../lib/data-normalize';
 
 type SlotKey = 'correct' | 'incorrect1' | 'incorrect2';
 
@@ -63,18 +64,6 @@ export interface NewModeRootSfenDuplicate {
   updatedAt: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function asStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
 function getSourcePayload(row: DraftProblemRow): Record<string, unknown> {
   return isRecord(row.source_payload) ? row.source_payload : {};
 }
@@ -113,7 +102,7 @@ function choiceToDraft(slotLabel: SlotKey, row: DraftChoiceRow | null | undefine
     usi: row.usi ?? '',
     label: row.label ?? '',
     explanation: row.explanation ?? '',
-    line: asStringArray(row.line),
+    line: normalizeStringArray(row.line),
     eval_cp: row.eval_cp ?? null,
     eval_percent: row.eval_percent ?? null,
   };
@@ -141,7 +130,7 @@ function rowToWorkspace(row: DraftProblemRow, choices: DraftChoiceRow[] = []): W
     ...draftPayload,
     kifText: typeof draftPayload.kifText === 'string' ? draftPayload.kifText : '',
     rootSfen: row.root_sfen,
-    kifMoves: asStringArray(draftPayload.kifMoves),
+    kifMoves: normalizeStringArray(draftPayload.kifMoves),
     introMoveUsi: typeof draftPayload.introMoveUsi === 'string'
       ? draftPayload.introMoveUsi
       : row.intro_moves_usi[row.intro_moves_usi.length - 1] ?? '',
@@ -221,9 +210,9 @@ function draftChoiceRows(draftProblemId: number, draft: DraftPayload): DraftChoi
       usi: typeof source.usi === 'string' ? source.usi : '',
       label: typeof source.label === 'string' ? source.label : '',
       explanation: typeof source.explanation === 'string' ? source.explanation : '',
-      line: asStringArray(source.line),
-      eval_cp: asNumber(source.eval_cp),
-      eval_percent: asNumber(source.eval_percent),
+      line: normalizeStringArray(source.line),
+      eval_cp: finiteNumberOrNull(source.eval_cp),
+      eval_percent: finiteNumberOrNull(source.eval_percent),
       source_snapshot: {
         slot,
         saved_from: 'workspace_compat_api',
@@ -268,12 +257,12 @@ function sourcePayloadForDraft(
 
 function introMovesForDraft(draft: DraftPayload): string[] {
   if (isRecord(draft.sourceBranch)) {
-    const sourceBranchMoves = asStringArray(draft.sourceBranch.introMovesUsi);
+    const sourceBranchMoves = normalizeStringArray(draft.sourceBranch.introMovesUsi);
     if (sourceBranchMoves.length > 0) return sourceBranchMoves;
   }
   const introMoveUsi = typeof draft.introMoveUsi === 'string' ? draft.introMoveUsi.trim() : '';
   if (introMoveUsi) return [introMoveUsi];
-  return asStringArray(draft.kifMoves);
+  return normalizeStringArray(draft.kifMoves);
 }
 
 /** List all authoring drafts ordered from oldest to newest. */
@@ -407,12 +396,12 @@ export async function saveWorkspaceDraft(
       root_sfen: rootSfen,
       intro_moves_usi: introMovesForDraft(draft),
       correct_choice_id: 1,
-      root_eval_cp: asNumber(draft.rootEvalCp),
-      root_eval_percent: asNumber(draft.rootEvalPercent),
-      problem_rating: asNumber(draft.problemRating) ?? 1500,
+      root_eval_cp: finiteNumberOrNull(draft.rootEvalCp),
+      root_eval_percent: finiteNumberOrNull(draft.rootEvalPercent),
+      problem_rating: finiteNumberOrNull(draft.problemRating) ?? 1500,
       problem_rating_games: currentRow.problem_rating_games ?? 0,
-      display_no: asNumber(draft.displayNo),
-      tags: asStringArray(draft.tags),
+      display_no: finiteNumberOrNull(draft.displayNo),
+      tags: normalizeStringArray(draft.tags),
       source_type: sourceTypeForDraft(draft, currentRow.source_type),
       source_payload: sourcePayloadForDraft(existingPayload, name, draft),
       source_snapshot: {
@@ -465,7 +454,7 @@ export async function findNewModeDraftByRootSfenAndIntro(
     prompt: string | null;
     intro_moves_usi: string[] | null;
     updated_at: string | null;
-  }>).find((row) => textArraysEqual(asStringArray(row.intro_moves_usi), normalizedIntroMovesUsi));
+  }>).find((row) => textArraysEqual(normalizeStringArray(row.intro_moves_usi), normalizedIntroMovesUsi));
 
   if (!duplicate) return null;
 
