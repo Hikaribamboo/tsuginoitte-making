@@ -1,0 +1,271 @@
+export type DraftProblem = {
+  id: number;
+  root_sfen: string;
+  intro_moves_usi: string[];
+  correct_choice_id: number;
+};
+
+export type DraftProblemChoice = {
+  id?: number;
+  draft_problem_id: number;
+  choice_id: number;
+  usi: string;
+  label: string;
+  eval_cp: number | null;
+  eval_percent: number | null;
+  line: string[];
+  explanation?: string | null;
+};
+
+export type ChoiceQuality = 'best' | 'slightly_worse' | 'worse' | 'bad' | 'blunder' | 'unknown';
+
+export type ChoiceEvalFeature = {
+  choice_id: number;
+  rank: number;
+  gapFromBest: number | null;
+  quality: ChoiceQuality;
+  isCorrect: boolean;
+};
+
+export type ExplanationPlanTone =
+  | 'positive'
+  | 'mild_positive'
+  | 'neutral'
+  | 'mild_negative'
+  | 'clear_negative'
+  | 'severe_negative';
+
+export type ExplanationPlanPrimaryReason =
+  | 'correct_attack_continues'
+  | 'correct_defense_works'
+  | 'correct_material_gain'
+  | 'correct_forcing_sequence'
+  | 'correct_tactical_gain'
+  | 'wrong_attack_disappears'
+  | 'wrong_opponent_escapes'
+  | 'wrong_opponent_blocks_line'
+  | 'wrong_no_threat'
+  | 'wrong_too_slow'
+  | 'wrong_material_loss'
+  | 'wrong_gives_pieces'
+  | 'wrong_king_safety_risk'
+  | 'wrong_bad_move_short'
+  | 'wrong_natural_but_worse'
+  | 'unknown';
+
+export type SuspectedExplanationPattern =
+  | 'attack_continues'
+  | 'attack_disappears'
+  | 'opponent_escapes'
+  | 'opponent_blocks_line'
+  | 'too_slow'
+  | 'material_gain'
+  | 'material_loss'
+  | 'gives_pieces'
+  | 'king_safety_risk'
+  | 'defense_works'
+  | 'double_threat'
+  | 'single_threat_only'
+  | 'natural_but_worse'
+  | 'no_threat'
+  | 'bad_move_short'
+  | 'unknown';
+
+export type LineFactsSummary = {
+  firstResponse: string | null;
+  firstSixMoves: string[];
+  moveCount: number;
+
+  hasDrop: boolean;
+  hasPromotion: boolean;
+
+  dropPieces: string[];
+  promotedMoves: string[];
+};
+
+export type DraftMoveFacts = {
+  choiceId: number;
+  usi: string;
+  label: string;
+
+  movedPiece: string | null;
+  from: string | null;
+  to: string | null;
+  isDrop: boolean;
+  isPromotion: boolean;
+  promotedPiece: string | null;
+  capturedPiece: string | null;
+
+  attacksAfterMove: Array<{
+    square: string;
+    piece: string;
+  }>;
+
+  attacksHighValuePiece: boolean;
+  givesCheck: boolean | null;
+
+  firstResponse: string | null;
+  firstResponseLabel: string | null;
+  firstResponseFacts: string[];
+  lineFirstMoves: string[];
+
+  factPhrases: string[];
+  tacticalMotifs: string[];
+};
+
+export type DraftPositionFeatures = {
+  choiceId: number;
+
+  material: {
+    capturedPiece: string | null;
+    capturedPieceValue: number | null;
+    attackedPieces: Array<{
+      square: string;
+      piece: string;
+      value: number;
+    }>;
+    attackedHighValuePieces: Array<{
+      square: string;
+      piece: string;
+      value: number;
+    }>;
+    roughImmediateMaterialGain: number;
+    materialPhrases: string[];
+  };
+
+  pieceActivity: {
+    movedPiece: string | null;
+    movedPieceAfterMove: string | null;
+    from: string | null;
+    to: string | null;
+    isDrop: boolean;
+    isPromotion: boolean;
+    promotedPiece: string | null;
+    attacksAfterMoveCount: number;
+    attacksHighValuePiece: boolean;
+    openedLongRangeLines: string[];
+    blockedOwnLongRangeLines: string[];
+    activityPhrases: string[];
+  };
+
+  kingSafety: {
+    ownKingSquare: string | null;
+    opponentKingSquare: string | null;
+    ownKingNearbyDefendersBefore: number | null;
+    ownKingNearbyDefendersAfter: number | null;
+    opponentAttacksNearOwnKingBefore: number | null;
+    opponentAttacksNearOwnKingAfter: number | null;
+    ownKingSafetyDelta: number | null;
+    kingSafetyPhrases: string[];
+    confidence: 'none' | 'low' | 'medium';
+  };
+
+  summaryPhrases: string[];
+};
+
+export type DraftLineContinuationFeatures = {
+  choiceId: number;
+  lineFirstMoves: string[];
+
+  firstResponse: string | null;
+  firstResponseLabel: string | null;
+
+  nextOwnMove: string | null;
+  nextOwnMoveLabel: string | null;
+
+  nextOwnMoveFacts: string[];
+  continuationPhrases: string[];
+
+  movedPieceContinuesAfterResponse: boolean;
+  movedPiecePromotesAfterResponse: boolean;
+  movedPieceCapturesAfterResponse: boolean;
+};
+
+export type DraftChoiceContrastDiagnosis =
+  | 'small_gain_but_no_continuation'
+  | 'small_gain_but_weaker_than_correct'
+  | 'low_value_gain_vs_major_piece_attack'
+  | 'attacks_piece_but_no_followup'
+  | 'slow_pawn_push'
+  | 'no_high_value_attack'
+  | 'no_tactical_followup'
+  | 'no_continuation_compared_to_correct'
+  | 'quiet_move_with_large_eval_gap'
+  | 'weaker_material_gain'
+  | 'promotion_or_capture_missing'
+  | 'king_safety_risk'
+  | 'unclear';
+
+export type DraftChoiceContrastFeatures = {
+  choiceId: number;
+  comparedToCorrectChoiceId: number;
+
+  correctStrengths: string[];
+  ownStrengths: string[];
+
+  missingComparedToCorrect: string[];
+
+  contrastPhrases: string[];
+
+  diagnosis: DraftChoiceContrastDiagnosis;
+  confidence: 'none' | 'low' | 'medium';
+};
+
+export type ExplanationPlan = {
+  problemId: number;
+  displayNo: number | null;
+  choiceId: number;
+  isCorrect: boolean;
+  label: string;
+  usi: string;
+
+  primaryReason: ExplanationPlanPrimaryReason;
+  secondaryReasons: ExplanationPlanPrimaryReason[];
+
+  reasonDetail: string;
+  tone: ExplanationPlanTone;
+
+  confidence: 'high' | 'medium' | 'low';
+
+  suggestedStructure: string[];
+  allowedPhrases: string[];
+  avoidPhrases: string[];
+
+  sourceSignals: {
+    suspectedPatterns: SuspectedExplanationPattern[];
+    textLabelsSummary: string[];
+    lineFactsSummary: string[];
+    absGapCp: number | null;
+    absGapPercent: number | null;
+    firstResponse: string | null;
+    sharedLineMoves: string[];
+    moveFacts?: DraftMoveFacts;
+    positionFeatures?: DraftPositionFeatures;
+    lineContinuationFeatures?: DraftLineContinuationFeatures;
+    contrastFeatures?: DraftChoiceContrastFeatures;
+  };
+};
+
+export type ExplanationChoiceResult = {
+  choiceId: number;
+  explanation: string;
+};
+
+export type GenerateChoiceExplanationsInput = {
+  problem: DraftProblem;
+  choices: DraftProblemChoice[];
+};
+
+export type GenerateChoiceExplanationsResult = {
+  problemId: number;
+  choices: ExplanationChoiceResult[];
+};
+
+export type LlmExplanationChoice = {
+  choice_id: number;
+  explanation: string;
+};
+
+export type LlmExplanationResponse = {
+  choices: LlmExplanationChoice[];
+};
