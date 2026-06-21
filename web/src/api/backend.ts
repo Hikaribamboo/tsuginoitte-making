@@ -125,6 +125,34 @@ export async function generateExplanations(
   return data.explanations;
 }
 
+export interface DraftChoiceExplanation {
+  choiceId: number;
+  explanation: string;
+}
+
+export interface GenerateDraftChoiceExplanationsResponse {
+  problemId: number;
+  updated: boolean;
+  choices: DraftChoiceExplanation[];
+}
+
+export async function generateDraftChoiceExplanations(
+  problemId: number,
+  overwrite = true,
+): Promise<GenerateDraftChoiceExplanationsResponse> {
+  const res = await fetch(`${ENGINE_API}/api/making-draft-problems/${encodeURIComponent(String(problemId))}/generate-explanations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ overwrite }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error ?? `API error ${res.status}`);
+  }
+  return data as GenerateDraftChoiceExplanationsResponse;
+}
+
 export interface RecognizeShogiPositionResponse {
   sfen: string;
   confidence?: number;

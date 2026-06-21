@@ -3,9 +3,11 @@ import express, { type Express } from 'express';
 import path from 'path';
 import { existsSync } from 'fs';
 import os from 'os';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { ShogiEngine } from '../engine.js';
 import { cancelMakingJob, getMakingJob, listMakingJobs, startMakingJob } from '../makingJobs.js';
 import { listMakingPathOptions } from '../makingOptions.js';
+import { generateChoiceExplanations, type DraftProblem, type DraftProblemChoice } from '../features/explanations/index.js';
 import {
   normalizeRecognitionModelVariant,
   resolvePredictionModelPathForVariant,
@@ -19,6 +21,46 @@ type UnifiedJobInput = {
   kind?: UnifiedJobKind;
   settings?: Record<string, unknown>;
 };
+
+let supabaseClient: SupabaseClient | null = null;
+
+function getSupabaseClient(): SupabaseClient {
+  if (supabaseClient) return supabaseClient;
+
+  const supabaseUrl = process.env.SUPABASE_URL?.trim();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
+  }
+
+  supabaseClient = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { persistSession: false },
+  });
+  return supabaseClient;
+}
+
+function normalizeDraftProblem(row: any): DraftProblem {
+  return {
+    id: Number(row.id),
+    root_sfen: String(row.root_sfen ?? ''),
+    intro_moves_usi: Array.isArray(row.intro_moves_usi) ? row.intro_moves_usi.map(String) : [],
+    correct_choice_id: Number(row.correct_choice_id),
+  };
+}
+
+function normalizeDraftChoice(row: any): DraftProblemChoice {
+  return {
+    id: typeof row.id === 'number' ? row.id : undefined,
+    draft_problem_id: Number(row.draft_problem_id),
+    choice_id: Number(row.choice_id),
+    usi: String(row.usi ?? ''),
+    label: String(row.label ?? ''),
+    eval_cp: typeof row.eval_cp === 'number' ? row.eval_cp : null,
+    eval_percent: typeof row.eval_percent === 'number' ? row.eval_percent : null,
+    line: Array.isArray(row.line) ? row.line.map(String) : [],
+    explanation: typeof row.explanation === 'string' ? row.explanation : '',
+  };
+}
 
 function mapUnifiedJobToLegacyInput(input: UnifiedJobInput): unknown {
   if (input.kind === 'book-problem') {
@@ -116,6 +158,102 @@ export function createEngineApp(engine: ShogiEngine): Express {
       res.json(options);
     } catch (error: any) {
       res.status(500).json({ error: error?.message ?? 'failed to list making options' });
+    }
+  });
+
+  app.post('/api/making-draft-problems/:problemId/generate-explanations', async (req, res) => {
+    const problemId = Number.parseInt(req.params.problemId, 10);
+    const overwrite = req.body?.overwrite === true;
+
+    if (!Number.isInteger(problemId) || problemId <= 0) {
+      res.status(400).json({ error: 'invalid problemId' });
+      return;
+    }
+
+    try {
+      const supabase = getSupabaseClient();
+      const { data: problemRow, error: problemError } = await supabase
+        .from('making_draft_problems')
+        .select('id, root_sfen, intro_moves_usi, correct_choice_id')
+        .eq('id', problemId)
+        .maybeSingle();
+
+      if (problemError) throw problemError;
+      if (!problemRow) {
+        res.status(404).json({ error: 'draft problem not found' });
+        return;
+      }
+
+      const { data: choiceRows, error: choicesError } = await supabase
+        .from('making_draft_choices')
+        .select('id, draft_problem_id, choice_id, usi, label, eval_cp, eval_percent, line, explanation')
+        .eq('draft_problem_id', problemId)
+        .order('choice_id', { ascending: true });
+
+      if (choicesError) throw choicesError;
+
+      const choices = (choiceRows ?? []).map(normalizeDraftChoice);
+      if (choices.length !== 3) {
+        res.status(400).json({ error: 'draft problem must have exactly 3 choices' });
+        return;
+      }
+
+      const targets = overwrite ? choices : choices.filter((choice) => !choice.explanation?.trim());
+      if (targets.length === 0) {
+        res.json({
+          problemId,
+          updated: false,
+          choices: choices.map((choice) => ({
+            choiceId: choice.choice_id,
+            explanation: choice.explanation ?? '',
+          })),
+        });
+        return;
+      }
+
+      const generated = await generateChoiceExplanations({
+        problem: normalizeDraftProblem(problemRow),
+        choices,
+      });
+
+      const generatedByChoiceId = new Map(
+        generated.choices.map((choice) => [choice.choiceId, choice.explanation]),
+      );
+      const targetChoiceIds = new Set(targets.map((choice) => choice.choice_id));
+      const now = new Date().toISOString();
+
+      await Promise.all(
+        choices
+          .filter((choice) => targetChoiceIds.has(choice.choice_id))
+          .map((choice) => {
+            const explanation = generatedByChoiceId.get(choice.choice_id);
+            if (!explanation) {
+              throw new Error(`generated explanation missing for choice_id=${choice.choice_id}`);
+            }
+            return supabase
+              .from('making_draft_choices')
+              .update({ explanation, updated_at: now })
+              .eq('draft_problem_id', problemId)
+              .eq('choice_id', choice.choice_id)
+              .then(({ error }) => {
+                if (error) throw error;
+              });
+          }),
+      );
+
+      res.json({
+        problemId,
+        updated: true,
+        choices: choices.map((choice) => ({
+          choiceId: choice.choice_id,
+          explanation: targetChoiceIds.has(choice.choice_id)
+            ? generatedByChoiceId.get(choice.choice_id) ?? ''
+            : choice.explanation ?? '',
+        })),
+      });
+    } catch (error: any) {
+      console.error('[api] POST /api/making-draft-problems/:problemId/generate-explanations failed:', error);
+      res.status(500).json({ error: error?.message ?? 'failed to generate explanations' });
     }
   });
 
