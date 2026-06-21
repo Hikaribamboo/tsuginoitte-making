@@ -27,7 +27,13 @@ import {
   hideWorkspaceFromList,
   findNewModeDraftByRootSfenAndIntro,
 } from '../api/workspaces';
-import { evaluatePosition, generateExplanations, startAnalysisStream, stopAnalysis, type AnalysisLine } from '../api/backend';
+import {
+  evaluatePosition,
+  generateDraftChoiceExplanations,
+  startAnalysisStream,
+  stopAnalysis,
+  type AnalysisLine,
+} from '../api/backend';
 import { AVAILABLE_TAGS, DEFAULT_PROMPT } from '../lib/constants';
 import { saveLastNewModeTags } from '../lib/new-mode-tags';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
@@ -1477,63 +1483,42 @@ const PasteProblemCreator: React.FC = () => {
   // ---- Generate explanations via AI ----
 
   const handleGenerateExplanations = useCallback(async () => {
-    if (!rootSfen || !parsed) {
-      setMessage('先に棋譜を読み込んでください');
+    if (!workspaceId) {
+      setMessage('先に下書きをDBに途中保存してください');
       return;
     }
-    const slots: SlotKey[] = ['correct', 'incorrect1', 'incorrect2'];
-    const filledSlots = slots.filter((s) => choices[s].usi);
-    if (filledSlots.length === 0) {
-      setMessage('選択肢を1つ以上設定してください');
-      return;
-    }
-
-    const targetSlots = filledSlots.filter((s) => !choices[s].explanation.trim());
-    if (targetSlots.length === 0) {
-      setMessage('すべての選択肢に解説が入力済みです');
+    const problemId = Number(workspaceId);
+    if (!Number.isInteger(problemId) || problemId <= 0) {
+      setMessage('下書きIDが不正です');
       return;
     }
 
     setGenerating(true);
     setMessage('');
     try {
-      const choiceData = targetSlots.map((slot) => {
-        const c = choices[slot];
-        // Convert USI reading line to Japanese labels
-        const fullPv = buildReplayLine(c);
-        const labels = pvToJapanese(fullPv, rootSfen, fullPv.length);
-        return {
-          label: c.label,
-          eval_cp: c.eval_cp,
-          eval_percent: c.eval_percent,
-          line_labels: labels.slice(1).join(' '), // exclude the choice move itself
-          is_correct: slot === 'correct',
-        };
-      });
+      const saved = await persistWorkspaceDraft();
+      if (!saved) return;
 
-      const results = await generateExplanations(
-        rootSfen,
-        parsed.sideToMove,
-        choiceData,
-      );
-
-      setChoices((prev) => {
-        const next = { ...prev };
-        results.forEach((r) => {
-          const slot = targetSlots[r.index];
-          if (slot) {
-            next[slot] = { ...next[slot], explanation: r.explanation };
-          }
-        });
-        return next;
-      });
-      setMessage(`解説を生成しました（${targetSlots.length}件）`);
+      const result = await generateDraftChoiceExplanations(problemId, true);
+      const refreshed = await getWorkspace(workspaceId);
+      const refreshedChoices = refreshed?.draft?.choices;
+      if (refreshedChoices && typeof refreshedChoices === 'object') {
+        setChoices(refreshedChoices as Record<SlotKey, ChoiceDraft>);
+      } else {
+        const explanationByChoiceId = new Map(result.choices.map((choice) => [choice.choiceId, choice.explanation]));
+        setChoices((prev) => ({
+          correct: { ...prev.correct, explanation: "[AI解説]" + (explanationByChoiceId.get(1) ?? prev.correct.explanation) },
+          incorrect1: { ...prev.incorrect1, explanation: "[AI解説]" + (explanationByChoiceId.get(2) ?? prev.incorrect1.explanation) },
+          incorrect2: { ...prev.incorrect2, explanation: "[AI解説]" + (explanationByChoiceId.get(3) ?? prev.incorrect2.explanation) },
+        }));
+      }
+      setMessage(`解説を生成しました（${result.choices.length}件）`);
     } catch (e: any) {
       setMessage(`解説生成エラー: ${e.message}`);
     } finally {
       setGenerating(false);
     }
-  }, [rootSfen, parsed, choices]);
+  }, [workspaceId, persistWorkspaceDraft]);
 
   // ---- Validation ----
 
