@@ -8,3 +8,5 @@ engine-server/engines/windows/eval/
 engine-server/engines/mac/eval/
 engine-server/outputs/
 engine-server/src/features/book-problem-generation/state/
+engine-server/data
+engine-server/tmp
