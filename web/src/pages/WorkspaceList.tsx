@@ -7,6 +7,7 @@ import {
   saveWorkspaceDraft,
   type Workspace,
 } from '../api/workspaces';
+import { generateDraftChoiceExplanations } from '../api/backend';
 import {
   parseKifRecordWithBranches,
   parseKifRecord,
@@ -41,6 +42,10 @@ const WorkspaceList: React.FC = () => {
   const [savingBranches, setSavingBranches] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectedWorkspaceIds, setSelectedWorkspaceIds] = useState<string[]>([]);
+  const [selectedDraftProblemIds, setSelectedDraftProblemIds] = useState<Set<number>>(() => new Set());
+  const [generatingSelected, setGeneratingSelected] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  const [batchResultMessage, setBatchResultMessage] = useState('');
   const [sortKey, setSortKey] = useState<'newest' | 'oldest' | 'rating-asc' | 'rating-desc' | 'name-asc' | 'name-desc'>('newest');
   const [modeFilter, setModeFilter] = useState<WorkspaceModeFilter>(() => getLastWorkspaceModeFilter());
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog | null>(null);
@@ -82,6 +87,14 @@ const WorkspaceList: React.FC = () => {
 
   useEffect(() => {
     setSelectedWorkspaceIds((prev) => prev.filter((id) => workspaces.some((workspace) => workspace.id === id)));
+    setSelectedDraftProblemIds((prev) => {
+      const visibleIds = new Set(workspaces.map((workspace) => Number(workspace.id)).filter(Number.isInteger));
+      const next = new Set<number>();
+      prev.forEach((id) => {
+        if (visibleIds.has(id)) next.add(id);
+      });
+      return next;
+    });
   }, [workspaces]);
 
   const visibleWorkspaces = useMemo(() => {
@@ -358,6 +371,32 @@ const WorkspaceList: React.FC = () => {
     );
   };
 
+  const toggleAiSelection = (workspaceId: string) => {
+    const draftProblemId = Number(workspaceId);
+    if (!Number.isInteger(draftProblemId) || draftProblemId <= 0) return;
+    setSelectedDraftProblemIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(draftProblemId)) {
+        next.delete(draftProblemId);
+      } else {
+        next.add(draftProblemId);
+      }
+      return next;
+    });
+  };
+
+  const explanationCount = (workspace: Workspace) => {
+    const choices = (workspace.draft as any)?.choices;
+    const slots = [choices?.correct, choices?.incorrect1, choices?.incorrect2];
+    return slots.filter((choice) => typeof choice?.explanation === 'string' && choice.explanation.trim()).length;
+  };
+
+  const explanationBadgeClass = (count: number) => {
+    if (count >= 3) return 'bg-emerald-100 text-emerald-700';
+    if (count > 0) return 'bg-amber-100 text-amber-700';
+    return 'bg-gray-100 text-gray-600';
+  };
+
   const allSelected = sortedWorkspaces.length > 0
     && sortedWorkspaces.every((workspace) => selectedWorkspaceIds.includes(workspace.id));
 
@@ -391,6 +430,56 @@ const WorkspaceList: React.FC = () => {
         }
       },
     });
+  };
+
+  const handleGenerateSelectedExplanations = async () => {
+    const ids = Array.from(selectedDraftProblemIds);
+    if (ids.length === 0) return;
+
+    setGeneratingSelected(true);
+    setBatchProgress({ current: 0, total: ids.length });
+    setBatchResultMessage('');
+    setError('');
+
+    let success = 0;
+    let skipped = 0;
+    let failed = 0;
+    const failedIds: number[] = [];
+
+    try {
+      for (let index = 0; index < ids.length; index += 1) {
+        const problemId = ids[index];
+        setBatchProgress({ current: index + 1, total: ids.length });
+
+        const workspace = workspaces.find((item) => Number(item.id) === problemId);
+        if (workspace && explanationCount(workspace) >= 3) {
+          skipped += 1;
+          continue;
+        }
+
+        try {
+          const result = await generateDraftChoiceExplanations(problemId, false);
+          if (result.updated) {
+            success += 1;
+          } else {
+            skipped += 1;
+          }
+        } catch (e) {
+          failed += 1;
+          failedIds.push(problemId);
+          console.error('[WorkspaceList] AI explanation batch failed', { problemId, error: e });
+        }
+      }
+
+      setBatchResultMessage(`AI解説生成が完了しました。成功: ${success}件 / スキップ: ${skipped}件 / 失敗: ${failed}件`);
+      if (failedIds.length > 0) {
+        setError(`AI解説生成に失敗した下書きID: ${failedIds.join(', ')}`);
+      }
+      await fetchWorkspaces();
+    } finally {
+      setGeneratingSelected(false);
+      setBatchProgress(null);
+    }
   };
 
   const formatDate = (iso: string) => {
@@ -492,8 +581,31 @@ const WorkspaceList: React.FC = () => {
               {deletingSelected ? '削除中...' : `選択削除 (${selectedWorkspaceIds.length})`}
             </button>
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[12px] text-gray-600">AI選択中 {selectedDraftProblemIds.size}件</span>
+            <button
+              type="button"
+              className="text-[12px] px-2 py-1 rounded border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50"
+              disabled={selectedDraftProblemIds.size === 0 || generatingSelected}
+              onClick={handleGenerateSelectedExplanations}
+            >
+              {generatingSelected ? 'AI解説生成中...' : '選択した問題のAI解説を生成'}
+            </button>
+            {batchProgress && (
+              <span className="text-[12px] text-gray-600">
+                {batchProgress.current} / {batchProgress.total}
+              </span>
+            )}
+          </div>
         </div>
       </div>
+
+      {batchResultMessage && (
+        <div className="mb-3 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-700">
+          {batchResultMessage}
+        </div>
+      )}
 
       {loading ? (
         <div className="text-[13px] text-gray-500 py-8 text-center">読み込み中...</div>
@@ -513,6 +625,7 @@ const WorkspaceList: React.FC = () => {
             const tags: string[] = d?.tags ?? [];
             const correctLabel = d?.choices?.correct?.label;
             const rootSfen = d?.rootSfen;
+            const aiExplanationCount = explanationCount(ws);
             const imagePositionMemo = typeof d?.imagePositionSource?.memo === 'string'
               ? d.imagePositionSource.memo.trim()
               : '';
@@ -529,6 +642,19 @@ const WorkspaceList: React.FC = () => {
                     onChange={(event) => {
                       event.stopPropagation();
                       toggleWorkspaceSelection(ws.id);
+                    }}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                </div>
+                <div className="pt-1">
+                  <input
+                    type="checkbox"
+                    aria-label="AI解説生成対象"
+                    title="AI解説生成対象"
+                    checked={selectedDraftProblemIds.has(Number(ws.id))}
+                    onChange={(event) => {
+                      event.stopPropagation();
+                      toggleAiSelection(ws.id);
                     }}
                     onClick={(event) => event.stopPropagation()}
                   />
@@ -551,6 +677,9 @@ const WorkspaceList: React.FC = () => {
                         下書きあり
                       </span>
                     )}
+                    <span className={`rounded px-1.5 py-0 text-[10px] ${explanationBadgeClass(aiExplanationCount)}`}>
+                      AI解説 {aiExplanationCount}/3
+                    </span>
                     {d?.mode && (
                       <span className="rounded bg-indigo-100 px-1.5 py-0 text-[10px] text-indigo-700">
                         {d.mode === 'new_mode' ? '新モード' : d.mode === 'joseki' ? '定跡' : '次の一手'}
