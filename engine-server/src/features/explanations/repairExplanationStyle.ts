@@ -85,6 +85,11 @@ const REPLACEMENTS: Replacement[] = [
     replacement: '攻め',
     reason: 'replace vague pressure phrase',
   },
+  {
+    pattern: /([^。]{1,24}に当たる)好手/g,
+    replacement: '$1',
+    reason: 'preserve concrete attack phrase',
+  },
 ];
 
 function cleanText(text: string): string {

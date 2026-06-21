@@ -32,6 +32,31 @@ function normalizeContinuationPhrase(phrase: string): string {
   return phrase;
 }
 
+function normalizeStrengthPhrase(phrase: string): string {
+  return normalizeMaterialPhrase(normalizeContinuationPhrase(phrase));
+}
+
+function hasConcreteStrength(contrastPhrase: string, strength: string): boolean {
+  if (contrastPhrase.includes(strength)) return true;
+  if (strength === '一歩取れる' && contrastPhrase.includes('一歩取れる')) return true;
+  if (strength.includes('飛車取り') && contrastPhrase.includes('飛車取り')) return true;
+  if (strength.includes('角に当たる') && contrastPhrase.includes('角に当たる')) return true;
+  if (strength.includes('桂に当たる') && contrastPhrase.includes('桂に当たる')) return true;
+  return false;
+}
+
+function joinStrengthAndContrast(strength: string, contrastPhrase: string): string {
+  const normalizedStrength = normalizeStrengthPhrase(strength);
+  const normalizedContrast = normalizeStrengthPhrase(contrastPhrase);
+  if (hasConcreteStrength(normalizedContrast, normalizedStrength)) {
+    return `${normalizedContrast}。`;
+  }
+  if (normalizedContrast.startsWith('正解手') || normalizedContrast.startsWith('後続') || normalizedContrast.startsWith('攻め')) {
+    return `${normalizedStrength}が，${normalizedContrast}。`;
+  }
+  return `${normalizedStrength}ものの，${normalizedContrast}。`;
+}
+
 function isPawnMove(plan: ExplanationPlan): boolean {
   return plan.sourceSignals.moveFacts?.movedPiece === '歩' || plainLabel(plan.label).includes('歩');
 }
@@ -42,10 +67,12 @@ export function buildFallbackExplanation(plan: ExplanationPlan, feature: ChoiceE
   const normalizedContinuation = continuation ? normalizeContinuationPhrase(continuation) : null;
   const moveFact = firstNonEmpty(plan.sourceSignals.moveFacts?.factPhrases);
   const positionPhrase = firstNonEmpty(plan.sourceSignals.positionFeatures?.summaryPhrases);
+  const materialPhrase = firstNonEmpty(plan.sourceSignals.positionFeatures?.material.materialPhrases);
+  const activityPhrase = firstNonEmpty(plan.sourceSignals.positionFeatures?.pieceActivity.activityPhrases);
   const contrastOwnStrength = firstNonEmpty(plan.sourceSignals.contrastFeatures?.ownStrengths);
 
   if (plan.isCorrect) {
-    const firstPhrase = moveFact ?? positionPhrase ?? contrastOwnStrength;
+    const firstPhrase = moveFact ?? positionPhrase ?? materialPhrase ?? activityPhrase ?? contrastOwnStrength;
     if (firstPhrase && normalizedContinuation) {
       return `${firstPhrase}。${normalizedContinuation}。`;
     }
@@ -59,16 +86,33 @@ export function buildFallbackExplanation(plan: ExplanationPlan, feature: ChoiceE
   }
 
   const contrastPhrase = firstNonEmpty(plan.sourceSignals.contrastFeatures?.contrastPhrases);
+  const ownStrength = contrastOwnStrength ? normalizeStrengthPhrase(contrastOwnStrength) : null;
   if (contrastPhrase) {
+    if (ownStrength) {
+      return joinStrengthAndContrast(ownStrength, contrastPhrase);
+    }
+    if (moveFact) {
+      return joinStrengthAndContrast(moveFact, contrastPhrase);
+    }
+    if (positionPhrase) {
+      return joinStrengthAndContrast(positionPhrase, contrastPhrase);
+    }
+    if (materialPhrase) {
+      return joinStrengthAndContrast(materialPhrase, contrastPhrase);
+    }
+    if (activityPhrase) {
+      return joinStrengthAndContrast(activityPhrase, contrastPhrase);
+    }
     return `${contrastPhrase}。`;
   }
 
-  const safePhrase = positionPhrase ? normalizeMaterialPhrase(positionPhrase) : null;
+  const safePhrase = firstNonEmpty([ownStrength ?? ''], [moveFact ?? ''], [positionPhrase ?? ''], [materialPhrase ?? ''], [activityPhrase ?? '']);
   if (safePhrase) {
-    if (safePhrase === '一歩取れる') {
+    const normalizedSafePhrase = normalizeStrengthPhrase(safePhrase);
+    if (normalizedSafePhrase === '一歩取れる') {
       return '一歩取れるが，正解手ほど攻めが続かない。';
     }
-    return `${safePhrase}が，攻めとしては少し重い。`;
+    return `${normalizedSafePhrase}が，攻めとしては少し重い。`;
   }
 
   if (plan.primaryReason === 'wrong_too_slow' || feature.quality === 'bad' || feature.quality === 'blunder' || isPawnMove(plan)) {
