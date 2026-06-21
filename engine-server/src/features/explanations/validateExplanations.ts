@@ -7,7 +7,7 @@ import type {
 } from './types.js';
 
 const MAX_EXPLANATION_LENGTH = 240;
-const BAD_EXPLANATION_PHRASES = [
+const SOFT_STYLE_PHRASES = [
   '効果的',
   'おすすめ',
   'お勧め',
@@ -20,7 +20,9 @@ const BAD_EXPLANATION_PHRASES = [
   '対応が必要',
   '狙いが弱く',
   'この手を無視できない',
-  '反撃',
+];
+
+const STRONG_CLAIM_PHRASES = [
   '優勢',
   '有利',
   '形勢',
@@ -38,11 +40,16 @@ export type ExplanationValidationIssueCode =
   | 'too_many_sentences'
   | 'bad_phrase'
   | 'unsupported_escape_phrase'
+  | 'unsupported_counterattack_phrase'
   | 'unsupported_risk_phrase'
+  | 'unsupported_claim'
   | 'missing_required_continuation_phrase';
+
+export type ExplanationValidationSeverity = 'hard' | 'soft';
 
 export type ExplanationValidationIssue = {
   code: ExplanationValidationIssueCode;
+  severity: ExplanationValidationSeverity;
   choiceId?: number;
   message: string;
 };
@@ -95,6 +102,50 @@ function hasKingSafetyEvidence(positionFeatures: DraftPositionFeatures | undefin
   );
 }
 
+function phraseEvidenceForChoice(
+  moveFacts: DraftMoveFacts | undefined,
+  positionFeatures: DraftPositionFeatures | undefined,
+  lineContinuationFeatures: DraftLineContinuationFeatures | undefined,
+): string[] {
+  return [
+    ...(moveFacts?.factPhrases ?? []),
+    ...(moveFacts?.firstResponseFacts ?? []),
+    ...(moveFacts?.tacticalMotifs ?? []),
+    ...(positionFeatures?.summaryPhrases ?? []),
+    ...(positionFeatures?.material.materialPhrases ?? []),
+    ...(positionFeatures?.pieceActivity.activityPhrases ?? []),
+    ...(positionFeatures?.kingSafety.kingSafetyPhrases ?? []),
+    ...(lineContinuationFeatures?.continuationPhrases ?? []),
+    ...(lineContinuationFeatures?.nextOwnMoveFacts ?? []),
+  ].filter((phrase) => phrase.trim());
+}
+
+function hasCounterattackEvidence(
+  moveFacts: DraftMoveFacts | undefined,
+  positionFeatures: DraftPositionFeatures | undefined,
+  lineContinuationFeatures: DraftLineContinuationFeatures | undefined,
+): boolean {
+  return phraseEvidenceForChoice(moveFacts, positionFeatures, lineContinuationFeatures).some((phrase) =>
+    phrase.includes('反撃') ||
+    phrase.includes('攻め返') ||
+    phrase.includes('切り返')
+  );
+}
+
+function hasStrongClaimEvidence(
+  moveFacts: DraftMoveFacts | undefined,
+  positionFeatures: DraftPositionFeatures | undefined,
+  lineContinuationFeatures: DraftLineContinuationFeatures | undefined,
+): boolean {
+  return phraseEvidenceForChoice(moveFacts, positionFeatures, lineContinuationFeatures).some((phrase) =>
+    phrase.includes('詰') ||
+    phrase.includes('必至') ||
+    phrase.includes('勝ち') ||
+    STRONG_CLAIM_PHRASES.some((claim) => phrase.includes(claim)) ||
+    phrase.includes('決め手')
+  );
+}
+
 function hasContinuationPhraseEvidence(
   explanation: string,
   lineContinuationFeatures: DraftLineContinuationFeatures | undefined,
@@ -136,6 +187,7 @@ export function validateExplanations(
   if (!value || !Array.isArray(value.choices)) {
     throw new ExplanationValidationError([{
       code: 'missing_choice',
+      severity: 'hard',
       message: 'LLM output choices must be an array',
     }]);
   }
@@ -156,6 +208,7 @@ export function validateExplanations(
     if (!choice || typeof choice.choice_id !== 'number' || !Number.isInteger(choice.choice_id)) {
       issues.push({
         code: 'invalid_choice_id',
+        severity: 'hard',
         message: 'LLM output contains invalid choice_id',
       });
       continue;
@@ -163,6 +216,7 @@ export function validateExplanations(
     if (!expectedChoiceIds.has(choice.choice_id)) {
       issues.push({
         code: 'invalid_choice_id',
+        severity: 'hard',
         choiceId: choice.choice_id,
         message: `LLM output contains unknown choice_id=${choice.choice_id}`,
       });
@@ -171,6 +225,7 @@ export function validateExplanations(
     if (actualChoiceIds.has(choice.choice_id)) {
       issues.push({
         code: 'duplicate_choice',
+        severity: 'hard',
         choiceId: choice.choice_id,
         message: `LLM output contains duplicate choice_id=${choice.choice_id}`,
       });
@@ -179,6 +234,7 @@ export function validateExplanations(
     if (typeof choice.explanation !== 'string' || !choice.explanation.trim()) {
       issues.push({
         code: 'too_short',
+        severity: 'hard',
         choiceId: choice.choice_id,
         message: `LLM output explanation is empty for choice_id=${choice.choice_id}`,
       });
@@ -186,6 +242,7 @@ export function validateExplanations(
     if (typeof choice.explanation === 'string' && choice.explanation.length > MAX_EXPLANATION_LENGTH) {
       issues.push({
         code: 'too_long',
+        severity: 'hard',
         choiceId: choice.choice_id,
         message: `LLM output explanation is too long for choice_id=${choice.choice_id}`,
       });
@@ -194,16 +251,43 @@ export function validateExplanations(
     if (sentenceCount(explanation) > 2) {
       issues.push({
         code: 'too_many_sentences',
+        severity: 'hard',
         choiceId: choice.choice_id,
         message: `LLM output explanation has too many sentences for choice_id=${choice.choice_id}`,
       });
     }
-    const badPhrase = BAD_EXPLANATION_PHRASES.find((phrase) => explanation.includes(phrase));
+    const badPhrase = SOFT_STYLE_PHRASES.find((phrase) => explanation.includes(phrase));
     if (badPhrase) {
       issues.push({
         code: 'bad_phrase',
+        severity: 'soft',
         choiceId: choice.choice_id,
         message: `LLM output contains banned phrase "${badPhrase}" for choice_id=${choice.choice_id}`,
+      });
+    }
+    if (explanation.includes('反撃') && !hasCounterattackEvidence(
+      moveFactsByChoiceId.get(choice.choice_id),
+      positionFeaturesByChoiceId.get(choice.choice_id),
+      lineContinuationByChoiceId.get(choice.choice_id),
+    )) {
+      issues.push({
+        code: 'unsupported_counterattack_phrase',
+        severity: 'hard',
+        choiceId: choice.choice_id,
+        message: `LLM output mentions counterattack without feature evidence for choice_id=${choice.choice_id}`,
+      });
+    }
+    const strongClaim = STRONG_CLAIM_PHRASES.find((phrase) => explanation.includes(phrase));
+    if (strongClaim && !hasStrongClaimEvidence(
+      moveFactsByChoiceId.get(choice.choice_id),
+      positionFeaturesByChoiceId.get(choice.choice_id),
+      lineContinuationByChoiceId.get(choice.choice_id),
+    )) {
+      issues.push({
+        code: 'unsupported_claim',
+        severity: 'hard',
+        choiceId: choice.choice_id,
+        message: `LLM output contains unsupported strong claim "${strongClaim}" for choice_id=${choice.choice_id}`,
       });
     }
     if (
@@ -212,6 +296,7 @@ export function validateExplanations(
     ) {
       issues.push({
         code: 'unsupported_escape_phrase',
+        severity: 'hard',
         choiceId: choice.choice_id,
         message: `LLM output mentions escape without move_facts evidence for choice_id=${choice.choice_id}`,
       });
@@ -222,6 +307,7 @@ export function validateExplanations(
     ) {
       issues.push({
         code: 'unsupported_risk_phrase',
+        severity: 'hard',
         choiceId: choice.choice_id,
         message: `LLM output mentions king risk without position_features evidence for choice_id=${choice.choice_id}`,
       });
@@ -232,6 +318,7 @@ export function validateExplanations(
     ) {
       issues.push({
         code: 'missing_required_continuation_phrase',
+        severity: 'hard',
         choiceId: choice.choice_id,
         message: `LLM output does not use required line_continuation_features for choice_id=${choice.choice_id}`,
       });
@@ -242,6 +329,7 @@ export function validateExplanations(
   if (actualChoiceIds.size !== expectedChoiceIds.size) {
     issues.push({
       code: 'missing_choice',
+      severity: 'hard',
       message: 'LLM output choice_id set does not match input choices',
     });
   }
@@ -250,6 +338,7 @@ export function validateExplanations(
     if (!actualChoiceIds.has(expectedChoiceId)) {
       issues.push({
         code: 'missing_choice',
+        severity: 'hard',
         choiceId: expectedChoiceId,
         message: `LLM output is missing choice_id=${expectedChoiceId}`,
       });

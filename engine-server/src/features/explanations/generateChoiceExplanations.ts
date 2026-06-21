@@ -7,6 +7,7 @@ import { buildExplanationPrompt } from './buildExplanationPrompt.js';
 import { diagnoseExplanationDebugDirectory } from './diagnoseExplanationDebug.js';
 import { extractEvalFeatures } from './extractEvalFeatures.js';
 import { requestExplanationJson } from './llmClient.js';
+import { repairExplanationStyle, type ExplanationStyleRepairOutput } from './repairExplanationStyle.js';
 import type { GenerateChoiceExplanationsInput, GenerateChoiceExplanationsResult, LlmExplanationResponse } from './types.js';
 import {
   ExplanationValidationError,
@@ -46,6 +47,7 @@ async function writeExplanationDebugLogs(params: {
   retryLlmOutput?: unknown;
   retryValidationIssues?: unknown;
   fallbackOutput?: unknown;
+  styleRepairOutput?: unknown;
   validated?: unknown;
   error?: unknown;
 }): Promise<void> {
@@ -95,6 +97,9 @@ async function writeExplanationDebugLogs(params: {
   if (params.fallbackOutput !== undefined) {
     await writeDebugJson(path.join(dir, 'fallback-output.json'), params.fallbackOutput);
   }
+  if (params.styleRepairOutput !== undefined) {
+    await writeDebugJson(path.join(dir, 'style-repair-output.json'), params.styleRepairOutput);
+  }
 
   if (params.validated !== undefined) {
     await writeDebugJson(path.join(dir, 'validated.json'), params.validated);
@@ -131,16 +136,31 @@ function validationContext(plans: ReturnType<typeof buildDraftExplanationPlansFo
 }
 
 function repairableValidationIssue(issue: ExplanationValidationIssue): boolean {
-  return issue.code === 'unsupported_escape_phrase' ||
-    issue.code === 'unsupported_risk_phrase' ||
-    issue.code === 'missing_required_continuation_phrase' ||
-    issue.code === 'too_many_sentences' ||
-    issue.code === 'bad_phrase';
+  return issue.severity === 'hard' || issue.severity === 'soft';
+}
+
+function hasHardValidationIssue(issues: ExplanationValidationIssue[]): boolean {
+  return issues.some((issue) => issue.severity === 'hard');
+}
+
+function hasOnlySoftValidationIssues(issues: ExplanationValidationIssue[]): boolean {
+  return issues.length > 0 && issues.every((issue) => issue.severity === 'soft');
+}
+
+function fallbackReasonByChoiceId(issues: ExplanationValidationIssue[]): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  for (const issue of issues) {
+    if (typeof issue.choiceId !== 'number') continue;
+    const reasons = result.get(issue.choiceId) ?? [];
+    reasons.push(issue.code);
+    result.set(issue.choiceId, reasons);
+  }
+  return result;
 }
 
 function fallbackChoiceIds(issues: ExplanationValidationIssue[], plans: ReturnType<typeof buildDraftExplanationPlansForProblem>): Set<number> {
   const ids = new Set<number>();
-  for (const issue of issues) {
+  for (const issue of issues.filter((item) => item.severity === 'hard')) {
     if (typeof issue.choiceId === 'number') ids.add(issue.choiceId);
   }
   if (ids.size === 0) {
@@ -159,10 +179,69 @@ function buildRetryPrompt(prompt: string): string {
     '「逃げられる」「かわされる」は使わず、',
     '「正解手ほど攻めが続かない」「攻め味が弱い」のように控えめに書き直してください。',
     '根拠のない「反撃」「危険」も使わず、move_facts / position_features / line_continuation_features にある事実だけで書いてください。',
-    '「可能性」「効果」「優勢」「有利」「形勢」「保てる」のような抽象語や形勢断定は使わないでください。',
+    '「可能性」「効果」「圧力」「優勢」「有利」「形勢」「保てる」のような抽象語や形勢断定は使わないでください。',
     '正解手に line_continuation_features.continuationPhrases がある場合は、必ずその継続事実を1つ本文に入れてください。',
     '各 explanation は必ず1〜2文にしてください。3文以上にしないでください。',
   ].join('\n');
+}
+
+function tryValidateAfterStyleRepair(params: {
+  output: LlmExplanationResponse;
+  sortedChoices: GenerateChoiceExplanationsInput['choices'];
+  validateContext: ReturnType<typeof validationContext>;
+}): {
+  repairedOutput: ExplanationStyleRepairOutput | undefined;
+  validated: LlmExplanationResponse | undefined;
+  issues: ExplanationValidationIssue[] | undefined;
+} {
+  let currentOutput = params.output;
+  let combinedRepairOutput: ExplanationStyleRepairOutput | undefined;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return {
+        repairedOutput: combinedRepairOutput,
+        validated: validateExplanations(currentOutput, params.sortedChoices, params.validateContext),
+        issues: undefined,
+      };
+    } catch (error) {
+      if (!(error instanceof ExplanationValidationError)) throw error;
+      if (!hasOnlySoftValidationIssues(error.issues)) {
+        return { repairedOutput: combinedRepairOutput, validated: undefined, issues: error.issues };
+      }
+
+      const repairedOutput = repairExplanationStyle(currentOutput, error.issues);
+      if (repairedOutput.repairs.length === 0) {
+        return { repairedOutput: combinedRepairOutput ?? repairedOutput, validated: undefined, issues: error.issues };
+      }
+
+      combinedRepairOutput = {
+        repairedChoiceIds: [
+          ...(combinedRepairOutput?.repairedChoiceIds ?? []),
+          ...repairedOutput.repairedChoiceIds,
+        ].filter((choiceId, index, array) => array.indexOf(choiceId) === index),
+        repairs: [
+          ...(combinedRepairOutput?.repairs ?? []),
+          ...repairedOutput.repairs,
+        ],
+        choices: repairedOutput.choices,
+      };
+      currentOutput = repairedOutput;
+    }
+  }
+
+  try {
+    return {
+      repairedOutput: combinedRepairOutput,
+      validated: validateExplanations(currentOutput, params.sortedChoices, params.validateContext),
+      issues: undefined,
+    };
+  } catch (error) {
+    if (error instanceof ExplanationValidationError) {
+      return { repairedOutput: combinedRepairOutput, validated: undefined, issues: error.issues };
+    }
+    throw error;
+  }
 }
 
 export async function generateChoiceExplanations(
@@ -201,6 +280,7 @@ export async function generateChoiceExplanations(
     let retryLlmOutput: LlmExplanationResponse | undefined;
     let retryValidationIssues: ExplanationValidationIssue[] | undefined;
     let fallbackOutput: LlmExplanationResponse | undefined;
+    let styleRepairOutput: ExplanationStyleRepairOutput | undefined;
     let validated;
 
     try {
@@ -211,6 +291,23 @@ export async function generateChoiceExplanations(
       }
 
       validationIssues = error.issues;
+      if (hasOnlySoftValidationIssues(error.issues)) {
+        const repaired = tryValidateAfterStyleRepair({
+          output: llmOutput,
+          sortedChoices,
+          validateContext,
+        });
+        styleRepairOutput = repaired.repairedOutput;
+        if (repaired.validated) {
+          validated = repaired.validated;
+          llmOutput = repaired.repairedOutput ?? llmOutput;
+        } else if (repaired.issues) {
+          validationIssues = repaired.issues;
+        }
+      }
+    }
+
+    if (!validated) {
       retryPrompt = buildRetryPrompt(prompt);
       retryLlmOutput = await requestExplanationJson(retryPrompt);
 
@@ -223,14 +320,37 @@ export async function generateChoiceExplanations(
         }
 
         retryValidationIssues = retryError.issues;
-        const ids = fallbackChoiceIds(retryError.issues, plans);
-        fallbackOutput = buildFallbackResponse({
-          baseOutput: retryLlmOutput,
-          plans,
-          features,
-          fallbackChoiceIds: ids,
-        });
-        validated = validateExplanations(fallbackOutput, sortedChoices, validateContext);
+        if (hasOnlySoftValidationIssues(retryError.issues)) {
+          const repaired = tryValidateAfterStyleRepair({
+            output: retryLlmOutput,
+            sortedChoices,
+            validateContext,
+          });
+          styleRepairOutput = repaired.repairedOutput;
+          if (repaired.validated) {
+            validated = repaired.validated;
+            retryLlmOutput = repaired.repairedOutput ?? retryLlmOutput;
+            llmOutput = retryLlmOutput;
+          } else if (repaired.issues) {
+            retryValidationIssues = repaired.issues;
+          }
+        }
+
+        if (!validated && retryValidationIssues && hasHardValidationIssue(retryValidationIssues)) {
+          const ids = fallbackChoiceIds(retryValidationIssues, plans);
+          fallbackOutput = buildFallbackResponse({
+            baseOutput: retryLlmOutput,
+            plans,
+            features,
+            fallbackChoiceIds: ids,
+            reasonByChoiceId: fallbackReasonByChoiceId(retryValidationIssues),
+          });
+          validated = validateExplanations(fallbackOutput, sortedChoices, validateContext);
+        }
+
+        if (!validated) {
+          throw new ExplanationValidationError(retryValidationIssues ?? retryError.issues);
+        }
       }
     }
 
@@ -250,6 +370,7 @@ export async function generateChoiceExplanations(
       retryLlmOutput,
       retryValidationIssues,
       fallbackOutput,
+      styleRepairOutput,
       validated,
     });
 

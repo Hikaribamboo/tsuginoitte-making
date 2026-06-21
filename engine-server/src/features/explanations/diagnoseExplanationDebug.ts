@@ -81,8 +81,18 @@ type DebugInput = {
 
 type ValidationIssue = {
   code?: string;
+  severity?: string;
   choiceId?: number;
   message?: string;
+};
+
+type StyleRepairOutput = {
+  repairedChoiceIds?: number[];
+};
+
+type FallbackDebugOutput = LlmExplanationResponse & {
+  replacedChoiceIds?: number[];
+  reasonByChoiceId?: Record<string, string[]>;
 };
 
 const DEBUG_FILES = [
@@ -100,6 +110,7 @@ const DEBUG_FILES = [
   'validation-issues.json',
   'retry-validation-issues.json',
   'fallback-output.json',
+  'style-repair-output.json',
 ] as const;
 
 const REQUIRED_SUMMARY_CODES: ExplanationDiagnosticCode[] = [
@@ -358,8 +369,12 @@ function addValidationIssueDiagnostics(
       addDiagnostic(diagnostics, 'too_many_sentences', 'warning', issue.message ?? '3文以上になっている');
     } else if (issue.code === 'bad_phrase') {
       addDiagnostic(diagnostics, 'style_bad_phrase', 'warning', issue.message ?? '禁止・弱い表現が含まれている');
+    } else if (issue.code === 'unsupported_claim') {
+      addDiagnostic(diagnostics, 'unsupported_claim', 'warning', issue.message ?? '強い評価・終局表現の根拠が不足している');
     } else if (issue.code === 'unsupported_escape_phrase') {
       addDiagnostic(diagnostics, 'unsupported_escape', 'warning', issue.message ?? '逃げ表現の根拠が不足している');
+    } else if (issue.code === 'unsupported_counterattack_phrase') {
+      addDiagnostic(diagnostics, 'unsupported_counterattack', 'warning', issue.message ?? '反撃表現の根拠が不足している');
     } else if (issue.code === 'unsupported_risk_phrase') {
       addDiagnostic(diagnostics, 'unsupported_king_danger', 'warning', issue.message ?? '玉の危険表現の根拠が不足している');
     } else if (issue.code === 'missing_required_continuation_phrase') {
@@ -590,7 +605,8 @@ export async function diagnoseExplanationDebugDirectory(
   const plans = await readJsonIfExists<ExplanationPlan[]>(debugDir, 'plans.json');
   const llmOutput = await readJsonIfExists<LlmExplanationResponse>(debugDir, 'llm-output.json');
   const retryLlmOutput = await readJsonIfExists<LlmExplanationResponse>(debugDir, 'retry-llm-output.json');
-  const fallbackOutput = await readJsonIfExists<LlmExplanationResponse>(debugDir, 'fallback-output.json');
+  const fallbackOutput = await readJsonIfExists<FallbackDebugOutput>(debugDir, 'fallback-output.json');
+  const styleRepairOutput = await readJsonIfExists<StyleRepairOutput>(debugDir, 'style-repair-output.json');
   const validated = await readJsonIfExists<LlmExplanationResponse>(debugDir, 'validated.json');
   const validationIssues = await readJsonIfExists<ValidationIssue[]>(debugDir, 'validation-issues.json');
   const retryValidationIssues = await readJsonIfExists<ValidationIssue[]>(debugDir, 'retry-validation-issues.json');
@@ -605,6 +621,7 @@ export async function diagnoseExplanationDebugDirectory(
     ...(validationIssues ?? []),
     ...(retryValidationIssues ?? []),
   ]);
+  const repairedChoiceIds = new Set(styleRepairOutput?.repairedChoiceIds ?? []);
   const correctChoiceId = input?.problem?.correct_choice_id;
   const correctMoveFacts = correctChoiceId === undefined ? undefined : moveFactsByChoiceId.get(correctChoiceId);
   const correctPositionFeatures = correctChoiceId === undefined ? undefined : positionFeaturesByChoiceId.get(correctChoiceId);
@@ -616,7 +633,7 @@ export async function diagnoseExplanationDebugDirectory(
   const repeatedWrongChoiceIds = repeatedWrongTemplates(choices, input, plansByChoiceId);
   const labelStartCount = choices.filter((choice) => LABEL_START_PATTERN.test(choice.explanation.trim())).length;
   const labelStartOverused = choices.length > 1 && labelStartCount >= Math.ceil(choices.length / 2);
-  const fallbackUsed = filesPresent.includes('fallback-output.json');
+  const fallbackChoiceIds = new Set(fallbackOutput?.replacedChoiceIds ?? []);
   const retryUsed = filesPresent.includes('retry-llm-output.json') || filesPresent.includes('retry-prompt.txt');
 
   const report: ExplanationDiagnosticsReport = {
@@ -635,8 +652,9 @@ export async function diagnoseExplanationDebugDirectory(
       contrastFeatures: contrastFeaturesByChoiceId.get(choice.choiceId),
       plan: plansByChoiceId.get(choice.choiceId),
       correctPhrases,
-      validationIssues: allValidationIssuesByChoiceId.get(choice.choiceId) ?? [],
-      fallbackUsed,
+      validationIssues: (allValidationIssuesByChoiceId.get(choice.choiceId) ?? [])
+        .filter((issue) => !(issue.code === 'bad_phrase' && repairedChoiceIds.has(choice.choiceId))),
+      fallbackUsed: fallbackChoiceIds.has(choice.choiceId),
       retryUsed,
       repeatedWrongTemplate: repeatedWrongChoiceIds.has(choice.choiceId),
       labelStartOverused,

@@ -1,5 +1,10 @@
 import type { ChoiceEvalFeature, ExplanationPlan, LlmExplanationChoice, LlmExplanationResponse } from './types.js';
 
+export type FallbackExplanationOutput = LlmExplanationResponse & {
+  replacedChoiceIds: number[];
+  reasonByChoiceId: Record<string, string[]>;
+};
+
 function cleanLabel(label: string): string {
   return label.replace(/打$/, '');
 }
@@ -37,9 +42,10 @@ export function buildFallbackExplanation(plan: ExplanationPlan, feature: ChoiceE
   const normalizedContinuation = continuation ? normalizeContinuationPhrase(continuation) : null;
   const moveFact = firstNonEmpty(plan.sourceSignals.moveFacts?.factPhrases);
   const positionPhrase = firstNonEmpty(plan.sourceSignals.positionFeatures?.summaryPhrases);
+  const contrastOwnStrength = firstNonEmpty(plan.sourceSignals.contrastFeatures?.ownStrengths);
 
   if (plan.isCorrect) {
-    const firstPhrase = moveFact ?? positionPhrase;
+    const firstPhrase = moveFact ?? positionPhrase ?? contrastOwnStrength;
     if (firstPhrase && normalizedContinuation) {
       return `${firstPhrase}。${normalizedContinuation}。`;
     }
@@ -77,7 +83,8 @@ export function buildFallbackResponse(params: {
   plans: ExplanationPlan[];
   features: ChoiceEvalFeature[];
   fallbackChoiceIds: Set<number>;
-}): LlmExplanationResponse {
+  reasonByChoiceId?: Map<number, string[]>;
+}): FallbackExplanationOutput {
   const existingByChoiceId = new Map<number, string>();
   for (const choice of params.baseOutput?.choices ?? []) {
     if (typeof choice.choice_id === 'number' && typeof choice.explanation === 'string') {
@@ -85,12 +92,18 @@ export function buildFallbackResponse(params: {
     }
   }
 
+  const replacedChoiceIds: number[] = [];
+  const reasonByChoiceId: Record<string, string[]> = {};
   const choices: LlmExplanationChoice[] = params.plans
     .slice()
     .sort((a, b) => a.choiceId - b.choiceId)
     .map((plan) => {
       const feature = params.features.find((item) => item.choice_id === plan.choiceId);
       const shouldFallback = params.fallbackChoiceIds.has(plan.choiceId) || !existingByChoiceId.has(plan.choiceId);
+      if (shouldFallback || !feature) {
+        replacedChoiceIds.push(plan.choiceId);
+        reasonByChoiceId[String(plan.choiceId)] = params.reasonByChoiceId?.get(plan.choiceId) ?? ['validation_failed'];
+      }
       return {
         choice_id: plan.choiceId,
         explanation: shouldFallback || !feature
@@ -105,5 +118,5 @@ export function buildFallbackResponse(params: {
       };
     });
 
-  return { choices };
+  return { replacedChoiceIds, reasonByChoiceId, choices };
 }
