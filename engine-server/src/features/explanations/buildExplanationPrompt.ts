@@ -103,6 +103,14 @@ export function buildExplanationPrompt(
               movedPieceCapturesAfterResponse: plan.sourceSignals.lineContinuationFeatures.movedPieceCapturesAfterResponse,
             }
           : null,
+        line_trajectory_features: plan.sourceSignals.lineTrajectoryFeatures
+          ? {
+              materialTrend: plan.sourceSignals.lineTrajectoryFeatures.materialTrend,
+              pieceActivityTrend: plan.sourceSignals.lineTrajectoryFeatures.pieceActivityTrend,
+              kingSafetyTrend: plan.sourceSignals.lineTrajectoryFeatures.kingSafetyTrend,
+              usableEvidence: plan.sourceSignals.lineTrajectoryFeatures.usableEvidence,
+            }
+          : null,
         contrast_features: plan.sourceSignals.contrastFeatures
           ? {
               choiceId: plan.sourceSignals.contrastFeatures.choiceId,
@@ -137,6 +145,13 @@ export function buildExplanationPrompt(
   const instructions = [
     '特徴量の使い方:',
     '- style_examples の短さ，語尾，直接さに寄せる',
+    '- 解説に使う材料は line_trajectory_features.usableEvidence を優先する',
+    '- usableEvidence の evidenceLevel が direct または line_observed のものは本文に使ってよい',
+    '- usableEvidence の heuristic は断定を弱める',
+    '- usableEvidence の eval_supported は単独では使わず，盤面特徴と組み合わせる',
+    '- usableEvidence の weak は，ほかに材料がない場合だけ使う',
+    '- evalSupport は全体評価の補助情報であり，単独の理由として使わない',
+    '- 評価値だけを根拠に，駒得・玉の固さ・攻めが続くとは断定しない',
     '- まず move_facts.factPhrases を見る',
     '- 次に line_continuation_features.continuationPhrases を見る',
     '- 次に position_features.summaryPhrases を見る',

@@ -3,6 +3,7 @@ import type {
   DraftChoiceContrastDiagnosis,
   DraftChoiceContrastFeatures,
   DraftLineContinuationFeatures,
+  DraftLineTrajectoryFeatures,
   DraftMoveFacts,
   DraftPositionFeatures,
   DraftProblem,
@@ -43,6 +44,16 @@ function strengthPhrases(params: {
   return params.includeContinuationFirst
     ? unique([...continuation, ...facts, ...material, ...activity])
     : unique([...facts, ...material, ...activity, ...continuation]);
+}
+
+function trajectoryStrengthPhrases(lineTrajectoryFeatures?: DraftLineTrajectoryFeatures): string[] {
+  return unique([
+    ...(lineTrajectoryFeatures?.materialTrend.phrases ?? []),
+    ...(lineTrajectoryFeatures?.pieceActivityTrend.phrases ?? []),
+    ...(lineTrajectoryFeatures?.usableEvidence
+      .filter((item) => item.confidence !== 'low' && item.evidenceLevel !== 'weak')
+      .map((item) => item.phrase) ?? []),
+  ]);
 }
 
 function hasHighValueAttack(moveFacts?: DraftMoveFacts, positionFeatures?: DraftPositionFeatures): boolean {
@@ -139,18 +150,27 @@ function missingPhrases(params: {
   ownPositionFeatures?: DraftPositionFeatures;
   correctLineContinuationFeatures?: DraftLineContinuationFeatures;
   ownLineContinuationFeatures?: DraftLineContinuationFeatures;
+  correctLineTrajectoryFeatures?: DraftLineTrajectoryFeatures;
+  ownLineTrajectoryFeatures?: DraftLineTrajectoryFeatures;
 }): string[] {
   const result: string[] = [];
   const correctHasContinuation = hasContinuation(params.correctLineContinuationFeatures);
   const ownHasContinuation = hasContinuation(params.ownLineContinuationFeatures);
   const correctHasHighValueAttack = hasHighValueAttack(params.correctMoveFacts, params.correctPositionFeatures);
   const ownHasHighValueAttack = hasHighValueAttack(params.ownMoveFacts, params.ownPositionFeatures);
+  const correctTrajectoryHasAttack = (params.correctLineTrajectoryFeatures?.pieceActivityTrend.phrases.length ?? 0) > 0;
+  const ownTrajectoryHasAttack = (params.ownLineTrajectoryFeatures?.pieceActivityTrend.phrases.length ?? 0) > 0;
+  const correctTrajectoryHasMaterial = (params.correctLineTrajectoryFeatures?.materialTrend.phrases.length ?? 0) > 0;
+  const ownTrajectoryHasMaterial = (params.ownLineTrajectoryFeatures?.materialTrend.phrases.length ?? 0) > 0;
 
-  if (correctHasContinuation && !ownHasContinuation) {
+  if ((correctHasContinuation || correctTrajectoryHasAttack) && !ownHasContinuation && !ownTrajectoryHasAttack) {
     result.push('正解手のような後続の攻めがない');
   }
-  if (correctHasHighValueAttack && !ownHasHighValueAttack) {
+  if ((correctHasHighValueAttack || correctTrajectoryHasAttack) && !ownHasHighValueAttack && !ownTrajectoryHasAttack) {
     result.push('正解手ほど大きな当たりがない');
+  }
+  if (correctTrajectoryHasMaterial && !ownTrajectoryHasMaterial) {
+    result.push('正解手ほど駒得を見込めない');
   }
   if (hasPromotionContinuation(params.correctLineContinuationFeatures) && !hasPromotionContinuation(params.ownLineContinuationFeatures)) {
     result.push('正解手のような角成が残らない');
@@ -174,6 +194,8 @@ function diagnose(params: {
   ownPositionFeatures?: DraftPositionFeatures;
   correctLineContinuationFeatures?: DraftLineContinuationFeatures;
   ownLineContinuationFeatures?: DraftLineContinuationFeatures;
+  correctLineTrajectoryFeatures?: DraftLineTrajectoryFeatures;
+  ownLineTrajectoryFeatures?: DraftLineTrajectoryFeatures;
 }): DraftChoiceContrastDiagnosis {
   if (params.feature?.isCorrect) return 'unclear';
   if (hasKingSafetyRisk(params.ownPositionFeatures)) return 'king_safety_risk';
@@ -184,6 +206,10 @@ function diagnose(params: {
   const correctHasHighValueAttack = hasHighValueAttack(params.correctMoveFacts, params.correctPositionFeatures);
   const correctHasPromotionOrCapture = hasPromotionOrCaptureContinuation(params.correctLineContinuationFeatures);
   const ownHasPromotionOrCapture = hasPromotionOrCaptureContinuation(params.ownLineContinuationFeatures);
+  const correctTrajectoryHasAttack = (params.correctLineTrajectoryFeatures?.pieceActivityTrend.phrases.length ?? 0) > 0;
+  const ownTrajectoryHasAttack = (params.ownLineTrajectoryFeatures?.pieceActivityTrend.phrases.length ?? 0) > 0;
+  const correctTrajectoryHasMaterial = (params.correctLineTrajectoryFeatures?.materialTrend.phrases.length ?? 0) > 0;
+  const ownTrajectoryHasMaterial = (params.ownLineTrajectoryFeatures?.materialTrend.phrases.length ?? 0) > 0;
 
   if (isSmallGain(params.ownMoveFacts, params.ownPositionFeatures) && correctHasHighValueAttack && !ownHasHighValueAttack) {
     return 'low_value_gain_vs_major_piece_attack';
@@ -201,9 +227,9 @@ function diagnose(params: {
   if (ownHasHighValueAttack && correctHasContinuation && !ownHasContinuation) {
     return 'attacks_piece_but_no_followup';
   }
-  if (correctHasHighValueAttack && !ownHasHighValueAttack) return 'no_high_value_attack';
-  if (correctHasContinuation && !ownHasContinuation) return 'no_continuation_compared_to_correct';
-  if (correctHasPromotionOrCapture && !ownHasPromotionOrCapture) return 'promotion_or_capture_missing';
+  if ((correctHasHighValueAttack || correctTrajectoryHasAttack) && !ownHasHighValueAttack && !ownTrajectoryHasAttack) return 'no_high_value_attack';
+  if ((correctHasContinuation || correctTrajectoryHasAttack) && !ownHasContinuation && !ownTrajectoryHasAttack) return 'no_continuation_compared_to_correct';
+  if ((correctHasPromotionOrCapture || correctTrajectoryHasMaterial) && !ownHasPromotionOrCapture && !ownTrajectoryHasMaterial) return 'promotion_or_capture_missing';
   if (
     materialGain(params.correctPositionFeatures) > materialGain(params.ownPositionFeatures) &&
     (correctHasHighValueAttack || correctHasContinuation)
@@ -280,17 +306,19 @@ export function extractDraftContrastFeaturesForChoices(params: {
   moveFactsByChoiceId: Map<number, DraftMoveFacts>;
   positionFeaturesByChoiceId: Map<number, DraftPositionFeatures>;
   lineContinuationFeaturesByChoiceId: Map<number, DraftLineContinuationFeatures>;
+  lineTrajectoryFeaturesByChoiceId?: Map<number, DraftLineTrajectoryFeatures>;
 }): DraftChoiceContrastFeatures[] {
   const correctChoiceId = params.problem.correct_choice_id;
   const correctMoveFacts = params.moveFactsByChoiceId.get(correctChoiceId);
   const correctPositionFeatures = params.positionFeaturesByChoiceId.get(correctChoiceId);
   const correctLineContinuationFeatures = params.lineContinuationFeaturesByChoiceId.get(correctChoiceId);
+  const correctLineTrajectoryFeatures = params.lineTrajectoryFeaturesByChoiceId?.get(correctChoiceId);
   const correctStrengths = strengthPhrases({
     moveFacts: correctMoveFacts,
     positionFeatures: correctPositionFeatures,
     lineContinuationFeatures: correctLineContinuationFeatures,
     includeContinuationFirst: true,
-  });
+  }).concat(trajectoryStrengthPhrases(correctLineTrajectoryFeatures));
   const featuresByChoiceId = new Map(params.features.map((feature) => [feature.choice_id, feature]));
 
   return params.choices.map((choice) => {
@@ -298,11 +326,12 @@ export function extractDraftContrastFeaturesForChoices(params: {
     const ownMoveFacts = params.moveFactsByChoiceId.get(choice.choice_id);
     const ownPositionFeatures = params.positionFeaturesByChoiceId.get(choice.choice_id);
     const ownLineContinuationFeatures = params.lineContinuationFeaturesByChoiceId.get(choice.choice_id);
+    const ownLineTrajectoryFeatures = params.lineTrajectoryFeaturesByChoiceId?.get(choice.choice_id);
     const ownStrengths = strengthPhrases({
       moveFacts: ownMoveFacts,
       positionFeatures: ownPositionFeatures,
       lineContinuationFeatures: ownLineContinuationFeatures,
-    });
+    }).concat(trajectoryStrengthPhrases(ownLineTrajectoryFeatures));
     const missingComparedToCorrect = feature?.isCorrect
       ? []
       : missingPhrases({
@@ -312,6 +341,8 @@ export function extractDraftContrastFeaturesForChoices(params: {
           ownPositionFeatures,
           correctLineContinuationFeatures,
           ownLineContinuationFeatures,
+          correctLineTrajectoryFeatures,
+          ownLineTrajectoryFeatures,
         });
     const diagnosis = diagnose({
       feature,
@@ -321,6 +352,8 @@ export function extractDraftContrastFeaturesForChoices(params: {
       ownPositionFeatures,
       correctLineContinuationFeatures,
       ownLineContinuationFeatures,
+      correctLineTrajectoryFeatures,
+      ownLineTrajectoryFeatures,
     });
     const phrases = feature?.isCorrect ? [] : contrastPhrases({
       diagnosis,

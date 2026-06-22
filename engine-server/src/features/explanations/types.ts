@@ -211,6 +211,104 @@ export type DraftChoiceContrastFeatures = {
   confidence: 'none' | 'low' | 'medium';
 };
 
+export type DraftFeatureCategory =
+  | 'material'
+  | 'pieceActivity'
+  | 'kingSafety'
+  | 'lineContinuation'
+  | 'contrast';
+
+export type DraftFeatureEvidenceLevel =
+  | 'direct'
+  | 'line_observed'
+  | 'heuristic'
+  | 'eval_supported'
+  | 'weak'
+  | 'none';
+
+export type DraftUsableExplanationEvidence = {
+  category: DraftFeatureCategory;
+  phrase: string;
+  evidenceLevel: DraftFeatureEvidenceLevel;
+  confidence: 'low' | 'medium' | 'high';
+  source:
+    | 'move_facts'
+    | 'position_features'
+    | 'line_trajectory'
+    | 'contrast_features';
+  ply?: number;
+  evalSupport?: 'positive' | 'negative' | 'neutral' | 'unknown';
+};
+
+export type DraftLineSnapshot = {
+  ply: number;
+  moveUsi: string | null;
+  moveLabel: string | null;
+
+  material: {
+    ownMaterialScore: number;
+    opponentMaterialScore: number;
+    materialBalanceFromChoiceSide: number;
+    capturedPieces: string[];
+    promotedPieces: string[];
+  };
+
+  pieceActivity: {
+    attackedPieces: Array<{
+      square: string;
+      piece: string;
+      value: number;
+    }>;
+    attackedHighValuePieces: Array<{
+      square: string;
+      piece: string;
+      value: number;
+    }>;
+    longRangePieceActivityCount: number;
+    ownAttacksNearOpponentKing: number | null;
+  };
+
+  kingSafety: {
+    ownKingSquare: string | null;
+    opponentKingSquare: string | null;
+    ownKingNearbyDefenders: number | null;
+    opponentAttacksNearOwnKing: number | null;
+    ownAttacksNearOpponentKing: number | null;
+  };
+};
+
+export type DraftLineTrajectoryFeatures = {
+  choiceId: number;
+
+  snapshots: DraftLineSnapshot[];
+
+  materialTrend: {
+    afterChoiceDelta: number | null;
+    afterPly3Delta: number | null;
+    afterPly5Delta: number | null;
+    phrases: string[];
+    confidence: 'none' | 'low' | 'medium' | 'high';
+  };
+
+  pieceActivityTrend: {
+    highValueAttackCreated: boolean;
+    highValueAttackMaintained: boolean;
+    highValueAttackLost: boolean;
+    attackNearOpponentKingDeltaPly5: number | null;
+    phrases: string[];
+    confidence: 'none' | 'low' | 'medium' | 'high';
+  };
+
+  kingSafetyTrend: {
+    ownKingSafetyDeltaPly5: number | null;
+    opponentKingPressureDeltaPly5: number | null;
+    phrases: string[];
+    confidence: 'none' | 'low' | 'medium';
+  };
+
+  usableEvidence: DraftUsableExplanationEvidence[];
+};
+
 export type ExplanationPlan = {
   problemId: number;
   displayNo: number | null;
@@ -243,6 +341,7 @@ export type ExplanationPlan = {
     positionFeatures?: DraftPositionFeatures;
     lineContinuationFeatures?: DraftLineContinuationFeatures;
     contrastFeatures?: DraftChoiceContrastFeatures;
+    lineTrajectoryFeatures?: DraftLineTrajectoryFeatures;
   };
 };
 

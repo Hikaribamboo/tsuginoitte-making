@@ -2,6 +2,7 @@ import type {
   ChoiceEvalFeature,
   DraftChoiceContrastFeatures,
   DraftLineContinuationFeatures,
+  DraftLineTrajectoryFeatures,
   DraftMoveFacts,
   DraftPositionFeatures,
   DraftProblem,
@@ -15,6 +16,7 @@ import { extractDraftMoveFactsForChoices } from './extractDraftMoveFacts.js';
 import { extractDraftPositionFeaturesForChoices } from './extractDraftPositionFeatures.js';
 import { extractDraftLineContinuationFeaturesForChoices } from './extractDraftLineContinuationFeatures.js';
 import { extractDraftContrastFeaturesForChoices } from './extractDraftContrastFeatures.js';
+import { extractDraftLineTrajectoryFeaturesForChoices } from './extractDraftLineTrajectoryFeatures.js';
 
 function getFeature(features: ChoiceEvalFeature[], choiceId: number): ChoiceEvalFeature {
   const feature = features.find((item) => item.choice_id === choiceId);
@@ -255,6 +257,37 @@ function refinePrimaryReasonWithContrastFeatures(params: {
   return primaryReason;
 }
 
+function addContrastEvidenceToLineTrajectory(
+  lineTrajectoryFeatures: DraftLineTrajectoryFeatures | undefined,
+  contrastFeatures: DraftChoiceContrastFeatures | undefined,
+  feature: ChoiceEvalFeature | undefined,
+): void {
+  if (!lineTrajectoryFeatures || !contrastFeatures || contrastFeatures.confidence === 'none') return;
+
+  const existing = new Set(lineTrajectoryFeatures.usableEvidence.map((item) => item.phrase));
+  const phrases = [
+    ...contrastFeatures.contrastPhrases,
+    ...contrastFeatures.missingComparedToCorrect,
+  ];
+  for (const phrase of phrases) {
+    const normalized = phrase.trim();
+    if (!normalized || existing.has(normalized)) continue;
+    existing.add(normalized);
+    lineTrajectoryFeatures.usableEvidence.push({
+      category: 'contrast',
+      phrase: normalized,
+      evidenceLevel: contrastFeatures.confidence === 'medium' ? 'eval_supported' : 'weak',
+      confidence: contrastFeatures.confidence === 'medium' ? 'medium' : 'low',
+      source: 'contrast_features',
+      evalSupport: feature?.isCorrect
+        ? 'positive'
+        : feature?.quality === 'bad' || feature?.quality === 'blunder' || (feature?.gapFromBest ?? 0) >= 200
+          ? 'negative'
+          : 'neutral',
+    });
+  }
+}
+
 function buildReasonDetail(params: {
   choice: DraftProblemChoice;
   isCorrect: boolean;
@@ -467,8 +500,8 @@ export function buildDraftExplanationPlansForProblem(
       featuresForChoice,
     ]),
   );
-  const contrastFeaturesByChoiceId = new Map<number, DraftChoiceContrastFeatures>(
-    extractDraftContrastFeaturesForChoices({
+  const lineTrajectoryFeaturesByChoiceId = new Map<number, DraftLineTrajectoryFeatures>(
+    extractDraftLineTrajectoryFeaturesForChoices({
       problem,
       choices: sortedChoices,
       features,
@@ -477,6 +510,24 @@ export function buildDraftExplanationPlansForProblem(
       lineContinuationFeaturesByChoiceId,
     }).map((featuresForChoice) => [featuresForChoice.choiceId, featuresForChoice]),
   );
+  const contrastFeaturesByChoiceId = new Map<number, DraftChoiceContrastFeatures>(
+    extractDraftContrastFeaturesForChoices({
+      problem,
+      choices: sortedChoices,
+      features,
+      moveFactsByChoiceId,
+      positionFeaturesByChoiceId,
+      lineContinuationFeaturesByChoiceId,
+      lineTrajectoryFeaturesByChoiceId,
+    }).map((featuresForChoice) => [featuresForChoice.choiceId, featuresForChoice]),
+  );
+  for (const choice of sortedChoices) {
+    addContrastEvidenceToLineTrajectory(
+      lineTrajectoryFeaturesByChoiceId.get(choice.choice_id),
+      contrastFeaturesByChoiceId.get(choice.choice_id),
+      features.find((feature) => feature.choice_id === choice.choice_id),
+    );
+  }
 
   return sortedChoices.map((choice) => {
     const feature = getFeature(features, choice.choice_id);
@@ -484,6 +535,7 @@ export function buildDraftExplanationPlansForProblem(
     const moveFacts = moveFactsByChoiceId.get(choice.choice_id);
     const positionFeatures = positionFeaturesByChoiceId.get(choice.choice_id);
     const lineContinuationFeatures = lineContinuationFeaturesByChoiceId.get(choice.choice_id);
+    const lineTrajectoryFeatures = lineTrajectoryFeaturesByChoiceId.get(choice.choice_id);
     const contrastFeatures = contrastFeaturesByChoiceId.get(choice.choice_id);
     const isCorrect = feature.isCorrect;
 
@@ -563,6 +615,7 @@ export function buildDraftExplanationPlansForProblem(
         moveFacts,
         positionFeatures,
         lineContinuationFeatures,
+        lineTrajectoryFeatures,
         contrastFeatures,
       },
     };

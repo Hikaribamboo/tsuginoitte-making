@@ -4,6 +4,7 @@ import path from 'node:path';
 import type {
   DraftChoiceContrastFeatures,
   DraftLineContinuationFeatures,
+  DraftLineTrajectoryFeatures,
   DraftMoveFacts,
   DraftPositionFeatures,
   ExplanationPlan,
@@ -25,6 +26,10 @@ export type ExplanationDiagnosticCode =
   | 'overstated_attack_disappears'
   | 'vague_expectation_phrase'
   | 'unsupported_large_gain_comparison'
+  | 'low_usable_evidence'
+  | 'missing_material_trajectory'
+  | 'missing_activity_trajectory'
+  | 'missing_king_safety_trajectory'
   | 'missing_contrast_feature'
   | 'missing_line_continuation'
   | 'repetitive_wrong_choice_template'
@@ -106,6 +111,9 @@ const DEBUG_FILES = [
   'move-facts.json',
   'position-features.json',
   'line-continuation-features.json',
+  'line-trajectory-features.json',
+  'usable-evidence.json',
+  'feature-coverage-report.json',
   'contrast-features.json',
   'plans.json',
   'prompt.txt',
@@ -129,6 +137,10 @@ const REQUIRED_SUMMARY_CODES: ExplanationDiagnosticCode[] = [
   'overstated_attack_disappears',
   'vague_expectation_phrase',
   'unsupported_large_gain_comparison',
+  'low_usable_evidence',
+  'missing_material_trajectory',
+  'missing_activity_trajectory',
+  'missing_king_safety_trajectory',
   'style_bad_phrase',
   'fallback_used',
   'retry_used',
@@ -328,6 +340,43 @@ function continuationEvidence(lineContinuation: DraftLineContinuationFeatures | 
   ].filter((phrase) => phrase.trim());
 }
 
+function usableEvidenceForChoice(lineTrajectory: DraftLineTrajectoryFeatures | undefined): string[] {
+  return (lineTrajectory?.usableEvidence ?? [])
+    .filter((item) => item.evidenceLevel !== 'weak' && item.evidenceLevel !== 'none')
+    .map((item) => item.phrase)
+    .filter((phrase) => phrase.trim());
+}
+
+function hasMaterialTrajectory(lineTrajectory: DraftLineTrajectoryFeatures | undefined): boolean {
+  if (!lineTrajectory) return false;
+  return lineTrajectory.snapshots.some((snapshot) =>
+    snapshot.material.materialBalanceFromChoiceSide !== null ||
+    snapshot.material.capturedPieces.length > 0 ||
+    snapshot.material.promotedPieces.length > 0
+  );
+}
+
+function hasActivityTrajectory(lineTrajectory: DraftLineTrajectoryFeatures | undefined): boolean {
+  if (!lineTrajectory) return false;
+  return lineTrajectory.snapshots.some((snapshot) =>
+    snapshot.pieceActivity.attackedPieces.length > 0 ||
+    snapshot.pieceActivity.attackedHighValuePieces.length > 0 ||
+    snapshot.pieceActivity.longRangePieceActivityCount > 0 ||
+    snapshot.pieceActivity.ownAttacksNearOpponentKing !== null
+  );
+}
+
+function hasKingSafetyTrajectory(lineTrajectory: DraftLineTrajectoryFeatures | undefined): boolean {
+  if (!lineTrajectory) return false;
+  return lineTrajectory.snapshots.some((snapshot) =>
+    snapshot.kingSafety.ownKingSquare !== null ||
+    snapshot.kingSafety.opponentKingSquare !== null ||
+    snapshot.kingSafety.ownKingNearbyDefenders !== null ||
+    snapshot.kingSafety.opponentAttacksNearOwnKing !== null ||
+    snapshot.kingSafety.ownAttacksNearOpponentKing !== null
+  );
+}
+
 function hasContinuationPhrase(
   explanation: string,
   lineContinuation: DraftLineContinuationFeatures | undefined,
@@ -503,6 +552,7 @@ function diagnoseChoice(params: {
   moveFacts?: DraftMoveFacts;
   positionFeatures?: DraftPositionFeatures;
   lineContinuation?: DraftLineContinuationFeatures;
+  lineTrajectory?: DraftLineTrajectoryFeatures;
   contrastFeatures?: DraftChoiceContrastFeatures;
   plan?: ExplanationPlan;
   correctPhrases: string[];
@@ -520,6 +570,7 @@ function diagnoseChoice(params: {
     moveFacts,
     positionFeatures,
     lineContinuation,
+    lineTrajectory,
     contrastFeatures,
     plan,
     correctPhrases,
@@ -531,6 +582,7 @@ function diagnoseChoice(params: {
   } = params;
   const factPhrases = phraseEvidenceForChoice(moveFacts, positionFeatures);
   const ownContinuationEvidence = continuationEvidence(lineContinuation);
+  const usableEvidence = usableEvidenceForChoice(lineTrajectory);
   const contrastPhrases = contrastFeatures?.contrastPhrases ?? [];
   const ownStrengths = contrastFeatures?.ownStrengths ?? [];
   const contrastStrengths = [
@@ -551,6 +603,19 @@ function diagnoseChoice(params: {
 
   if (sentenceCount(explanation) > 2) {
     addDiagnostic(diagnostics, 'too_many_sentences', 'warning', '解説が3文以上になっている');
+  }
+
+  if (usableEvidence.length < 2) {
+    addDiagnostic(diagnostics, 'low_usable_evidence', 'warning', '本文に使える直接・line上の証拠が少ない');
+  }
+  if (!hasMaterialTrajectory(lineTrajectory)) {
+    addDiagnostic(diagnostics, 'missing_material_trajectory', 'warning', 'line上の駒損得推移が取れていない');
+  }
+  if (!hasActivityTrajectory(lineTrajectory)) {
+    addDiagnostic(diagnostics, 'missing_activity_trajectory', 'warning', 'line上の駒の効き推移が取れていない');
+  }
+  if (!hasKingSafetyTrajectory(lineTrajectory)) {
+    addDiagnostic(diagnostics, 'missing_king_safety_trajectory', 'info', 'line上の玉安全推移が取れていない');
   }
 
   const badPhrase = BAD_PHRASES.find((phrase) => explanation.includes(phrase));
@@ -739,6 +804,10 @@ export async function diagnoseExplanationDebugDirectory(
     debugDir,
     'line-continuation-features.json',
   );
+  const lineTrajectoryFeatures = await readJsonIfExists<DraftLineTrajectoryFeatures[]>(
+    debugDir,
+    'line-trajectory-features.json',
+  );
   const contrastFeatures = await readJsonIfExists<DraftChoiceContrastFeatures[]>(debugDir, 'contrast-features.json');
   const plans = await readJsonIfExists<ExplanationPlan[]>(debugDir, 'plans.json');
   const llmOutput = await readJsonIfExists<LlmExplanationResponse>(debugDir, 'llm-output.json');
@@ -753,6 +822,7 @@ export async function diagnoseExplanationDebugDirectory(
   const moveFactsByChoiceId = byChoiceId(moveFacts);
   const positionFeaturesByChoiceId = byChoiceId(positionFeatures);
   const lineContinuationByChoiceId = byChoiceId(lineContinuationFeatures);
+  const lineTrajectoryByChoiceId = byChoiceId(lineTrajectoryFeatures);
   const contrastFeaturesByChoiceId = byChoiceId(contrastFeatures);
   const plansByChoiceId = planByChoiceId(plans);
   const allValidationIssuesByChoiceId = validationIssuesByChoiceId([
@@ -787,6 +857,7 @@ export async function diagnoseExplanationDebugDirectory(
       moveFacts: moveFactsByChoiceId.get(choice.choiceId),
       positionFeatures: positionFeaturesByChoiceId.get(choice.choiceId),
       lineContinuation: lineContinuationByChoiceId.get(choice.choiceId),
+      lineTrajectory: lineTrajectoryByChoiceId.get(choice.choiceId),
       contrastFeatures: contrastFeaturesByChoiceId.get(choice.choiceId),
       plan: plansByChoiceId.get(choice.choiceId),
       correctPhrases,

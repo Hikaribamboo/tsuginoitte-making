@@ -40,6 +40,9 @@ async function writeExplanationDebugLogs(params: {
   positionFeatures?: unknown;
   lineContinuationFeatures?: unknown;
   contrastFeatures?: unknown;
+  lineTrajectoryFeatures?: unknown;
+  usableEvidence?: unknown;
+  featureCoverageReport?: unknown;
   prompt: string;
   llmOutput?: unknown;
   validationIssues?: unknown;
@@ -76,6 +79,15 @@ async function writeExplanationDebugLogs(params: {
   }
   if (params.contrastFeatures !== undefined) {
     await writeDebugJson(path.join(dir, 'contrast-features.json'), params.contrastFeatures);
+  }
+  if (params.lineTrajectoryFeatures !== undefined) {
+    await writeDebugJson(path.join(dir, 'line-trajectory-features.json'), params.lineTrajectoryFeatures);
+  }
+  if (params.usableEvidence !== undefined) {
+    await writeDebugJson(path.join(dir, 'usable-evidence.json'), params.usableEvidence);
+  }
+  if (params.featureCoverageReport !== undefined) {
+    await writeDebugJson(path.join(dir, 'feature-coverage-report.json'), params.featureCoverageReport);
   }
   await writeDebugText(path.join(dir, 'prompt.txt'), params.prompt);
 
@@ -132,6 +144,31 @@ function validationContext(plans: ReturnType<typeof buildDraftExplanationPlansFo
     requiredContinuationChoiceIds: plans
       .filter((plan) => plan.isCorrect && (plan.sourceSignals.lineContinuationFeatures?.continuationPhrases.length ?? 0) > 0)
       .map((plan) => plan.choiceId),
+  };
+}
+
+function featureCoverageReport(problemId: number, plans: ReturnType<typeof buildDraftExplanationPlansForProblem>) {
+  return {
+    problemId,
+    choices: plans.map((plan) => {
+      const evidence = plan.sourceSignals.lineTrajectoryFeatures?.usableEvidence ?? [];
+      const byCategory = evidence.reduce<Record<string, number>>((acc, item) => {
+        acc[item.category] = (acc[item.category] ?? 0) + 1;
+        return acc;
+      }, {
+        material: 0,
+        pieceActivity: 0,
+        kingSafety: 0,
+        lineContinuation: 0,
+        contrast: 0,
+      });
+      return {
+        choiceId: plan.choiceId,
+        usableEvidenceCount: evidence.length,
+        byCategory,
+        highOrMediumEvidenceCount: evidence.filter((item) => item.confidence === 'high' || item.confidence === 'medium').length,
+      };
+    }),
   };
 }
 
@@ -254,6 +291,12 @@ export async function generateChoiceExplanations(
   const positionFeatures = plans.map((plan) => plan.sourceSignals.positionFeatures).filter(Boolean);
   const lineContinuationFeatures = plans.map((plan) => plan.sourceSignals.lineContinuationFeatures).filter(Boolean);
   const contrastFeatures = plans.map((plan) => plan.sourceSignals.contrastFeatures).filter(Boolean);
+  const lineTrajectoryFeatures = plans.map((plan) => plan.sourceSignals.lineTrajectoryFeatures).filter(Boolean);
+  const usableEvidence = plans.map((plan) => ({
+    choiceId: plan.choiceId,
+    usableEvidence: plan.sourceSignals.lineTrajectoryFeatures?.usableEvidence ?? [],
+  }));
+  const coverageReport = featureCoverageReport(input.problem.id, plans);
   const prompt = buildExplanationPrompt(input.problem, sortedChoices, features, plans);
   const validateContext = validationContext(plans);
 
@@ -363,6 +406,9 @@ export async function generateChoiceExplanations(
       positionFeatures,
       lineContinuationFeatures,
       contrastFeatures,
+      lineTrajectoryFeatures,
+      usableEvidence,
+      featureCoverageReport: coverageReport,
       prompt,
       llmOutput,
       validationIssues,
