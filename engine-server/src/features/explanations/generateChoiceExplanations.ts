@@ -156,33 +156,70 @@ function validationContext(plans: ReturnType<typeof buildDraftExplanationPlansFo
 }
 
 function featureCoverageReport(problemId: number, plans: ReturnType<typeof buildDraftExplanationPlansForProblem>) {
+  const choices = plans.map((plan) => {
+    const evidence = plan.sourceSignals.lineTrajectoryFeatures?.usableEvidence ?? [];
+    const chains = plan.sourceSignals.lineTrajectoryFeatures?.evidenceChains ?? [];
+    const byCategory = evidence.reduce<Record<string, number>>((acc, item) => {
+      acc[item.category] = (acc[item.category] ?? 0) + 1;
+      return acc;
+    }, {
+      material: 0,
+      pieceActivity: 0,
+      kingSafety: 0,
+      lineContinuation: 0,
+      contrast: 0,
+      threat: 0,
+      defense: 0,
+    });
+    const chainByCategory = chains.reduce<Record<string, number>>((acc, chain) => {
+      acc[chain.category] = (acc[chain.category] ?? 0) + 1;
+      return acc;
+    }, {
+      material: 0,
+      pieceActivity: 0,
+      kingSafety: 0,
+      lineContinuation: 0,
+      contrast: 0,
+      threat: 0,
+      defense: 0,
+    });
+    return {
+      choiceId: plan.choiceId,
+      usableEvidenceCount: evidence.length,
+      evidenceChainCount: chains.length,
+      highOrMediumEvidenceChainCount: chains.filter((chain) =>
+        chain.confidence === 'high' || chain.confidence === 'medium'
+      ).length,
+      byCategory,
+      chainByCategory,
+      highOrMediumEvidenceCount: evidence.filter((item) => item.confidence === 'high' || item.confidence === 'medium').length,
+    };
+  });
+  const chainCategoryTotals = choices.reduce<Record<string, number>>((acc, choice) => {
+    for (const [category, count] of Object.entries(choice.chainByCategory)) {
+      acc[category] = (acc[category] ?? 0) + count;
+    }
+    return acc;
+  }, {
+    material: 0,
+    pieceActivity: 0,
+    kingSafety: 0,
+    lineContinuation: 0,
+    contrast: 0,
+    threat: 0,
+    defense: 0,
+  });
   return {
     problemId,
-    choices: plans.map((plan) => {
-      const evidence = plan.sourceSignals.lineTrajectoryFeatures?.usableEvidence ?? [];
-      const byCategory = evidence.reduce<Record<string, number>>((acc, item) => {
-        acc[item.category] = (acc[item.category] ?? 0) + 1;
-        return acc;
-      }, {
-        material: 0,
-        pieceActivity: 0,
-        kingSafety: 0,
-        lineContinuation: 0,
-        contrast: 0,
-        threat: 0,
-        defense: 0,
-      });
-      return {
-        choiceId: plan.choiceId,
-        usableEvidenceCount: evidence.length,
-        evidenceChainCount: plan.sourceSignals.lineTrajectoryFeatures?.evidenceChains.length ?? 0,
-        highOrMediumEvidenceChainCount: plan.sourceSignals.lineTrajectoryFeatures?.evidenceChains.filter((chain) =>
-          chain.confidence === 'high' || chain.confidence === 'medium'
-        ).length ?? 0,
-        byCategory,
-        highOrMediumEvidenceCount: evidence.filter((item) => item.confidence === 'high' || item.confidence === 'medium').length,
-      };
-    }),
+    chainCategoryTotals,
+    avgEvidenceChainsPerChoice: choices.length === 0
+      ? 0
+      : choices.reduce((sum, choice) => sum + choice.evidenceChainCount, 0) / choices.length,
+    avgMediumHighEvidenceChainsPerChoice: choices.length === 0
+      ? 0
+      : choices.reduce((sum, choice) => sum + choice.highOrMediumEvidenceChainCount, 0) / choices.length,
+    choicesWithNoEvidenceChain: choices.filter((choice) => choice.evidenceChainCount === 0).length,
+    choices,
   };
 }
 

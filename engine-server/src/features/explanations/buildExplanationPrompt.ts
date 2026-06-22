@@ -1,5 +1,5 @@
 import { getStyleExamplesForPlans } from './explanationStyleExamples.js';
-import type { ChoiceEvalFeature, DraftProblem, DraftProblemChoice, ExplanationPlan } from './types.js';
+import type { ChoiceEvalFeature, DraftEvidenceChain, DraftProblem, DraftProblemChoice, ExplanationPlan } from './types.js';
 
 function featureByChoiceId(features: ChoiceEvalFeature[], choiceId: number): ChoiceEvalFeature {
   const feature = features.find((item) => item.choice_id === choiceId);
@@ -30,6 +30,11 @@ function canUseEscapePhrase(plan: ExplanationPlan): boolean {
   );
 }
 
+function sortedEvidenceChains(plan: ExplanationPlan): DraftEvidenceChain[] {
+  return [...(plan.sourceSignals.lineTrajectoryFeatures?.evidenceChains ?? [])]
+    .sort((a, b) => b.priority - a.priority);
+}
+
 export function buildExplanationPrompt(
   problem: DraftProblem,
   choices: DraftProblemChoice[],
@@ -49,6 +54,7 @@ export function buildExplanationPrompt(
     choices: choices.map((choice) => {
       const feature = featureByChoiceId(features, choice.choice_id);
       const plan = planByChoiceId(plans, choice.choice_id);
+      const evidenceChains = sortedEvidenceChains(plan);
 
       return {
         choice_id: choice.choice_id,
@@ -109,10 +115,10 @@ export function buildExplanationPrompt(
               pieceActivityTrend: plan.sourceSignals.lineTrajectoryFeatures.pieceActivityTrend,
               kingSafetyTrend: plan.sourceSignals.lineTrajectoryFeatures.kingSafetyTrend,
               usableEvidence: plan.sourceSignals.lineTrajectoryFeatures.usableEvidence,
-              evidenceChains: plan.sourceSignals.lineTrajectoryFeatures.evidenceChains,
+              evidenceChains,
             }
           : null,
-        evidence_chains: plan.sourceSignals.lineTrajectoryFeatures?.evidenceChains ?? [],
+        evidence_chains: evidenceChains,
         contrast_features: plan.sourceSignals.contrastFeatures
           ? {
               choiceId: plan.sourceSignals.contrastFeatures.choiceId,
@@ -149,6 +155,11 @@ export function buildExplanationPrompt(
     '- style_examples の短さ，語尾，直接さに寄せる',
     '- 解説に使う材料は evidence_chains と line_trajectory_features.usableEvidence を優先する',
     '- evidence_chains がある場合，結果だけでなく手順ラベルを使って説明してよい',
+    '- evidence_chains は priority が高い順に並んでいる',
+    '- confidence が high/medium の evidence_chains がある場合，まず usablePhrase を主材料として使う',
+    '- resultPhrase より usablePhrase を優先する',
+    '- usablePhrase に手順ラベルが含まれる場合，そのまま使ってよい',
+    '- 1つの explanation では最重要chainを1つ使えばよい',
     '- evidence_chains は line上で確認できる手順だけ。line外の応手は作らない',
     '- evidence_chains の limitations に注意する',
     '- evidence_chains の confidence が high/medium のものを優先する',

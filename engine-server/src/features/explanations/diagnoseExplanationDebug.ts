@@ -32,8 +32,14 @@ export type ExplanationDiagnosticCode =
   | 'missing_activity_trajectory'
   | 'missing_king_safety_trajectory'
   | 'missing_evidence_chain'
+  | 'missing_material_chain'
+  | 'missing_activity_chain'
+  | 'missing_threat_chain'
+  | 'missing_defense_chain'
+  | 'missing_continuation_chain'
   | 'chain_available_but_not_used'
   | 'line_label_missing_in_explanation'
+  | 'choicesWithNoEvidenceChain'
   | 'missing_contrast_feature'
   | 'missing_line_continuation'
   | 'repetitive_wrong_choice_template'
@@ -153,8 +159,14 @@ const REQUIRED_SUMMARY_CODES: ExplanationDiagnosticCode[] = [
   'missing_activity_trajectory',
   'missing_king_safety_trajectory',
   'missing_evidence_chain',
+  'missing_material_chain',
+  'missing_activity_chain',
+  'missing_threat_chain',
+  'missing_defense_chain',
+  'missing_continuation_chain',
   'chain_available_but_not_used',
   'line_label_missing_in_explanation',
+  'choicesWithNoEvidenceChain',
   'style_bad_phrase',
   'fallback_used',
   'retry_used',
@@ -418,6 +430,21 @@ function chainLabelUsedInExplanation(explanation: string, chains: DraftEvidenceC
   return chains.some((chain) => chain.steps.some((step) => step.label !== null && explanation.includes(step.label)));
 }
 
+function hasChainCategory(chains: DraftEvidenceChain[] | undefined, categories: string[]): boolean {
+  return (chains ?? []).some((chain) => categories.includes(chain.category));
+}
+
+function hasUsableEvidenceCategory(
+  lineTrajectory: DraftLineTrajectoryFeatures | undefined,
+  categories: string[],
+): boolean {
+  return (lineTrajectory?.usableEvidence ?? []).some((item) =>
+    categories.includes(item.category) &&
+    item.evidenceLevel !== 'weak' &&
+    item.evidenceLevel !== 'none'
+  );
+}
+
 function hasEscapeEvidence(
   moveFacts: DraftMoveFacts | undefined,
   lineContinuation: DraftLineContinuationFeatures | undefined,
@@ -656,6 +683,36 @@ function diagnoseChoice(params: {
   }
   if (usableEvidence.length > 0 && strongChains.length === 0) {
     addDiagnostic(diagnostics, 'missing_evidence_chain', 'warning', 'usableEvidence はあるが手順付きchainが作れていない');
+  }
+  if ((evidenceChains ?? lineTrajectory?.evidenceChains ?? []).length === 0) {
+    addDiagnostic(diagnostics, 'choicesWithNoEvidenceChain', 'warning', 'このchoiceには evidenceChain がない');
+  }
+  if (hasUsableEvidenceCategory(lineTrajectory, ['material']) && !hasChainCategory(evidenceChains ?? lineTrajectory?.evidenceChains, ['material'])) {
+    addDiagnostic(diagnostics, 'missing_material_chain', 'warning', 'material usableEvidence はあるが material chain がない');
+  }
+  if (
+    hasUsableEvidenceCategory(lineTrajectory, ['pieceActivity']) &&
+    !hasChainCategory(evidenceChains ?? lineTrajectory?.evidenceChains, ['pieceActivity', 'lineContinuation'])
+  ) {
+    addDiagnostic(diagnostics, 'missing_activity_chain', 'warning', 'pieceActivity usableEvidence はあるが activity / continuation chain がない');
+  }
+  if (
+    (lineContinuation?.nextOwnMoveFacts.length ?? 0) > 0 &&
+    !hasChainCategory(evidenceChains ?? lineTrajectory?.evidenceChains, ['threat', 'lineContinuation'])
+  ) {
+    addDiagnostic(diagnostics, 'missing_threat_chain', 'warning', '次の自分の手の事実があるが threat chain がない');
+  }
+  if (
+    (lineContinuation?.continuationPhrases.length ?? 0) > 0 &&
+    !hasChainCategory(evidenceChains ?? lineTrajectory?.evidenceChains, ['lineContinuation'])
+  ) {
+    addDiagnostic(diagnostics, 'missing_continuation_chain', 'warning', 'continuationPhrases はあるが lineContinuation chain がない');
+  }
+  if (
+    hasUsableEvidenceCategory(lineTrajectory, ['kingSafety']) &&
+    !hasChainCategory(evidenceChains ?? lineTrajectory?.evidenceChains, ['defense'])
+  ) {
+    addDiagnostic(diagnostics, 'missing_defense_chain', 'warning', 'kingSafety/受け系の材料はあるが defense chain がない');
   }
   if (strongChains.length > 0 && !strongChains.some((chain) => chainUsedInExplanation(explanation, chain))) {
     addDiagnostic(diagnostics, 'chain_available_but_not_used', 'warning', 'evidenceChain があるのに本文に使われていない');

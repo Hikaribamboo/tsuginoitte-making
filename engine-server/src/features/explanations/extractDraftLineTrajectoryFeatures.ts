@@ -542,6 +542,7 @@ function buildEvidenceChains(params: {
       category: 'lineContinuation',
       confidence: 'high',
       evidenceLevel: 'line_observed',
+      priority: 100,
       steps,
       resultPhrase: phrase,
       usablePhrase: chainUsablePhrase(phrase, nextOwn),
@@ -557,6 +558,7 @@ function buildEvidenceChains(params: {
       category: 'material',
       confidence: candidate.capturedPiece === '歩' ? 'medium' : 'high',
       evidenceLevel: 'line_observed',
+      priority: candidate.capturedPiece === '歩' ? 80 : 95,
       steps: [
         moveStep(candidate, 'candidate_move', resultPhrase),
         ...(firstResponse ? [moveStep(firstResponse, 'opponent_response', '応手')] : []),
@@ -576,6 +578,7 @@ function buildEvidenceChains(params: {
       category: nextOwn.isDrop ? 'threat' : 'lineContinuation',
       confidence: 'medium',
       evidenceLevel: 'line_observed',
+      priority: nextOwn.isDrop ? 90 : 85,
       steps: [
         moveStep(candidate, 'candidate_move', candidateFact),
         ...(firstResponse ? [moveStep(firstResponse, 'opponent_response', '応手')] : []),
@@ -594,6 +597,7 @@ function buildEvidenceChains(params: {
       category: 'kingSafety',
       confidence: 'low',
       evidenceLevel: 'heuristic',
+      priority: 30,
       steps: [
         moveStep(candidate, 'candidate_move', candidateFact),
         moveStep(nextOwn, 'king_safety', params.kingSafetyPhrases[0]),
@@ -610,7 +614,7 @@ function buildEvidenceChains(params: {
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  });
+  }).sort((a, b) => b.priority - a.priority);
 }
 
 export function extractDraftLineTrajectoryFeatures(params: {

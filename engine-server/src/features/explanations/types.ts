@@ -274,6 +274,7 @@ export type DraftEvidenceChain = {
     | 'defense';
   confidence: 'low' | 'medium' | 'high';
   evidenceLevel: DraftFeatureEvidenceLevel;
+  priority: number;
   steps: DraftEvidenceChainStep[];
   resultPhrase: string;
   usablePhrase: string;
