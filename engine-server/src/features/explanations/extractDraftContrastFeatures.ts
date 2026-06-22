@@ -254,7 +254,7 @@ function contrastPhrases(params: {
   ) {
     result.push('正解手のような後続の攻めがない');
   } else if (params.diagnosis === 'weaker_material_gain') {
-    result.push(`${own ?? '得はある'}が，正解手ほど大きな得ではない`);
+    result.push(`${own ?? '当たりはある'}が，正解手ほど大きな当たりではない`);
   } else if (params.diagnosis === 'promotion_or_capture_missing') {
     result.push('正解手のような成りや駒得が残らない');
   } else if (params.diagnosis === 'king_safety_risk') {

@@ -32,18 +32,63 @@ const REPLACEMENTS: Replacement[] = [
   },
   {
     pattern: /可能性が高い/g,
-    replacement: '見込みがある',
+    replacement: '',
     reason: 'replace vague possibility phrase',
   },
   {
     pattern: /可能性があります/g,
-    replacement: '見込みがある',
+    replacement: '',
     reason: 'replace vague possibility phrase',
   },
   {
     pattern: /可能性/g,
-    replacement: '見込み',
+    replacement: '',
     reason: 'replace vague possibility phrase',
+  },
+  {
+    pattern: /攻め筋が消える見込みがある/g,
+    replacement: '後続の攻めが弱い',
+    reason: 'replace overstated attack disappearance phrase',
+  },
+  {
+    pattern: /攻め筋が消える/g,
+    replacement: '後続の攻めが弱い',
+    reason: 'replace overstated attack disappearance phrase',
+  },
+  {
+    pattern: /攻め筋がなくなる/g,
+    replacement: '後続の攻めが弱い',
+    reason: 'replace overstated attack disappearance phrase',
+  },
+  {
+    pattern: /攻めが消える/g,
+    replacement: '後続の攻めが弱い',
+    reason: 'replace overstated attack disappearance phrase',
+  },
+  {
+    pattern: /攻めがなくなる/g,
+    replacement: '後続の攻めが弱い',
+    reason: 'replace overstated attack disappearance phrase',
+  },
+  {
+    pattern: /大きな得ではない/g,
+    replacement: '大きな当たりではない',
+    reason: 'replace unsupported large gain comparison',
+  },
+  {
+    pattern: /得ではない/g,
+    replacement: '当たりではない',
+    reason: 'replace unsupported large gain comparison',
+  },
+  {
+    pattern: /見込みがある/g,
+    replacement: '',
+    reason: 'remove vague expectation phrase',
+  },
+  {
+    pattern: /見込み/g,
+    replacement: '',
+    reason: 'remove vague expectation phrase',
   },
   {
     pattern: /正解手ほど効果的ではない/g,
@@ -95,6 +140,12 @@ const REPLACEMENTS: Replacement[] = [
 function cleanText(text: string): string {
   return text
     .replace(/攻めが続く。攻めが続く。/g, '攻めが続く。')
+    .replace(/後続の攻めが弱い。後続の攻めが弱い。/g, '後続の攻めが弱い。')
+    .replace(/後続の攻めが弱いがある/g, '後続の攻めが弱い')
+    .replace(/攻めが弱いがある/g, '攻めが弱い')
+    .replace(/，。/g, '。')
+    .replace(/、。/g, '。')
+    .replace(/が。/g, '。')
     .replace(/。。+/g, '。')
     .replace(/、。/g, '。')
     .replace(/，。/g, '。')

@@ -22,6 +22,9 @@ export type ExplanationDiagnosticCode =
   | 'missing_own_strength_in_wrong_choice'
   | 'generic_wrong_choice_only'
   | 'too_plain_correct_choice'
+  | 'overstated_attack_disappears'
+  | 'vague_expectation_phrase'
+  | 'unsupported_large_gain_comparison'
   | 'missing_contrast_feature'
   | 'missing_line_continuation'
   | 'repetitive_wrong_choice_template'
@@ -123,6 +126,9 @@ const REQUIRED_SUMMARY_CODES: ExplanationDiagnosticCode[] = [
   'generic_wrong_choice_only',
   'missing_own_strength_in_wrong_choice',
   'too_plain_correct_choice',
+  'overstated_attack_disappears',
+  'vague_expectation_phrase',
+  'unsupported_large_gain_comparison',
   'style_bad_phrase',
   'fallback_used',
   'retry_used',
@@ -147,11 +153,22 @@ const GENERIC_PHRASES = [
   '評価が良い',
   '保てる',
   '勝ちやすい',
+  '見込み',
 ];
 
 const BAD_PHRASES = [
   ...GENERIC_PHRASES,
   '反撃',
+];
+
+const SOFT_REPAIR_PHRASES = [
+  ...GENERIC_PHRASES,
+  '攻め筋が消える',
+  '攻め筋がなくなる',
+  '攻めが消える',
+  '攻めがなくなる',
+  '大きな得ではない',
+  '得ではない',
 ];
 
 const VAGUE_WRONG_CHOICE_PHRASES = [
@@ -382,6 +399,17 @@ function hasStrongClaimEvidence(
   );
 }
 
+function hasMaterialComparisonEvidence(positionFeatures: DraftPositionFeatures | undefined): boolean {
+  return Boolean(
+    (positionFeatures?.material.roughImmediateMaterialGain ?? 0) > 0 ||
+    positionFeatures?.material.materialPhrases.some((phrase) =>
+      phrase.includes('駒得') ||
+      phrase.includes('取れる') ||
+      phrase.includes('得')
+    )
+  );
+}
+
 function addDiagnostic(
   diagnostics: ExplanationDiagnostic[],
   code: ExplanationDiagnosticCode,
@@ -417,6 +445,9 @@ function addValidationIssueDiagnostics(
 
 function finalTextRelevantValidationIssues(explanation: string, issues: ValidationIssue[]): ValidationIssue[] {
   return issues.filter((issue) => {
+    if (issue.code === 'bad_phrase') {
+      return SOFT_REPAIR_PHRASES.some((phrase) => explanation.includes(phrase));
+    }
     if (issue.code === 'unsupported_escape_phrase') {
       return explanation.includes('逃げられる') || explanation.includes('かわされる') || explanation.includes('逃げても');
     }
@@ -591,6 +622,33 @@ function diagnoseChoice(params: {
     !hasStrongClaimEvidence(moveFacts, positionFeatures, lineContinuation)
   ) {
     addDiagnostic(diagnostics, 'unsupported_claim', 'warning', '強い評価・終局表現を支えるfeaturesが不足している');
+  }
+
+  if (
+    explanation.includes('攻め筋が消える') ||
+    explanation.includes('攻め筋がなくなる') ||
+    explanation.includes('攻めが消える') ||
+    explanation.includes('攻めがなくなる')
+  ) {
+    addDiagnostic(diagnostics, 'overstated_attack_disappears', 'warning', '攻め筋が消える系の強い断定が含まれている');
+  }
+
+  if (
+    explanation.includes('見込み') ||
+    explanation.includes('可能性') ||
+    explanation.includes('かもしれない') ||
+    explanation.includes('と思われる')
+  ) {
+    addDiagnostic(diagnostics, 'vague_expectation_phrase', 'warning', '見込み・可能性などの曖昧表現が含まれている');
+  }
+
+  if (
+    (explanation.includes('大きな得ではない') ||
+      explanation.includes('得ではない') ||
+      explanation.includes('大きな得')) &&
+    !hasMaterialComparisonEvidence(positionFeatures)
+  ) {
+    addDiagnostic(diagnostics, 'unsupported_large_gain_comparison', 'warning', '駒得比較を支えるmaterial featuresが不足している');
   }
 
   if (wrongChoice) {
