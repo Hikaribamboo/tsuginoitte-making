@@ -163,6 +163,8 @@ export function buildExplanationPrompt(
     '- evidence_chains は line上で確認できる手順だけ。line外の応手は作らない',
     '- evidence_chains の limitations に注意する',
     '- evidence_chains の confidence が high/medium のものを優先する',
+    '- evidence_chains を使う場合は resultPhrase より usablePhrase を優先して本文候補にする',
+    '- priority が高い medium/high の evidence_chain から，最重要な usablePhrase を1つ選んでよい',
     '- evidence_chains が使える場合も長くしすぎず，1〜2文に収める',
     '- 「確定」「必ず」「何もない」「優勢」は，複数応手や明確な評価根拠がない限り使わない',
     '- usableEvidence の evidenceLevel が direct または line_observed のものは本文に使ってよい',

@@ -520,6 +520,16 @@ function buildEvidenceChains(params: {
     params.pieceActivityPhrases[0] ??
     params.materialPhrases[0] ??
     '候補手';
+  const candidateActivityFact = params.moveFacts?.factPhrases.find((phrase) =>
+    phrase.includes('飛車取り') ||
+    phrase.includes('角に当たる') ||
+    phrase.includes('金に当たる') ||
+    phrase.includes('銀に当たる')
+  ) ?? params.pieceActivityPhrases.find((phrase) =>
+    phrase.includes('飛車取り') ||
+    phrase.includes('当たる') ||
+    phrase.includes('当たり')
+  );
 
   for (const phrase of unique(params.lineContinuationFeatures?.continuationPhrases ?? [])) {
     const steps: DraftEvidenceChainStep[] = [
@@ -557,10 +567,10 @@ function buildEvidenceChains(params: {
       choiceId: params.choiceId,
       category: 'material',
       confidence: candidate.capturedPiece === '歩' ? 'medium' : 'high',
-      evidenceLevel: 'line_observed',
+      evidenceLevel: 'direct',
       priority: candidate.capturedPiece === '歩' ? 80 : 95,
       steps: [
-        moveStep(candidate, 'candidate_move', resultPhrase),
+        moveStep(candidate, 'capture', resultPhrase),
         ...(firstResponse ? [moveStep(firstResponse, 'opponent_response', '応手')] : []),
       ],
       resultPhrase,
@@ -569,9 +579,43 @@ function buildEvidenceChains(params: {
     });
   }
 
+  if (candidateActivityFact) {
+    chains.push({
+      id: `${params.choiceId}:activity:candidate`,
+      choiceId: params.choiceId,
+      category: 'pieceActivity',
+      confidence: 'medium',
+      evidenceLevel: 'direct',
+      priority: candidateActivityFact.includes('飛車取り') ? 88 : 75,
+      steps: [
+        moveStep(candidate, 'candidate_move', candidateActivityFact),
+      ],
+      resultPhrase: candidateActivityFact,
+      usablePhrase: candidate.label ? `${candidate.label}で${candidateActivityFact}` : candidateActivityFact,
+      limitations: [],
+    });
+  }
+
   if (nextOwn?.capturedPiece || nextOwn?.promotedPiece) {
     const nextResult = promotePhrase(nextOwn.promotedPiece) ??
       (nextOwn.capturedPiece === '歩' ? '一歩取れる' : `${nextOwn.capturedPiece}を取れる`);
+    const nextRole: DraftEvidenceChainStep['role'] = nextOwn.promotedPiece ? 'promotion' : 'material_gain';
+    chains.push({
+      id: `${params.choiceId}:material:next-own`,
+      choiceId: params.choiceId,
+      category: 'material',
+      confidence: nextOwn.capturedPiece === '歩' && !nextOwn.promotedPiece ? 'medium' : 'high',
+      evidenceLevel: 'line_observed',
+      priority: nextOwn.promotedPiece ? 92 : 82,
+      steps: [
+        moveStep(candidate, 'candidate_move', candidateFact),
+        ...(firstResponse ? [moveStep(firstResponse, 'opponent_response', '応手')] : []),
+        moveStep(nextOwn, nextRole, nextResult),
+      ],
+      resultPhrase: nextResult,
+      usablePhrase: nextOwn.label ? `line上では${nextOwn.label}で${nextResult}` : `line上では${nextResult}`,
+      limitations: ['line上で確認できる範囲'],
+    });
     chains.push({
       id: `${params.choiceId}:threat:next-own`,
       choiceId: params.choiceId,
@@ -587,6 +631,49 @@ function buildEvidenceChains(params: {
       resultPhrase: nextResult,
       usablePhrase: nextOwn.label ? `${nextOwn.label}で${nextResult}` : nextResult,
       limitations: ['line上の応手に対する確認'],
+    });
+  }
+
+  const materialTrendPhrase = params.materialPhrases.find((phrase) => phrase === '駒得を主張できる');
+  if (materialTrendPhrase && !chains.some((chain) => chain.category === 'material')) {
+    const trendEvent = params.events[5] ?? params.events[3] ?? nextOwn ?? candidate;
+    chains.push({
+      id: `${params.choiceId}:material:trend`,
+      choiceId: params.choiceId,
+      category: 'material',
+      confidence: 'medium',
+      evidenceLevel: 'line_observed',
+      priority: 70,
+      steps: [
+        moveStep(candidate, 'candidate_move', candidateFact),
+        ...(trendEvent && trendEvent !== candidate ? [moveStep(trendEvent, 'material_gain', materialTrendPhrase)] : []),
+      ],
+      resultPhrase: materialTrendPhrase,
+      usablePhrase: trendEvent?.label ? `line上では${trendEvent.label}まで進んで駒得を主張できる` : materialTrendPhrase,
+      limitations: ['line上で確認できる範囲'],
+    });
+  }
+
+  const activityTrendPhrase = params.pieceActivityPhrases.find((phrase) =>
+    phrase.includes('大きな当たり') ||
+    phrase.includes('相手玉周辺')
+  );
+  if (activityTrendPhrase && !chains.some((chain) => chain.category === 'pieceActivity')) {
+    const trendEvent = params.events[5] ?? params.events[3] ?? nextOwn ?? candidate;
+    chains.push({
+      id: `${params.choiceId}:activity:trend`,
+      choiceId: params.choiceId,
+      category: 'pieceActivity',
+      confidence: activityTrendPhrase.includes('相手玉周辺') ? 'low' : 'medium',
+      evidenceLevel: activityTrendPhrase.includes('相手玉周辺') ? 'heuristic' : 'line_observed',
+      priority: activityTrendPhrase.includes('相手玉周辺') ? 35 : 72,
+      steps: [
+        moveStep(candidate, 'candidate_move', candidateFact),
+        ...(trendEvent && trendEvent !== candidate ? [moveStep(trendEvent, 'threat', activityTrendPhrase)] : []),
+      ],
+      resultPhrase: activityTrendPhrase,
+      usablePhrase: trendEvent?.label ? `line上では${trendEvent.label}まで進んで${activityTrendPhrase}` : activityTrendPhrase,
+      limitations: activityTrendPhrase.includes('相手玉周辺') ? ['簡易特徴量による推定'] : ['line上で確認できる範囲'],
     });
   }
 
