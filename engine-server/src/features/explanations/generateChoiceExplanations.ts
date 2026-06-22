@@ -42,6 +42,8 @@ async function writeExplanationDebugLogs(params: {
   contrastFeatures?: unknown;
   lineTrajectoryFeatures?: unknown;
   usableEvidence?: unknown;
+  evidenceChains?: unknown;
+  analysisFeatureCoverage?: unknown;
   featureCoverageReport?: unknown;
   prompt: string;
   llmOutput?: unknown;
@@ -85,6 +87,12 @@ async function writeExplanationDebugLogs(params: {
   }
   if (params.usableEvidence !== undefined) {
     await writeDebugJson(path.join(dir, 'usable-evidence.json'), params.usableEvidence);
+  }
+  if (params.evidenceChains !== undefined) {
+    await writeDebugJson(path.join(dir, 'evidence-chains.json'), params.evidenceChains);
+  }
+  if (params.analysisFeatureCoverage !== undefined) {
+    await writeDebugJson(path.join(dir, 'analysis-feature-coverage.json'), params.analysisFeatureCoverage);
   }
   if (params.featureCoverageReport !== undefined) {
     await writeDebugJson(path.join(dir, 'feature-coverage-report.json'), params.featureCoverageReport);
@@ -161,14 +169,75 @@ function featureCoverageReport(problemId: number, plans: ReturnType<typeof build
         kingSafety: 0,
         lineContinuation: 0,
         contrast: 0,
+        threat: 0,
+        defense: 0,
       });
       return {
         choiceId: plan.choiceId,
         usableEvidenceCount: evidence.length,
+        evidenceChainCount: plan.sourceSignals.lineTrajectoryFeatures?.evidenceChains.length ?? 0,
+        highOrMediumEvidenceChainCount: plan.sourceSignals.lineTrajectoryFeatures?.evidenceChains.filter((chain) =>
+          chain.confidence === 'high' || chain.confidence === 'medium'
+        ).length ?? 0,
         byCategory,
         highOrMediumEvidenceCount: evidence.filter((item) => item.confidence === 'high' || item.confidence === 'medium').length,
       };
     }),
+  };
+}
+
+function analysisFeatureCoverage() {
+  return {
+    patterns: [
+      {
+        pattern: 'correct_attack_continues',
+        requiredEvidence: ['lineContinuation', 'next own move', 'high value attack', 'promotion or material gain'],
+        currentlySupportedBy: ['move_facts', 'position_features', 'line_continuation_features', 'line_trajectory_features', 'evidence_chains'],
+        knownMissing: ['line外の自然分岐', '複数応手の網羅'],
+      },
+      {
+        pattern: 'correct_defense_works',
+        requiredEvidence: ['defense move', 'kingSafety', 'line response'],
+        currentlySupportedBy: ['position_features.kingSafety', 'line_trajectory_features', 'evidence_chains'],
+        knownMissing: ['受け切りの厳密判定', '複数応手の網羅'],
+      },
+      {
+        pattern: 'correct_material_gain',
+        requiredEvidence: ['capture', 'promotion', 'material trend'],
+        currentlySupportedBy: ['move_facts', 'position_features.material', 'line_trajectory_features.materialTrend', 'evidence_chains'],
+        knownMissing: ['数手先の交換全体の精算'],
+      },
+      {
+        pattern: 'wrong_attack_disappears',
+        requiredEvidence: ['missing continuation', 'weaker activity', 'contrast to correct'],
+        currentlySupportedBy: ['contrast_features', 'line_trajectory_features', 'evidence_chains'],
+        knownMissing: ['line外で本当に攻め筋が消えるかの確認'],
+      },
+      {
+        pattern: 'wrong_opponent_escapes',
+        requiredEvidence: ['first response label', 'escaped attacked piece'],
+        currentlySupportedBy: ['move_facts.firstResponseFacts', 'line_continuation_features', 'evidence_chains'],
+        knownMissing: ['当たり駒以外の自然なかわしの分類'],
+      },
+      {
+        pattern: 'wrong_too_slow',
+        requiredEvidence: ['quiet move', 'large eval gap', 'missing continuation'],
+        currentlySupportedBy: ['move_facts', 'position_features', 'contrast_features'],
+        knownMissing: ['相手の具体的な反撃手順'],
+      },
+      {
+        pattern: 'wrong_material_loss',
+        requiredEvidence: ['material trend', 'exchange sequence', 'contrast to correct material chain'],
+        currentlySupportedBy: ['position_features.material', 'line_trajectory_features.materialTrend', 'evidence_chains', 'contrast_features'],
+        knownMissing: ['交換全体の厳密な価値評価'],
+      },
+      {
+        pattern: 'wrong_king_safety_risk',
+        requiredEvidence: ['kingSafety trend', 'opponent attacks near king'],
+        currentlySupportedBy: ['position_features.kingSafety', 'line_trajectory_features.kingSafetyTrend'],
+        knownMissing: ['詰み・寄せの厳密判定'],
+      },
+    ],
   };
 }
 
@@ -296,7 +365,12 @@ export async function generateChoiceExplanations(
     choiceId: plan.choiceId,
     usableEvidence: plan.sourceSignals.lineTrajectoryFeatures?.usableEvidence ?? [],
   }));
+  const evidenceChains = plans.map((plan) => ({
+    choiceId: plan.choiceId,
+    evidenceChains: plan.sourceSignals.lineTrajectoryFeatures?.evidenceChains ?? [],
+  }));
   const coverageReport = featureCoverageReport(input.problem.id, plans);
+  const analysisCoverage = analysisFeatureCoverage();
   const prompt = buildExplanationPrompt(input.problem, sortedChoices, features, plans);
   const validateContext = validationContext(plans);
 
@@ -408,6 +482,8 @@ export async function generateChoiceExplanations(
       contrastFeatures,
       lineTrajectoryFeatures,
       usableEvidence,
+      evidenceChains,
+      analysisFeatureCoverage: analysisCoverage,
       featureCoverageReport: coverageReport,
       prompt,
       llmOutput,
@@ -442,6 +518,11 @@ export async function generateChoiceExplanations(
       positionFeatures,
       lineContinuationFeatures,
       contrastFeatures,
+      lineTrajectoryFeatures,
+      usableEvidence,
+      evidenceChains,
+      analysisFeatureCoverage: analysisCoverage,
+      featureCoverageReport: coverageReport,
       prompt,
       error: exposedError,
       validationIssues: error instanceof ExplanationValidationError ? error.issues : undefined,

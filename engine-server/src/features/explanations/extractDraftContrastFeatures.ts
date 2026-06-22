@@ -50,10 +50,20 @@ function trajectoryStrengthPhrases(lineTrajectoryFeatures?: DraftLineTrajectoryF
   return unique([
     ...(lineTrajectoryFeatures?.materialTrend.phrases ?? []),
     ...(lineTrajectoryFeatures?.pieceActivityTrend.phrases ?? []),
+    ...(lineTrajectoryFeatures?.evidenceChains
+      .filter((chain) => chain.confidence !== 'low' && chain.evidenceLevel !== 'weak')
+      .map((chain) => chain.usablePhrase) ?? []),
     ...(lineTrajectoryFeatures?.usableEvidence
       .filter((item) => item.confidence !== 'low' && item.evidenceLevel !== 'weak')
       .map((item) => item.phrase) ?? []),
   ]);
+}
+
+function hasChainCategory(lineTrajectoryFeatures: DraftLineTrajectoryFeatures | undefined, category: DraftLineTrajectoryFeatures['evidenceChains'][number]['category']): boolean {
+  return Boolean(lineTrajectoryFeatures?.evidenceChains.some((chain) =>
+    chain.category === category &&
+    chain.confidence !== 'low'
+  ));
 }
 
 function hasHighValueAttack(moveFacts?: DraftMoveFacts, positionFeatures?: DraftPositionFeatures): boolean {
@@ -162,15 +172,24 @@ function missingPhrases(params: {
   const ownTrajectoryHasAttack = (params.ownLineTrajectoryFeatures?.pieceActivityTrend.phrases.length ?? 0) > 0;
   const correctTrajectoryHasMaterial = (params.correctLineTrajectoryFeatures?.materialTrend.phrases.length ?? 0) > 0;
   const ownTrajectoryHasMaterial = (params.ownLineTrajectoryFeatures?.materialTrend.phrases.length ?? 0) > 0;
+  const correctHasLineChain = hasChainCategory(params.correctLineTrajectoryFeatures, 'lineContinuation');
+  const ownHasLineChain = hasChainCategory(params.ownLineTrajectoryFeatures, 'lineContinuation');
+  const correctHasMaterialChain = hasChainCategory(params.correctLineTrajectoryFeatures, 'material');
+  const ownHasMaterialChain = hasChainCategory(params.ownLineTrajectoryFeatures, 'material');
+  const correctHasDefenseChain = hasChainCategory(params.correctLineTrajectoryFeatures, 'defense');
+  const ownHasDefenseChain = hasChainCategory(params.ownLineTrajectoryFeatures, 'defense');
 
-  if ((correctHasContinuation || correctTrajectoryHasAttack) && !ownHasContinuation && !ownTrajectoryHasAttack) {
+  if ((correctHasContinuation || correctTrajectoryHasAttack || correctHasLineChain) && !ownHasContinuation && !ownTrajectoryHasAttack && !ownHasLineChain) {
     result.push('正解手のような後続の攻めがない');
   }
   if ((correctHasHighValueAttack || correctTrajectoryHasAttack) && !ownHasHighValueAttack && !ownTrajectoryHasAttack) {
     result.push('正解手ほど大きな当たりがない');
   }
-  if (correctTrajectoryHasMaterial && !ownTrajectoryHasMaterial) {
-    result.push('正解手ほど駒得を見込めない');
+  if ((correctTrajectoryHasMaterial || correctHasMaterialChain) && !ownTrajectoryHasMaterial && !ownHasMaterialChain) {
+    result.push('正解手ほど駒得につながる手順がない');
+  }
+  if (correctHasDefenseChain && !ownHasDefenseChain) {
+    result.push('正解手ほど受けの手順が見えない');
   }
   if (hasPromotionContinuation(params.correctLineContinuationFeatures) && !hasPromotionContinuation(params.ownLineContinuationFeatures)) {
     result.push('正解手のような角成が残らない');
@@ -210,6 +229,10 @@ function diagnose(params: {
   const ownTrajectoryHasAttack = (params.ownLineTrajectoryFeatures?.pieceActivityTrend.phrases.length ?? 0) > 0;
   const correctTrajectoryHasMaterial = (params.correctLineTrajectoryFeatures?.materialTrend.phrases.length ?? 0) > 0;
   const ownTrajectoryHasMaterial = (params.ownLineTrajectoryFeatures?.materialTrend.phrases.length ?? 0) > 0;
+  const correctHasLineChain = hasChainCategory(params.correctLineTrajectoryFeatures, 'lineContinuation');
+  const ownHasLineChain = hasChainCategory(params.ownLineTrajectoryFeatures, 'lineContinuation');
+  const correctHasMaterialChain = hasChainCategory(params.correctLineTrajectoryFeatures, 'material');
+  const ownHasMaterialChain = hasChainCategory(params.ownLineTrajectoryFeatures, 'material');
 
   if (isSmallGain(params.ownMoveFacts, params.ownPositionFeatures) && correctHasHighValueAttack && !ownHasHighValueAttack) {
     return 'low_value_gain_vs_major_piece_attack';
@@ -228,8 +251,8 @@ function diagnose(params: {
     return 'attacks_piece_but_no_followup';
   }
   if ((correctHasHighValueAttack || correctTrajectoryHasAttack) && !ownHasHighValueAttack && !ownTrajectoryHasAttack) return 'no_high_value_attack';
-  if ((correctHasContinuation || correctTrajectoryHasAttack) && !ownHasContinuation && !ownTrajectoryHasAttack) return 'no_continuation_compared_to_correct';
-  if ((correctHasPromotionOrCapture || correctTrajectoryHasMaterial) && !ownHasPromotionOrCapture && !ownTrajectoryHasMaterial) return 'promotion_or_capture_missing';
+  if ((correctHasContinuation || correctTrajectoryHasAttack || correctHasLineChain) && !ownHasContinuation && !ownTrajectoryHasAttack && !ownHasLineChain) return 'no_continuation_compared_to_correct';
+  if ((correctHasPromotionOrCapture || correctTrajectoryHasMaterial || correctHasMaterialChain) && !ownHasPromotionOrCapture && !ownTrajectoryHasMaterial && !ownHasMaterialChain) return 'promotion_or_capture_missing';
   if (
     materialGain(params.correctPositionFeatures) > materialGain(params.ownPositionFeatures) &&
     (correctHasHighValueAttack || correctHasContinuation)

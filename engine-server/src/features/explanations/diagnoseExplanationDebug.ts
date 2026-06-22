@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import type {
   DraftChoiceContrastFeatures,
+  DraftEvidenceChain,
   DraftLineContinuationFeatures,
   DraftLineTrajectoryFeatures,
   DraftMoveFacts,
@@ -30,6 +31,9 @@ export type ExplanationDiagnosticCode =
   | 'missing_material_trajectory'
   | 'missing_activity_trajectory'
   | 'missing_king_safety_trajectory'
+  | 'missing_evidence_chain'
+  | 'chain_available_but_not_used'
+  | 'line_label_missing_in_explanation'
   | 'missing_contrast_feature'
   | 'missing_line_continuation'
   | 'repetitive_wrong_choice_template'
@@ -106,6 +110,11 @@ type FallbackDebugOutput = LlmExplanationResponse & {
   reasonByChoiceId?: Record<string, string[]>;
 };
 
+type EvidenceChainsDebugOutput = Array<{
+  choiceId?: number;
+  evidenceChains?: DraftEvidenceChain[];
+}>;
+
 const DEBUG_FILES = [
   'input.json',
   'move-facts.json',
@@ -113,7 +122,9 @@ const DEBUG_FILES = [
   'line-continuation-features.json',
   'line-trajectory-features.json',
   'usable-evidence.json',
+  'evidence-chains.json',
   'feature-coverage-report.json',
+  'analysis-feature-coverage.json',
   'contrast-features.json',
   'plans.json',
   'prompt.txt',
@@ -141,6 +152,9 @@ const REQUIRED_SUMMARY_CODES: ExplanationDiagnosticCode[] = [
   'missing_material_trajectory',
   'missing_activity_trajectory',
   'missing_king_safety_trajectory',
+  'missing_evidence_chain',
+  'chain_available_but_not_used',
+  'line_label_missing_in_explanation',
   'style_bad_phrase',
   'fallback_used',
   'retry_used',
@@ -384,6 +398,26 @@ function hasContinuationPhrase(
   return continuationEvidence(lineContinuation).some((phrase) => includesLoose(explanation, phrase));
 }
 
+function chainEvidenceForChoice(chains: DraftEvidenceChain[] | undefined): DraftEvidenceChain[] {
+  return (chains ?? []).filter((chain) =>
+    (chain.confidence === 'high' || chain.confidence === 'medium') &&
+    chain.evidenceLevel !== 'weak' &&
+    chain.evidenceLevel !== 'none'
+  );
+}
+
+function chainUsedInExplanation(explanation: string, chain: DraftEvidenceChain): boolean {
+  if (includesLoose(explanation, chain.usablePhrase) || includesLoose(explanation, chain.resultPhrase)) return true;
+  return chain.steps.some((step) =>
+    (step.label !== null && explanation.includes(step.label)) ||
+    includesLoose(explanation, step.fact)
+  );
+}
+
+function chainLabelUsedInExplanation(explanation: string, chains: DraftEvidenceChain[]): boolean {
+  return chains.some((chain) => chain.steps.some((step) => step.label !== null && explanation.includes(step.label)));
+}
+
 function hasEscapeEvidence(
   moveFacts: DraftMoveFacts | undefined,
   lineContinuation: DraftLineContinuationFeatures | undefined,
@@ -553,6 +587,7 @@ function diagnoseChoice(params: {
   positionFeatures?: DraftPositionFeatures;
   lineContinuation?: DraftLineContinuationFeatures;
   lineTrajectory?: DraftLineTrajectoryFeatures;
+  evidenceChains?: DraftEvidenceChain[];
   contrastFeatures?: DraftChoiceContrastFeatures;
   plan?: ExplanationPlan;
   correctPhrases: string[];
@@ -571,6 +606,7 @@ function diagnoseChoice(params: {
     positionFeatures,
     lineContinuation,
     lineTrajectory,
+    evidenceChains,
     contrastFeatures,
     plan,
     correctPhrases,
@@ -583,6 +619,7 @@ function diagnoseChoice(params: {
   const factPhrases = phraseEvidenceForChoice(moveFacts, positionFeatures);
   const ownContinuationEvidence = continuationEvidence(lineContinuation);
   const usableEvidence = usableEvidenceForChoice(lineTrajectory);
+  const strongChains = chainEvidenceForChoice(evidenceChains ?? lineTrajectory?.evidenceChains);
   const contrastPhrases = contrastFeatures?.contrastPhrases ?? [];
   const ownStrengths = contrastFeatures?.ownStrengths ?? [];
   const contrastStrengths = [
@@ -616,6 +653,15 @@ function diagnoseChoice(params: {
   }
   if (!hasKingSafetyTrajectory(lineTrajectory)) {
     addDiagnostic(diagnostics, 'missing_king_safety_trajectory', 'info', 'line上の玉安全推移が取れていない');
+  }
+  if (usableEvidence.length > 0 && strongChains.length === 0) {
+    addDiagnostic(diagnostics, 'missing_evidence_chain', 'warning', 'usableEvidence はあるが手順付きchainが作れていない');
+  }
+  if (strongChains.length > 0 && !strongChains.some((chain) => chainUsedInExplanation(explanation, chain))) {
+    addDiagnostic(diagnostics, 'chain_available_but_not_used', 'warning', 'evidenceChain があるのに本文に使われていない');
+  }
+  if (strongChains.length > 0 && !chainLabelUsedInExplanation(explanation, strongChains)) {
+    addDiagnostic(diagnostics, 'line_label_missing_in_explanation', 'warning', 'evidenceChain の手順ラベルが本文に出ていない');
   }
 
   const badPhrase = BAD_PHRASES.find((phrase) => explanation.includes(phrase));
@@ -809,6 +855,7 @@ export async function diagnoseExplanationDebugDirectory(
     'line-trajectory-features.json',
   );
   const contrastFeatures = await readJsonIfExists<DraftChoiceContrastFeatures[]>(debugDir, 'contrast-features.json');
+  const evidenceChains = await readJsonIfExists<EvidenceChainsDebugOutput>(debugDir, 'evidence-chains.json');
   const plans = await readJsonIfExists<ExplanationPlan[]>(debugDir, 'plans.json');
   const llmOutput = await readJsonIfExists<LlmExplanationResponse>(debugDir, 'llm-output.json');
   const retryLlmOutput = await readJsonIfExists<LlmExplanationResponse>(debugDir, 'retry-llm-output.json');
@@ -823,6 +870,10 @@ export async function diagnoseExplanationDebugDirectory(
   const positionFeaturesByChoiceId = byChoiceId(positionFeatures);
   const lineContinuationByChoiceId = byChoiceId(lineContinuationFeatures);
   const lineTrajectoryByChoiceId = byChoiceId(lineTrajectoryFeatures);
+  const evidenceChainsByChoiceId = new Map<number, DraftEvidenceChain[]>();
+  for (const item of evidenceChains ?? []) {
+    if (typeof item.choiceId === 'number') evidenceChainsByChoiceId.set(item.choiceId, item.evidenceChains ?? []);
+  }
   const contrastFeaturesByChoiceId = byChoiceId(contrastFeatures);
   const plansByChoiceId = planByChoiceId(plans);
   const allValidationIssuesByChoiceId = validationIssuesByChoiceId([
@@ -858,6 +909,7 @@ export async function diagnoseExplanationDebugDirectory(
       positionFeatures: positionFeaturesByChoiceId.get(choice.choiceId),
       lineContinuation: lineContinuationByChoiceId.get(choice.choiceId),
       lineTrajectory: lineTrajectoryByChoiceId.get(choice.choiceId),
+      evidenceChains: evidenceChainsByChoiceId.get(choice.choiceId),
       contrastFeatures: contrastFeaturesByChoiceId.get(choice.choiceId),
       plan: plansByChoiceId.get(choice.choiceId),
       correctPhrases,

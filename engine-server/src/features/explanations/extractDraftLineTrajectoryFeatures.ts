@@ -9,6 +9,8 @@ import {
 } from '../kif-problem-generation/shogi/sfenEngine.js';
 import type {
   ChoiceEvalFeature,
+  DraftEvidenceChain,
+  DraftEvidenceChainStep,
   DraftFeatureCategory,
   DraftFeatureEvidenceLevel,
   DraftLineSnapshot,
@@ -22,6 +24,15 @@ import type {
 
 type BoardIndex = { r: number; f: number };
 type MoveEndpoints = { from: string | null; to: string | null; isDrop: boolean; isPromotion: boolean; dropPiece: PieceBase | null };
+type LineMoveEvent = {
+  ply: number;
+  usi: string;
+  label: string | null;
+  capturedPiece: string | null;
+  promotedPiece: string | null;
+  isDrop: boolean;
+  isPromotion: boolean;
+};
 
 const HIGH_VALUE_PIECES = new Set(['飛車', '角', '金', '銀']);
 const LONG_RANGE_BASES = new Set<PieceBase>(['R', 'B', 'L']);
@@ -451,6 +462,157 @@ function trendConfidence(phrases: string[], high = false): 'none' | 'low' | 'med
   return high ? 'high' : 'medium';
 }
 
+function stepSide(ply: number): DraftEvidenceChainStep['side'] {
+  if (ply === 0) return 'choice';
+  return ply % 2 === 1 ? 'opponent' : 'self';
+}
+
+function moveStep(
+  event: LineMoveEvent | undefined,
+  role: DraftEvidenceChainStep['role'],
+  fact: string,
+): DraftEvidenceChainStep {
+  return {
+    ply: event?.ply ?? -1,
+    usi: event?.usi ?? null,
+    label: event?.label ?? null,
+    side: event ? stepSide(event.ply) : 'unknown',
+    role,
+    fact,
+  };
+}
+
+function promotePhrase(piece: string | null): string | null {
+  if (!piece) return null;
+  if (piece === '馬') return '馬を作れる';
+  if (piece === '龍') return '龍を作れる';
+  return `${piece}が残る`;
+}
+
+function chainUsablePhrase(resultPhrase: string, nextOwnEvent: LineMoveEvent | undefined): string {
+  if (!nextOwnEvent?.label) return resultPhrase;
+  if (resultPhrase.includes('飛車を逃げても') && resultPhrase.includes('角成')) {
+    return `飛車を逃げても${nextOwnEvent.label}が残る`;
+  }
+  if (resultPhrase === '角成が残る' || resultPhrase === '角が成れる') {
+    return `${nextOwnEvent.label}が残る`;
+  }
+  if (resultPhrase.includes('馬を作れる') || resultPhrase.includes('龍を作れる')) {
+    return `${nextOwnEvent.label}で${resultPhrase}`;
+  }
+  return resultPhrase;
+}
+
+function buildEvidenceChains(params: {
+  choiceId: number;
+  moveFacts?: DraftMoveFacts;
+  lineContinuationFeatures?: { continuationPhrases: string[]; nextOwnMoveFacts: string[] };
+  events: LineMoveEvent[];
+  materialPhrases: string[];
+  pieceActivityPhrases: string[];
+  kingSafetyPhrases: string[];
+}): DraftEvidenceChain[] {
+  const chains: DraftEvidenceChain[] = [];
+  const candidate = params.events[0];
+  const firstResponse = params.events[1];
+  const nextOwn = params.events[2];
+  const candidateFact = params.moveFacts?.factPhrases[0] ??
+    params.pieceActivityPhrases[0] ??
+    params.materialPhrases[0] ??
+    '候補手';
+
+  for (const phrase of unique(params.lineContinuationFeatures?.continuationPhrases ?? [])) {
+    const steps: DraftEvidenceChainStep[] = [
+      moveStep(candidate, 'candidate_move', candidateFact),
+    ];
+    if (firstResponse) {
+      const responseFact = params.moveFacts?.firstResponseFacts[0] ??
+        (phrase.includes('逃げても') ? '飛車を逃げる' : '応手');
+      steps.push(moveStep(firstResponse, 'opponent_response', responseFact));
+    }
+    if (nextOwn) {
+      const nextFact = params.lineContinuationFeatures?.nextOwnMoveFacts[0] ??
+        promotePhrase(nextOwn.promotedPiece) ??
+        (nextOwn.capturedPiece ? `${nextOwn.capturedPiece}を取れる` : '継続手');
+      steps.push(moveStep(nextOwn, 'next_own_move', nextFact));
+    }
+    chains.push({
+      id: `${params.choiceId}:line:${chains.length + 1}`,
+      choiceId: params.choiceId,
+      category: 'lineContinuation',
+      confidence: 'high',
+      evidenceLevel: 'line_observed',
+      steps,
+      resultPhrase: phrase,
+      usablePhrase: chainUsablePhrase(phrase, nextOwn),
+      limitations: [],
+    });
+  }
+
+  if (candidate?.capturedPiece) {
+    const resultPhrase = candidate.capturedPiece === '歩' ? '一歩取れる' : `${candidate.capturedPiece}を取れる`;
+    chains.push({
+      id: `${params.choiceId}:material:candidate`,
+      choiceId: params.choiceId,
+      category: 'material',
+      confidence: candidate.capturedPiece === '歩' ? 'medium' : 'high',
+      evidenceLevel: 'line_observed',
+      steps: [
+        moveStep(candidate, 'candidate_move', resultPhrase),
+        ...(firstResponse ? [moveStep(firstResponse, 'opponent_response', '応手')] : []),
+      ],
+      resultPhrase,
+      usablePhrase: candidate.label ? `${candidate.label}で${resultPhrase}` : resultPhrase,
+      limitations: ['line上で確認できる範囲の駒得'],
+    });
+  }
+
+  if (nextOwn?.capturedPiece || nextOwn?.promotedPiece) {
+    const nextResult = promotePhrase(nextOwn.promotedPiece) ??
+      (nextOwn.capturedPiece === '歩' ? '一歩取れる' : `${nextOwn.capturedPiece}を取れる`);
+    chains.push({
+      id: `${params.choiceId}:threat:next-own`,
+      choiceId: params.choiceId,
+      category: nextOwn.isDrop ? 'threat' : 'lineContinuation',
+      confidence: 'medium',
+      evidenceLevel: 'line_observed',
+      steps: [
+        moveStep(candidate, 'candidate_move', candidateFact),
+        ...(firstResponse ? [moveStep(firstResponse, 'opponent_response', '応手')] : []),
+        moveStep(nextOwn, 'next_own_move', nextResult),
+      ],
+      resultPhrase: nextResult,
+      usablePhrase: nextOwn.label ? `${nextOwn.label}で${nextResult}` : nextResult,
+      limitations: ['line上の応手に対する確認'],
+    });
+  }
+
+  if (params.kingSafetyPhrases.length > 0 && nextOwn) {
+    chains.push({
+      id: `${params.choiceId}:king-safety:1`,
+      choiceId: params.choiceId,
+      category: 'kingSafety',
+      confidence: 'low',
+      evidenceLevel: 'heuristic',
+      steps: [
+        moveStep(candidate, 'candidate_move', candidateFact),
+        moveStep(nextOwn, 'king_safety', params.kingSafetyPhrases[0]),
+      ],
+      resultPhrase: params.kingSafetyPhrases[0],
+      usablePhrase: params.kingSafetyPhrases[0],
+      limitations: ['玉の安全は簡易特徴量による推定'],
+    });
+  }
+
+  const seen = new Set<string>();
+  return chains.filter((chain) => {
+    const key = `${chain.category}:${chain.usablePhrase}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function extractDraftLineTrajectoryFeatures(params: {
   problem: DraftProblem;
   choice: DraftProblemChoice;
@@ -467,6 +629,7 @@ export function extractDraftLineTrajectoryFeatures(params: {
 
   const line = normalizeLine(params.choice).slice(0, 6);
   const snapshots: DraftLineSnapshot[] = [];
+  const events: LineMoveEvent[] = [];
   let capturedPieces: string[] = [];
   let promotedPieces: string[] = [];
 
@@ -485,12 +648,21 @@ export function extractDraftLineTrajectoryFeatures(params: {
     const event = applyMoveWithEvents(pos, move);
     capturedPieces = unique([...capturedPieces, event.capturedPiece]);
     promotedPieces = unique([...promotedPieces, event.promotedPiece]);
-    const ply = index + 1;
-    if ([1, 2, 4, 6].includes(ply)) {
+    events.push({
+      ply: index,
+      usi: move,
+      label: event.label,
+      capturedPiece: event.capturedPiece,
+      promotedPiece: event.promotedPiece,
+      isDrop: parseMoveEndpoints(move).isDrop,
+      isPromotion: parseMoveEndpoints(move).isPromotion,
+    });
+    const snapshotPly = index + 1;
+    if ([1, 2, 4, 6].includes(snapshotPly)) {
       snapshots.push(makeSnapshot({
         pos,
         choiceColor,
-        ply,
+        ply: snapshotPly,
         moveUsi: move,
         moveLabel: event.label,
         capturedPieces,
@@ -600,6 +772,15 @@ export function extractDraftLineTrajectoryFeatures(params: {
       evalSupport: support,
     })),
   );
+  const evidenceChains = buildEvidenceChains({
+    choiceId: params.choice.choice_id,
+    moveFacts: params.moveFacts,
+    lineContinuationFeatures: params.lineContinuationFeatures,
+    events,
+    materialPhrases: unique(materialPhrases),
+    pieceActivityPhrases: unique(pieceActivityPhrases),
+    kingSafetyPhrases: unique(kingSafetyPhrases),
+  });
 
   return {
     choiceId: params.choice.choice_id,
@@ -628,6 +809,7 @@ export function extractDraftLineTrajectoryFeatures(params: {
     usableEvidence: unique(usableEvidence.map((item) => item.phrase)).map((phrase) =>
       usableEvidence.find((item) => item.phrase === phrase) as DraftUsableExplanationEvidence
     ),
+    evidenceChains,
   };
 }
 

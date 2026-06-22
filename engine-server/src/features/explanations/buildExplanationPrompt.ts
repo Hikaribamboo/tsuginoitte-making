@@ -109,8 +109,10 @@ export function buildExplanationPrompt(
               pieceActivityTrend: plan.sourceSignals.lineTrajectoryFeatures.pieceActivityTrend,
               kingSafetyTrend: plan.sourceSignals.lineTrajectoryFeatures.kingSafetyTrend,
               usableEvidence: plan.sourceSignals.lineTrajectoryFeatures.usableEvidence,
+              evidenceChains: plan.sourceSignals.lineTrajectoryFeatures.evidenceChains,
             }
           : null,
+        evidence_chains: plan.sourceSignals.lineTrajectoryFeatures?.evidenceChains ?? [],
         contrast_features: plan.sourceSignals.contrastFeatures
           ? {
               choiceId: plan.sourceSignals.contrastFeatures.choiceId,
@@ -145,7 +147,13 @@ export function buildExplanationPrompt(
   const instructions = [
     '特徴量の使い方:',
     '- style_examples の短さ，語尾，直接さに寄せる',
-    '- 解説に使う材料は line_trajectory_features.usableEvidence を優先する',
+    '- 解説に使う材料は evidence_chains と line_trajectory_features.usableEvidence を優先する',
+    '- evidence_chains がある場合，結果だけでなく手順ラベルを使って説明してよい',
+    '- evidence_chains は line上で確認できる手順だけ。line外の応手は作らない',
+    '- evidence_chains の limitations に注意する',
+    '- evidence_chains の confidence が high/medium のものを優先する',
+    '- evidence_chains が使える場合も長くしすぎず，1〜2文に収める',
+    '- 「確定」「必ず」「何もない」「優勢」は，複数応手や明確な評価根拠がない限り使わない',
     '- usableEvidence の evidenceLevel が direct または line_observed のものは本文に使ってよい',
     '- usableEvidence の heuristic は断定を弱める',
     '- usableEvidence の eval_supported は単独では使わず，盤面特徴と組み合わせる',

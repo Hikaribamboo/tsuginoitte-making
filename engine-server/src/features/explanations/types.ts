@@ -216,7 +216,9 @@ export type DraftFeatureCategory =
   | 'pieceActivity'
   | 'kingSafety'
   | 'lineContinuation'
-  | 'contrast';
+  | 'contrast'
+  | 'threat'
+  | 'defense';
 
 export type DraftFeatureEvidenceLevel =
   | 'direct'
@@ -238,6 +240,44 @@ export type DraftUsableExplanationEvidence = {
     | 'contrast_features';
   ply?: number;
   evalSupport?: 'positive' | 'negative' | 'neutral' | 'unknown';
+};
+
+export type DraftEvidenceChainStep = {
+  ply: number;
+  usi: string | null;
+  label: string | null;
+  side: 'choice' | 'opponent' | 'self' | 'unknown';
+  role:
+    | 'candidate_move'
+    | 'opponent_response'
+    | 'next_own_move'
+    | 'capture'
+    | 'promotion'
+    | 'defense'
+    | 'threat'
+    | 'material_gain'
+    | 'king_safety'
+    | 'other';
+  fact: string;
+};
+
+export type DraftEvidenceChain = {
+  id: string;
+  choiceId: number;
+  category:
+    | 'material'
+    | 'pieceActivity'
+    | 'kingSafety'
+    | 'lineContinuation'
+    | 'contrast'
+    | 'threat'
+    | 'defense';
+  confidence: 'low' | 'medium' | 'high';
+  evidenceLevel: DraftFeatureEvidenceLevel;
+  steps: DraftEvidenceChainStep[];
+  resultPhrase: string;
+  usablePhrase: string;
+  limitations: string[];
 };
 
 export type DraftLineSnapshot = {
@@ -307,6 +347,7 @@ export type DraftLineTrajectoryFeatures = {
   };
 
   usableEvidence: DraftUsableExplanationEvidence[];
+  evidenceChains: DraftEvidenceChain[];
 };
 
 export type ExplanationPlan = {
