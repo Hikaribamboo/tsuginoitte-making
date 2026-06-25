@@ -1,7 +1,7 @@
 // In production (served by Express), /api is direct.
 // In Vite dev, /api is proxied to the backend server.
 const ENGINE_API = import.meta.env.VITE_ENGINE_API_URL ?? '';
-const AI_API = import.meta.env.VITE_AI_API_URL ?? ENGINE_API;
+const AI_API = import.meta.env.VITE_AI_API_URL ?? '';
 
 export interface EngineEvalResult {
   eval_cp: number;

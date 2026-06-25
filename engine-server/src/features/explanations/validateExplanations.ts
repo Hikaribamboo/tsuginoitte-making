@@ -21,7 +21,10 @@ const SOFT_STYLE_PHRASES = [
   '狙いが弱く',
   'この手を無視できない',
   '見込み',
+  '有効な手',
+  '有利',
   '攻め筋が消える',
+  '攻め筋が消えてしまう',
   '攻め筋がなくなる',
   '攻めが消える',
   '攻めがなくなる',
@@ -50,7 +53,10 @@ export type ExplanationValidationIssueCode =
   | 'unsupported_counterattack_phrase'
   | 'unsupported_risk_phrase'
   | 'unsupported_claim'
-  | 'missing_required_continuation_phrase';
+  | 'missing_required_continuation_phrase'
+  | 'candidate_label_overused'
+  | 'candidate_move_as_subject'
+  | 'wrong_choice_called_good_move';
 
 export type ExplanationValidationSeverity = 'hard' | 'soft';
 
@@ -58,6 +64,7 @@ export type ExplanationValidationIssue = {
   code: ExplanationValidationIssueCode;
   severity: ExplanationValidationSeverity;
   choiceId?: number;
+  phrase?: string;
   message: string;
 };
 
@@ -76,7 +83,42 @@ export type ExplanationValidationContext = {
   positionFeaturesList?: DraftPositionFeatures[];
   lineContinuationFeaturesList?: DraftLineContinuationFeatures[];
   requiredContinuationChoiceIds?: number[];
+  correctChoiceId?: number;
 };
+
+const SHOGI_LABEL_START_PATTERN = /^[▲△]?[１-９一二三四五六七八九0-9]+[一二三四五六七八九]?[歩香桂銀金角飛玉王と馬龍竜成打]/;
+const CANDIDATE_MOVE_SUBJECT_PATTERNS = [
+  /[歩香桂銀金角飛玉王と馬龍竜成銀成桂成香]+を[１-９][一二三四五六七八九]に(?:動かす|打つ)と/,
+  /[１-９][一二三四五六七八九]に[歩香桂銀金角飛玉王と馬龍竜成銀成桂成香]+を打つと/,
+  /歩を[１-９][一二三四五六七八九]に突くのは/,
+  /[１-９][一二三四五六七八九]に歩を突くのは/,
+];
+
+function normalizeLabelForText(label: string): string {
+  return label.replace(/^([▲△])/, '').trim();
+}
+
+function startsWithCandidateLabel(explanation: string, label: string | undefined): boolean {
+  const text = explanation.trim();
+  const normalizedLabel = normalizeLabelForText(label ?? '');
+  if (!normalizedLabel) return SHOGI_LABEL_START_PATTERN.test(text);
+  return [
+    `${label}は`,
+    `${label}では`,
+    `${label}で`,
+    `${label}には`,
+    `${label}なら`,
+    `${normalizedLabel}は`,
+    `${normalizedLabel}では`,
+    `${normalizedLabel}で`,
+    `${normalizedLabel}には`,
+    `${normalizedLabel}なら`,
+  ].some((prefix) => text.startsWith(prefix));
+}
+
+function hasCandidateMoveSubject(explanation: string): boolean {
+  return CANDIDATE_MOVE_SUBJECT_PATTERNS.some((pattern) => pattern.test(explanation));
+}
 
 function hasEscapeEvidence(
   moveFacts: DraftMoveFacts | undefined,
@@ -208,6 +250,7 @@ export function validateExplanations(
     (context.lineContinuationFeaturesList ?? []).map((facts) => [facts.choiceId, facts]),
   );
   const requiredContinuationChoiceIds = new Set(context.requiredContinuationChoiceIds ?? []);
+  const choiceById = new Map(inputChoices.map((choice) => [choice.choice_id, choice]));
   const actualChoiceIds = new Set<number>();
   const issues: ExplanationValidationIssue[] = [];
 
@@ -255,6 +298,39 @@ export function validateExplanations(
       });
     }
     const explanation = typeof choice.explanation === 'string' ? choice.explanation : '';
+    const inputChoice = choiceById.get(choice.choice_id);
+    if (startsWithCandidateLabel(explanation, inputChoice?.label)) {
+      issues.push({
+        code: 'candidate_label_overused',
+        severity: 'soft',
+        choiceId: choice.choice_id,
+        phrase: inputChoice?.label,
+        message: `LLM output starts with candidate label for choice_id=${choice.choice_id}`,
+      });
+    }
+    if (hasCandidateMoveSubject(explanation)) {
+      const subjectPattern = CANDIDATE_MOVE_SUBJECT_PATTERNS.find((pattern) => pattern.test(explanation));
+      issues.push({
+        code: 'candidate_move_as_subject',
+        severity: 'soft',
+        choiceId: choice.choice_id,
+        phrase: subjectPattern ? explanation.match(subjectPattern)?.[0] : undefined,
+        message: `LLM output uses candidate move as sentence subject for choice_id=${choice.choice_id}`,
+      });
+    }
+    if (
+      typeof context.correctChoiceId === 'number' &&
+      choice.choice_id !== context.correctChoiceId &&
+      explanation.includes('好手')
+    ) {
+      issues.push({
+        code: 'wrong_choice_called_good_move',
+        severity: 'soft',
+        choiceId: choice.choice_id,
+        phrase: '好手',
+        message: `LLM output calls wrong choice good move for choice_id=${choice.choice_id}`,
+      });
+    }
     if (sentenceCount(explanation) > 2) {
       issues.push({
         code: 'too_many_sentences',
@@ -269,6 +345,7 @@ export function validateExplanations(
         code: 'bad_phrase',
         severity: 'soft',
         choiceId: choice.choice_id,
+        phrase: badPhrase,
         message: `LLM output contains banned phrase "${badPhrase}" for choice_id=${choice.choice_id}`,
       });
     }
@@ -294,6 +371,7 @@ export function validateExplanations(
         code: 'unsupported_claim',
         severity: 'hard',
         choiceId: choice.choice_id,
+        phrase: strongClaim,
         message: `LLM output contains unsupported strong claim "${strongClaim}" for choice_id=${choice.choice_id}`,
       });
     }

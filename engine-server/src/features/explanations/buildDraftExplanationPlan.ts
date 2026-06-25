@@ -235,6 +235,7 @@ function refinePrimaryReasonWithContrastFeatures(params: {
   const { primaryReason, isCorrect, contrastFeatures } = params;
   if (isCorrect || !contrastFeatures || contrastFeatures.confidence === 'none') return primaryReason;
 
+  if (contrastFeatures.diagnosis === 'natural_but_worse') return 'wrong_natural_but_worse';
   if (contrastFeatures.diagnosis === 'slow_pawn_push') return 'wrong_too_slow';
   if (
     contrastFeatures.diagnosis === 'small_gain_but_no_continuation' ||
@@ -257,6 +258,30 @@ function refinePrimaryReasonWithContrastFeatures(params: {
   return primaryReason;
 }
 
+function refinePrimaryReasonWithLineTrajectoryFeatures(params: {
+  primaryReason: ExplanationPlanPrimaryReason;
+  isCorrect: boolean;
+  lineTrajectoryFeatures: DraftLineTrajectoryFeatures | undefined;
+}): ExplanationPlanPrimaryReason {
+  const { primaryReason, isCorrect, lineTrajectoryFeatures } = params;
+  if (!isCorrect || !lineTrajectoryFeatures) return primaryReason;
+
+  const continuationEvidence = lineTrajectoryFeatures.correctAttackContinuationEvidence ?? [];
+  const usefulContinuation = continuationEvidence.some((item) =>
+    item.textUsefulness === 'must_use' ||
+    item.textUsefulness === 'useful' ||
+    item.category === 'lineContinuation' ||
+    item.category === 'threat' ||
+    item.category === 'promotion' ||
+    item.category === 'pieceActivity'
+  );
+  const materialAndActivity = lineTrajectoryFeatures.usableEvidence.some((item) => item.category === 'material' && item.confidence !== 'low') &&
+    lineTrajectoryFeatures.usableEvidence.some((item) => item.category === 'pieceActivity' && item.confidence !== 'low');
+
+  if (usefulContinuation || materialAndActivity) return 'correct_attack_continues';
+  return primaryReason;
+}
+
 function addContrastEvidenceToLineTrajectory(
   lineTrajectoryFeatures: DraftLineTrajectoryFeatures | undefined,
   contrastFeatures: DraftChoiceContrastFeatures | undefined,
@@ -266,6 +291,7 @@ function addContrastEvidenceToLineTrajectory(
 
   const existing = new Set(lineTrajectoryFeatures.usableEvidence.map((item) => item.phrase));
   const phrases = [
+    ...contrastFeatures.contrastUsablePhrases,
     ...contrastFeatures.contrastPhrases,
     ...contrastFeatures.missingComparedToCorrect,
   ];
@@ -297,10 +323,15 @@ function buildReasonDetail(params: {
   absGapCp: number | null;
   absGapPercent: number | null;
   contrastFeatures: DraftChoiceContrastFeatures | undefined;
+  lineTrajectoryFeatures: DraftLineTrajectoryFeatures | undefined;
 }): string {
-  const { isCorrect, primaryReason, contrastFeatures } = params;
+  const { isCorrect, primaryReason, contrastFeatures, lineTrajectoryFeatures } = params;
 
   if (isCorrect) {
+    const continuationPhrase = lineTrajectoryFeatures?.correctAttackContinuationEvidence.find((item) =>
+      item.textUsefulness === 'must_use' || item.textUsefulness === 'useful'
+    )?.usablePhrase ?? lineTrajectoryFeatures?.correctAttackContinuationEvidence[0]?.usablePhrase;
+
     if (primaryReason === 'correct_tactical_gain') {
       return '飛車や角に当たる';
     }
@@ -310,7 +341,7 @@ function buildReasonDetail(params: {
     }
 
     if (primaryReason === 'correct_attack_continues') {
-      return 'この手で攻めが続く';
+      return continuationPhrase ?? '具体的な次の狙いが残る';
     }
 
     if (primaryReason === 'correct_defense_works') {
@@ -318,7 +349,7 @@ function buildReasonDetail(params: {
     }
 
     if (primaryReason === 'correct_material_gain') {
-      return '駒得を主張できる';
+      return '一歩得や駒得につながる';
     }
 
     return '読み筋から短く書く';
@@ -424,7 +455,7 @@ function allowedPhrases(
   canUseEscapePhrase: boolean,
 ): string[] {
   if (isCorrect) {
-    return ['好手', '狙い', '攻めが続く', '受ける', '守る', '飛車取り'];
+    return ['飛車取り', '角成が残る', '馬を作れる', '龍を作れる', '一歩取れる', '金に当たる'];
   }
 
   if (primaryReason === 'wrong_natural_but_worse') {
@@ -561,8 +592,13 @@ export function buildDraftExplanationPlansForProblem(
       absGapCp,
       absGapPercent,
     });
-    const primaryReason = refinePrimaryReasonWithContrastFeatures({
+    const lineTrajectoryRefinedPrimaryReason = refinePrimaryReasonWithLineTrajectoryFeatures({
       primaryReason: positionRefinedPrimaryReason,
+      isCorrect,
+      lineTrajectoryFeatures,
+    });
+    const primaryReason = refinePrimaryReasonWithContrastFeatures({
+      primaryReason: lineTrajectoryRefinedPrimaryReason,
       isCorrect,
       contrastFeatures,
     });
@@ -590,6 +626,7 @@ export function buildDraftExplanationPlansForProblem(
         absGapCp,
         absGapPercent,
         contrastFeatures,
+        lineTrajectoryFeatures,
       }),
       tone,
 

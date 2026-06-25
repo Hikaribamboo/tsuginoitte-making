@@ -149,6 +149,7 @@ function validationContext(plans: ReturnType<typeof buildDraftExplanationPlansFo
     moveFactsList: plans.map((plan) => plan.sourceSignals.moveFacts).filter(Boolean),
     positionFeaturesList: plans.map((plan) => plan.sourceSignals.positionFeatures).filter(Boolean),
     lineContinuationFeaturesList: plans.map((plan) => plan.sourceSignals.lineContinuationFeatures).filter(Boolean),
+    correctChoiceId: plans.find((plan) => plan.isCorrect)?.choiceId,
     requiredContinuationChoiceIds: plans
       .filter((plan) => plan.isCorrect && (plan.sourceSignals.lineContinuationFeatures?.continuationPhrases.length ?? 0) > 0)
       .map((plan) => plan.choiceId),
@@ -303,7 +304,7 @@ function fallbackReasonByChoiceId(issues: ExplanationValidationIssue[]): Map<num
 
 function fallbackChoiceIds(issues: ExplanationValidationIssue[], plans: ReturnType<typeof buildDraftExplanationPlansForProblem>): Set<number> {
   const ids = new Set<number>();
-  for (const issue of issues.filter((item) => item.severity === 'hard')) {
+  for (const issue of issues) {
     if (typeof issue.choiceId === 'number') ids.add(issue.choiceId);
   }
   if (ids.size === 0) {
@@ -312,19 +313,53 @@ function fallbackChoiceIds(issues: ExplanationValidationIssue[], plans: ReturnTy
   return ids;
 }
 
-function buildRetryPrompt(prompt: string): string {
+function outputChoicesById(output: LlmExplanationResponse | undefined): Map<number, string> {
+  return new Map(
+    (output?.choices ?? [])
+      .filter((choice) => typeof choice.choice_id === 'number' && typeof choice.explanation === 'string')
+      .map((choice) => [choice.choice_id, choice.explanation.trim()]),
+  );
+}
+
+function sameOutputChoiceIds(
+  previous: LlmExplanationResponse | undefined,
+  next: LlmExplanationResponse | undefined,
+): number[] {
+  const previousById = outputChoicesById(previous);
+  const nextById = outputChoicesById(next);
+  return [...nextById.entries()]
+    .filter(([choiceId, text]) => previousById.get(choiceId) === text)
+    .map(([choiceId]) => choiceId);
+}
+
+function buildRetryPrompt(
+  prompt: string,
+  previousOutput: LlmExplanationResponse | undefined,
+  issues: ExplanationValidationIssue[],
+): string {
   return [
     prompt,
     '',
     '追加注意:',
-    '前回の出力には、根拠のない「逃げられる」「かわされる」が含まれていました。',
-    'move_facts.firstResponseFacts / factPhrases / line_continuation_features で確認できない場合、',
-    '「逃げられる」「かわされる」は使わず、',
-    '「正解手ほど攻めが続かない」「攻め味が弱い」のように控えめに書き直してください。',
+    '前回の出力には validation issue が残っています。同じ文を繰り返さず、必ず別表現で修正してください。',
+    '特に「攻め筋が消える」「攻め筋が消えてしまう」「有効な手」「有利」「好手」「可能性があります」「効果的」「圧力」「おすすめ」は使わないでください。',
+    '不正解手では「好手」を絶対に使わないでください。',
+    'move_facts.firstResponseFacts / factPhrases / line_continuation_features で確認できない場合、「逃げられる」「かわされる」は使わないでください。',
     '根拠のない「反撃」「危険」も使わず、move_facts / position_features / line_continuation_features にある事実だけで書いてください。',
-    '「可能性」「効果」「圧力」「優勢」「有利」「形勢」「保てる」のような抽象語や形勢断定は使わないでください。',
     '正解手に line_continuation_features.continuationPhrases がある場合は、必ずその継続事実を1つ本文に入れてください。',
     '各 explanation は必ず1〜2文にしてください。3文以上にしないでください。',
+    '',
+    '前回の validation issues:',
+    JSON.stringify(issues.map((issue) => ({
+      choiceId: issue.choiceId ?? null,
+      code: issue.code,
+      severity: issue.severity,
+      phrase: issue.phrase ?? null,
+      message: issue.message,
+    })), null, 2),
+    '',
+    '前回の invalid output:',
+    JSON.stringify(previousOutput ?? null, null, 2),
   ].join('\n');
 }
 
@@ -462,8 +497,9 @@ export async function generateChoiceExplanations(
     }
 
     if (!validated) {
-      retryPrompt = buildRetryPrompt(prompt);
+      retryPrompt = buildRetryPrompt(prompt, llmOutput, validationIssues ?? []);
       retryLlmOutput = await requestExplanationJson(retryPrompt);
+      const retrySameChoiceIds = sameOutputChoiceIds(llmOutput, retryLlmOutput);
 
       try {
         validated = validateExplanations(retryLlmOutput, sortedChoices, validateContext);
@@ -490,7 +526,12 @@ export async function generateChoiceExplanations(
           }
         }
 
-        if (!validated && retryValidationIssues && hasHardValidationIssue(retryValidationIssues)) {
+        const retryIssueChoiceIds = new Set((retryValidationIssues ?? [])
+          .map((issue) => issue.choiceId)
+          .filter((choiceId): choiceId is number => typeof choiceId === 'number'));
+        const retryRepeatedInvalidText = retrySameChoiceIds.some((choiceId) => retryIssueChoiceIds.has(choiceId));
+
+        if (!validated && retryValidationIssues && (retryValidationIssues.length > 0 || retryRepeatedInvalidText)) {
           const ids = fallbackChoiceIds(retryValidationIssues, plans);
           fallbackOutput = buildFallbackResponse({
             baseOutput: retryLlmOutput,
@@ -506,6 +547,20 @@ export async function generateChoiceExplanations(
           throw new ExplanationValidationError(retryValidationIssues ?? retryError.issues);
         }
       }
+    }
+
+    try {
+      validated = validateExplanations(validated, sortedChoices, validateContext);
+    } catch (finalError) {
+      if (!(finalError instanceof ExplanationValidationError)) throw finalError;
+      fallbackOutput = buildFallbackResponse({
+        baseOutput: validated,
+        plans,
+        features,
+        fallbackChoiceIds: fallbackChoiceIds(finalError.issues, plans),
+        reasonByChoiceId: fallbackReasonByChoiceId(finalError.issues),
+      });
+      validated = validateExplanations(fallbackOutput, sortedChoices, validateContext);
     }
 
     await writeExplanationDebugLogs({

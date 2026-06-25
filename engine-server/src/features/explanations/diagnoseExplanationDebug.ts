@@ -22,6 +22,21 @@ export type ExplanationDiagnosticCode =
   | 'vague_wrong_choice_reason'
   | 'weak_wrong_choice_reason'
   | 'missing_own_strength_in_wrong_choice'
+  | 'missing_correct_evidence_in_wrong_choice'
+  | 'wrong_choice_has_only_generic_contrast'
+  | 'wrong_choice_uses_own_strength_and_missing_correct_evidence'
+  | 'correct_evidence_available_but_unused_in_wrong_choice'
+  | 'wrong_natural_but_worse_detected'
+  | 'wrong_natural_but_worse_used_well'
+  | 'wrong_natural_but_worse_missing_own_strength'
+  | 'wrong_natural_but_worse_missing_correct_difference'
+  | 'wrong_natural_but_worse_too_generic'
+  | 'correct_attack_continues_detected'
+  | 'correct_attack_continues_used_well'
+  | 'correct_attack_continues_too_generic'
+  | 'correct_attack_continues_missing_specific_followup'
+  | 'correct_attack_continues_chain_available_but_unused'
+  | 'correct_attack_continues_no_concrete_evidence'
   | 'generic_wrong_choice_only'
   | 'too_plain_correct_choice'
   | 'overstated_attack_disappears'
@@ -39,6 +54,13 @@ export type ExplanationDiagnosticCode =
   | 'missing_continuation_chain'
   | 'chain_available_but_not_used'
   | 'line_label_missing_in_explanation'
+  | 'line_label_expected_but_missing'
+  | 'candidate_label_overused'
+  | 'candidate_move_as_subject'
+  | 'wrong_choice_called_good_move'
+  | 'retry_failed_same_output'
+  | 'soft_issue_survived_final'
+  | 'hard_issue_survived_final'
   | 'choicesWithNoEvidenceChain'
   | 'missing_contrast_feature'
   | 'missing_line_continuation'
@@ -107,10 +129,6 @@ type ValidationIssue = {
   message?: string;
 };
 
-type StyleRepairOutput = {
-  repairedChoiceIds?: number[];
-};
-
 type FallbackDebugOutput = LlmExplanationResponse & {
   replacedChoiceIds?: number[];
   reasonByChoiceId?: Record<string, string[]>;
@@ -150,6 +168,21 @@ const REQUIRED_SUMMARY_CODES: ExplanationDiagnosticCode[] = [
   'missing_contrast_feature',
   'generic_wrong_choice_only',
   'missing_own_strength_in_wrong_choice',
+  'missing_correct_evidence_in_wrong_choice',
+  'wrong_choice_has_only_generic_contrast',
+  'wrong_choice_uses_own_strength_and_missing_correct_evidence',
+  'correct_evidence_available_but_unused_in_wrong_choice',
+  'wrong_natural_but_worse_detected',
+  'wrong_natural_but_worse_used_well',
+  'wrong_natural_but_worse_missing_own_strength',
+  'wrong_natural_but_worse_missing_correct_difference',
+  'wrong_natural_but_worse_too_generic',
+  'correct_attack_continues_detected',
+  'correct_attack_continues_used_well',
+  'correct_attack_continues_too_generic',
+  'correct_attack_continues_missing_specific_followup',
+  'correct_attack_continues_chain_available_but_unused',
+  'correct_attack_continues_no_concrete_evidence',
   'too_plain_correct_choice',
   'overstated_attack_disappears',
   'vague_expectation_phrase',
@@ -166,6 +199,13 @@ const REQUIRED_SUMMARY_CODES: ExplanationDiagnosticCode[] = [
   'missing_continuation_chain',
   'chain_available_but_not_used',
   'line_label_missing_in_explanation',
+  'line_label_expected_but_missing',
+  'candidate_label_overused',
+  'candidate_move_as_subject',
+  'wrong_choice_called_good_move',
+  'retry_failed_same_output',
+  'soft_issue_survived_final',
+  'hard_issue_survived_final',
   'choicesWithNoEvidenceChain',
   'style_bad_phrase',
   'fallback_used',
@@ -185,6 +225,7 @@ const GENERIC_PHRASES = [
   '対応が必要',
   '狙いが弱く',
   'この手を無視できない',
+  '有効な手',
   '優勢',
   '有利',
   '形勢',
@@ -196,12 +237,18 @@ const GENERIC_PHRASES = [
 
 const BAD_PHRASES = [
   ...GENERIC_PHRASES,
+  '攻め筋が消える',
+  '攻め筋が消えてしまう',
+  '攻め筋がなくなる',
+  '攻めが消える',
+  '攻めがなくなる',
   '反撃',
 ];
 
 const SOFT_REPAIR_PHRASES = [
   ...GENERIC_PHRASES,
   '攻め筋が消える',
+  '攻め筋が消えてしまう',
   '攻め筋がなくなる',
   '攻めが消える',
   '攻めがなくなる',
@@ -220,6 +267,20 @@ const VAGUE_WRONG_CHOICE_PHRASES = [
 ];
 
 const LABEL_START_PATTERN = /^[▲△]?[１-９一二三四五六七八九0-9]+[一二三四五六七八九]?[歩香桂銀金角飛玉王と馬龍竜成打]/;
+const CANDIDATE_MOVE_SUBJECT_PATTERNS = [
+  /[歩香桂銀金角飛玉王と馬龍竜成銀成桂成香]+を[１-９][一二三四五六七八九]に(?:動かす|打つ)と/,
+  /[１-９][一二三四五六七八九]に[歩香桂銀金角飛玉王と馬龍竜成銀成桂成香]+を打つと/,
+  /歩を[１-９][一二三四五六七八九]に突くのは/,
+  /[１-９][一二三四五六七八九]に歩を突くのは/,
+];
+const LINE_LABEL_ROLES = new Set<DraftEvidenceChain['steps'][number]['role']>([
+  'opponent_response',
+  'next_own_move',
+  'defense',
+  'threat',
+  'material_gain',
+  'promotion',
+]);
 
 async function exists(filePath: string): Promise<boolean> {
   try {
@@ -427,7 +488,84 @@ function chainUsedInExplanation(explanation: string, chain: DraftEvidenceChain):
 }
 
 function chainLabelUsedInExplanation(explanation: string, chains: DraftEvidenceChain[]): boolean {
-  return chains.some((chain) => chain.steps.some((step) => step.label !== null && explanation.includes(step.label)));
+  return chains.some((chain) => chain.steps.some((step) =>
+    step.side !== 'choice' &&
+    step.label !== null &&
+    LINE_LABEL_ROLES.has(step.role) &&
+    explanation.includes(step.label)
+  ));
+}
+
+function chainBeneficiary(chain: DraftEvidenceChain): DraftEvidenceChain['beneficiary'] {
+  if (chain.beneficiary) return chain.beneficiary;
+  const materialRoles = new Set<DraftEvidenceChain['steps'][number]['role']>(['capture', 'material_gain', 'promotion']);
+  const materialSteps = chain.steps.filter((step) => materialRoles.has(step.role));
+  if (materialSteps.some((step) => step.side === 'opponent')) return 'opponent';
+  if (materialSteps.some((step) => step.side === 'choice' || step.side === 'self')) return 'choice_side';
+  if (chain.steps.some((step) => (step.side === 'choice' || step.side === 'self') && step.role === 'next_own_move')) {
+    return 'choice_side';
+  }
+  return 'unclear';
+}
+
+function chainTextUsefulness(chain: DraftEvidenceChain, isCorrectChoice?: boolean): DraftEvidenceChain['textUsefulness'] {
+  if (chain.textUsefulness) return chain.textUsefulness;
+  const beneficiary = chainBeneficiary(chain);
+  if (beneficiary === 'opponent') return 'avoid';
+  if (chain.resultPhrase.includes('一歩取れる') || chain.usablePhrase.includes('一歩取れる')) return 'optional';
+  const isCaptureOnly = chain.resultPhrase.includes('取れる') || chain.usablePhrase.includes('取れる');
+  const isMajorPieceCapture = chain.resultPhrase.includes('飛車を取れる') ||
+    chain.resultPhrase.includes('角を取れる') ||
+    chain.usablePhrase.includes('飛車を取れる') ||
+    chain.usablePhrase.includes('角を取れる');
+  if (isCorrectChoice === false && chain.category === 'lineContinuation' && isCaptureOnly && !isMajorPieceCapture) {
+    return 'low_value';
+  }
+  if (
+    (chain.category === 'lineContinuation' || chain.category === 'defense' || chain.category === 'threat') &&
+    (chain.confidence === 'high' || chain.confidence === 'medium') &&
+    chain.priority >= 80
+  ) return 'useful';
+  return 'optional';
+}
+
+function expectedLineLabelMissing(explanation: string, chains: DraftEvidenceChain[], isCorrectChoice?: boolean): boolean {
+  return chains.some((chain) =>
+    (chain.confidence === 'high' || chain.confidence === 'medium') &&
+    (chainTextUsefulness(chain, isCorrectChoice) === 'must_use' || chainTextUsefulness(chain, isCorrectChoice) === 'useful') &&
+    (chainBeneficiary(chain) === 'choice_side' || chainBeneficiary(chain) === 'both') &&
+    chain.steps.some((step) =>
+      step.side !== 'choice' &&
+      step.label !== null &&
+      LINE_LABEL_ROLES.has(step.role) &&
+      step.lineLabelsPreferred === true &&
+      chain.usablePhrase.includes(step.label) &&
+      !explanation.includes(step.label)
+    )
+  );
+}
+
+function usefulLineChains(chains: DraftEvidenceChain[], isCorrectChoice?: boolean): DraftEvidenceChain[] {
+  return chains.filter((chain) =>
+    (chainTextUsefulness(chain, isCorrectChoice) === 'must_use' || chainTextUsefulness(chain, isCorrectChoice) === 'useful') &&
+    (chain.confidence === 'high' || chain.confidence === 'medium') &&
+    (chainBeneficiary(chain) === 'choice_side' || chainBeneficiary(chain) === 'both') &&
+    expectedLineLabelMissing('', [chain], isCorrectChoice)
+  );
+}
+
+function startsWithCandidateLabel(explanation: string, moveFacts: DraftMoveFacts | undefined, plan: ExplanationPlan | undefined): boolean {
+  const text = explanation.trim();
+  const labels = [moveFacts?.label, plan?.label].filter((label): label is string => Boolean(label));
+  return labels.some((label) => {
+    const withoutSide = label.replace(/^([▲△])/, '');
+    return [`${label}は`, `${label}では`, `${label}で`, `${label}には`, `${label}なら`, `${withoutSide}は`, `${withoutSide}では`, `${withoutSide}で`, `${withoutSide}には`, `${withoutSide}なら`]
+      .some((prefix) => text.startsWith(prefix));
+  });
+}
+
+function hasCandidateMoveSubject(explanation: string): boolean {
+  return CANDIDATE_MOVE_SUBJECT_PATTERNS.some((pattern) => pattern.test(explanation));
 }
 
 function hasChainCategory(chains: DraftEvidenceChain[] | undefined, categories: string[]): boolean {
@@ -549,6 +687,12 @@ function addValidationIssueDiagnostics(
       addDiagnostic(diagnostics, 'unsupported_king_danger', 'warning', issue.message ?? '玉の危険表現の根拠が不足している');
     } else if (issue.code === 'missing_required_continuation_phrase') {
       addDiagnostic(diagnostics, 'missing_line_continuation', 'warning', issue.message ?? '継続事実が本文に使われていない');
+    } else if (issue.code === 'candidate_label_overused') {
+      addDiagnostic(diagnostics, 'candidate_label_overused', 'warning', issue.message ?? '候補手ラベル始まりになっている');
+    } else if (issue.code === 'candidate_move_as_subject') {
+      addDiagnostic(diagnostics, 'candidate_move_as_subject', 'warning', issue.message ?? '候補手そのものを説明文の主語にしている');
+    } else if (issue.code === 'wrong_choice_called_good_move') {
+      addDiagnostic(diagnostics, 'wrong_choice_called_good_move', 'warning', issue.message ?? '不正解手を好手と呼んでいる');
     }
   }
 }
@@ -581,6 +725,15 @@ function finalTextRelevantValidationIssues(explanation: string, issues: Validati
         explanation.includes('決め手')
       );
     }
+    if (issue.code === 'candidate_label_overused') {
+      return LABEL_START_PATTERN.test(explanation.trim());
+    }
+    if (issue.code === 'candidate_move_as_subject') {
+      return hasCandidateMoveSubject(explanation);
+    }
+    if (issue.code === 'wrong_choice_called_good_move') {
+      return explanation.includes('好手');
+    }
     return true;
   });
 }
@@ -606,6 +759,95 @@ function hasContrastText(explanation: string, correctPhrases: string[]): boolean
   return correctPhrases.some((phrase) => includesLoose(explanation, phrase));
 }
 
+function missingCorrectEvidenceText(contrastFeatures: DraftChoiceContrastFeatures | undefined): string[] {
+  const evidencePhrases = (contrastFeatures?.missingCorrectEvidence ?? []).flatMap((item) => {
+    const result = [item.phrase];
+    if (item.phrase.includes('角成') || item.phrase.includes('角が成') || item.phrase.includes('馬を作')) {
+      result.push('正解手のような角成が残らない');
+    }
+    if (item.phrase.includes('飛車取り') || item.phrase.includes('角取り') || item.phrase.includes('当たる')) {
+      result.push('正解手ほど大きな当たりではない');
+    }
+    if (item.category === 'material' || item.phrase.includes('取れる') || item.phrase.includes('駒得')) {
+      result.push('正解手ほど駒得につながる手順がない');
+    }
+    if (item.category === 'lineContinuation') {
+      result.push('正解手のような手順付きの継続がない');
+      result.push('正解手のような後続の攻めがない');
+    }
+    if (item.category === 'threat') result.push('正解手のような厳しい狙いがない');
+    if (item.category === 'defense') result.push('正解手ほど受けの手順が見えない');
+    return result;
+  });
+  return [
+    ...(contrastFeatures?.contrastUsablePhrases ?? []),
+    ...evidencePhrases,
+    ...(contrastFeatures?.missingComparedToCorrect ?? []),
+  ].filter((phrase) => phrase.trim());
+}
+
+function hasMissingCorrectEvidenceText(explanation: string, contrastFeatures: DraftChoiceContrastFeatures | undefined): boolean {
+  return hasFactPhrase(explanation, missingCorrectEvidenceText(contrastFeatures));
+}
+
+function hasNaturalButWorseShape(
+  explanation: string,
+  usesOwnStrength: boolean,
+  usesCorrectDifference: boolean,
+): boolean {
+  return usesOwnStrength &&
+    usesCorrectDifference &&
+    (explanation.includes('が，') || explanation.includes('が、') || explanation.includes('にはなるが') || explanation.includes('は作れるが'));
+}
+
+function correctAttackEvidence(lineTrajectory: DraftLineTrajectoryFeatures | undefined): string[] {
+  return [
+    ...(lineTrajectory?.correctAttackContinuationEvidence ?? []).map((item) => item.usablePhrase),
+    ...(lineTrajectory?.correctAttackContinuationEvidence ?? []).map((item) => item.phrase),
+  ].filter((phrase) => phrase.trim());
+}
+
+function hasCorrectAttackEvidence(lineTrajectory: DraftLineTrajectoryFeatures | undefined, chains: DraftEvidenceChain[] | undefined): boolean {
+  if ((lineTrajectory?.correctAttackContinuationEvidence.length ?? 0) > 0) return true;
+  return (chains ?? lineTrajectory?.evidenceChains ?? []).some((chain) =>
+    (chain.category === 'lineContinuation' ||
+      chain.category === 'threat' ||
+      chain.category === 'material' ||
+      chain.category === 'pieceActivity') &&
+    (chain.confidence === 'high' || chain.confidence === 'medium') &&
+    chainTextUsefulness(chain, true) !== 'avoid' &&
+    chainTextUsefulness(chain, true) !== 'low_value'
+  );
+}
+
+function correctAttackEvidenceUsed(
+  explanation: string,
+  lineTrajectory: DraftLineTrajectoryFeatures | undefined,
+  chains: DraftEvidenceChain[] | undefined,
+  lineContinuation: DraftLineContinuationFeatures | undefined,
+): boolean {
+  if (correctAttackEvidence(lineTrajectory).some((phrase) => includesLoose(explanation, phrase))) return true;
+  if ((chains ?? lineTrajectory?.evidenceChains ?? []).some((chain) =>
+    (chainTextUsefulness(chain, true) === 'must_use' || chainTextUsefulness(chain, true) === 'useful') &&
+    chainUsedInExplanation(explanation, chain)
+  )) return true;
+  return hasContinuationPhrase(explanation, lineContinuation);
+}
+
+function concreteCorrectAttackText(explanation: string): boolean {
+  return explanation.includes('取れる') ||
+    explanation.includes('取る') ||
+    explanation.includes('当たる') ||
+    explanation.includes('当たり') ||
+    explanation.includes('飛車取り') ||
+    explanation.includes('角成') ||
+    explanation.includes('馬を作') ||
+    explanation.includes('龍を作') ||
+    explanation.includes('竜を作') ||
+    explanation.includes('狙い') ||
+    explanation.includes('相手玉');
+}
+
 function diagnoseChoice(params: {
   choiceId: number;
   explanation: string;
@@ -621,6 +863,7 @@ function diagnoseChoice(params: {
   validationIssues: ValidationIssue[];
   fallbackUsed: boolean;
   retryUsed: boolean;
+  retryFailedSameOutput: boolean;
   repeatedWrongTemplate: boolean;
   labelStartOverused: boolean;
 }): ExplanationChoiceDiagnostics {
@@ -640,6 +883,7 @@ function diagnoseChoice(params: {
     validationIssues,
     fallbackUsed,
     retryUsed,
+    retryFailedSameOutput,
     repeatedWrongTemplate,
     labelStartOverused,
   } = params;
@@ -649,20 +893,33 @@ function diagnoseChoice(params: {
   const strongChains = chainEvidenceForChoice(evidenceChains ?? lineTrajectory?.evidenceChains);
   const contrastPhrases = contrastFeatures?.contrastPhrases ?? [];
   const ownStrengths = contrastFeatures?.ownStrengths ?? [];
+  const ownCompensatingPhrases = (contrastFeatures?.ownCompensatingEvidence ?? []).map((item) => item.phrase);
   const contrastStrengths = [
     ...(contrastFeatures?.correctStrengths ?? []),
     ...ownStrengths,
+    ...ownCompensatingPhrases,
     ...(contrastFeatures?.missingComparedToCorrect ?? []),
+    ...(contrastFeatures?.contrastUsablePhrases ?? []),
   ];
   const wrongChoice = isWrongChoice(choiceId, input, plan);
+  const relevantValidationIssues = finalTextRelevantValidationIssues(explanation, validationIssues);
 
-  addValidationIssueDiagnostics(diagnostics, finalTextRelevantValidationIssues(explanation, validationIssues));
+  addValidationIssueDiagnostics(diagnostics, relevantValidationIssues);
+  if (relevantValidationIssues.some((issue) => issue.severity === 'soft')) {
+    addDiagnostic(diagnostics, 'soft_issue_survived_final', 'warning', 'soft validation issue が最終出力に残っている');
+  }
+  if (relevantValidationIssues.some((issue) => issue.severity === 'hard')) {
+    addDiagnostic(diagnostics, 'hard_issue_survived_final', 'warning', 'hard validation issue が最終出力に残っている');
+  }
 
   if (fallbackUsed) {
     addDiagnostic(diagnostics, 'fallback_used', 'warning', 'fallback-output.json が使われている');
   }
   if (retryUsed) {
     addDiagnostic(diagnostics, 'retry_used', 'info', 'retry-llm-output.json または retry-prompt.txt が残っている');
+  }
+  if (retryFailedSameOutput) {
+    addDiagnostic(diagnostics, 'retry_failed_same_output', 'warning', 'retry後も初回と同じ説明が残っている');
   }
 
   if (sentenceCount(explanation) > 2) {
@@ -720,6 +977,20 @@ function diagnoseChoice(params: {
   if (strongChains.length > 0 && !chainLabelUsedInExplanation(explanation, strongChains)) {
     addDiagnostic(diagnostics, 'line_label_missing_in_explanation', 'warning', 'evidenceChain の手順ラベルが本文に出ていない');
   }
+  if (strongChains.length > 0 && expectedLineLabelMissing(explanation, strongChains, !wrongChoice)) {
+    addDiagnostic(diagnostics, 'line_label_expected_but_missing', 'warning', 'usablePhrase にあるline手順ラベルが本文に出ていない');
+  }
+
+  const candidateMoveAsSubject = hasCandidateMoveSubject(explanation);
+  if (startsWithCandidateLabel(explanation, moveFacts, plan) || candidateMoveAsSubject) {
+    addDiagnostic(diagnostics, 'candidate_label_overused', 'warning', '候補手ラベルまたは候補手そのものを本文の主語にしている');
+  }
+  if (candidateMoveAsSubject) {
+    addDiagnostic(diagnostics, 'candidate_move_as_subject', 'warning', '候補手そのものを説明文の主語にしている');
+  }
+  if (wrongChoice && explanation.includes('好手')) {
+    addDiagnostic(diagnostics, 'wrong_choice_called_good_move', 'warning', '不正解手に好手という表現が入っている');
+  }
 
   const badPhrase = BAD_PHRASES.find((phrase) => explanation.includes(phrase));
   if (badPhrase) {
@@ -746,6 +1017,34 @@ function diagnoseChoice(params: {
     addDiagnostic(diagnostics, 'ok_uses_continuation', 'info', 'line_continuation_features のcontinuationPhrasesを使えている');
   } else if (!wrongChoice && ownContinuationEvidence.length > 0) {
     addDiagnostic(diagnostics, 'missing_line_continuation', 'warning', '正解手のline_continuation_featuresが本文に使われていない');
+  }
+
+  const correctAttackDetected = !wrongChoice && hasCorrectAttackEvidence(lineTrajectory, evidenceChains);
+  const correctAttackUsed = correctAttackDetected &&
+    correctAttackEvidenceUsed(explanation, lineTrajectory, evidenceChains, lineContinuation) &&
+    concreteCorrectAttackText(explanation);
+  const correctAttackChains = (evidenceChains ?? lineTrajectory?.evidenceChains ?? []).filter((chain) =>
+    chainTextUsefulness(chain, true) === 'must_use' || chainTextUsefulness(chain, true) === 'useful'
+  );
+  if (correctAttackDetected) {
+    addDiagnostic(diagnostics, 'correct_attack_continues_detected', 'info', '正解手に攻め継続の具体材料がある');
+    if (correctAttackUsed) {
+      addDiagnostic(diagnostics, 'correct_attack_continues_used_well', 'info', '正解手の攻め継続を具体材料で説明できている');
+    }
+    if (!correctAttackEvidenceUsed(explanation, lineTrajectory, evidenceChains, lineContinuation)) {
+      addDiagnostic(diagnostics, 'correct_attack_continues_missing_specific_followup', 'warning', '正解手の具体的な次の狙い・成り・駒取りが本文に出ていない');
+    }
+    if (correctAttackChains.length > 0 && !correctAttackChains.some((chain) => chainUsedInExplanation(explanation, chain))) {
+      addDiagnostic(diagnostics, 'correct_attack_continues_chain_available_but_unused', 'warning', '正解手の useful/must_use chain が本文に使われていない');
+    }
+    if (
+      explanation.includes('攻めが続く') &&
+      !concreteCorrectAttackText(explanation)
+    ) {
+      addDiagnostic(diagnostics, 'correct_attack_continues_too_generic', 'warning', '正解手の攻め継続説明が一般表現だけになっている');
+    }
+  } else if (!wrongChoice) {
+    addDiagnostic(diagnostics, 'correct_attack_continues_no_concrete_evidence', 'warning', '正解手だが攻め継続の具体材料が抽出できていない');
   }
 
   if (
@@ -821,9 +1120,11 @@ function diagnoseChoice(params: {
 
   if (wrongChoice) {
     const usesContrastPhrase = hasFactPhrase(explanation, contrastPhrases);
-    const usesOwnStrength = hasOwnStrengthPhrase(explanation, ownStrengths);
+    const usesOwnStrength = hasOwnStrengthPhrase(explanation, [...ownStrengths, ...ownCompensatingPhrases]);
+    const usesMissingCorrectEvidence = hasMissingCorrectEvidenceText(explanation, contrastFeatures);
     const usesOwnEvidence = hasChoiceSpecificEvidence(explanation, factPhrases) || usesContrastPhrase || usesOwnStrength;
     const usesContrast = usesContrastPhrase ||
+      usesMissingCorrectEvidence ||
       hasFactPhrase(explanation, contrastStrengths) ||
       hasContrastText(explanation, correctPhrases);
     const weakFallbackText = explanation.includes('正解手ほど攻めが続かない');
@@ -838,20 +1139,55 @@ function diagnoseChoice(params: {
     }
     if (genericWrongOnly) {
       addDiagnostic(diagnostics, 'generic_wrong_choice_only', 'warning', '不正解手の説明が汎用的な弱さだけになっている');
+      addDiagnostic(diagnostics, 'wrong_choice_has_only_generic_contrast', 'warning', '不正解手の説明が汎用比較だけになっている');
+    } else if ((weakFallbackText || vagueText) && !usesOwnStrength && !usesMissingCorrectEvidence) {
+      addDiagnostic(diagnostics, 'wrong_choice_has_only_generic_contrast', 'warning', '不正解手の説明がその手固有の材料や正解手の具体材料を使えていない');
     }
-    if (!usesOwnEvidence && vagueText) {
+    if (!usesOwnEvidence && !usesMissingCorrectEvidence && vagueText) {
       addDiagnostic(diagnostics, 'vague_wrong_choice_reason', 'warning', 'その手固有のfactより曖昧な弱さの説明に寄っている');
     }
-    if (weakFallbackText && (!usesOwnEvidence || explanation.replace('正解手ほど攻めが続かない', '').length < 12)) {
+    if (weakFallbackText && !usesOwnStrength && !usesMissingCorrectEvidence && (!usesOwnEvidence || explanation.replace('正解手ほど攻めが続かない', '').length < 12)) {
       addDiagnostic(diagnostics, 'weak_wrong_choice_reason', 'warning', '「正解手ほど攻めが続かない」に説明が寄り、具体的な悪さが弱い');
     }
     const hasUsableContrastFeature = Boolean(
       contrastFeatures &&
-      contrastFeatures.contrastPhrases.length > 0 &&
+      (contrastFeatures.contrastPhrases.length > 0 || contrastFeatures.contrastUsablePhrases.length > 0) &&
       contrastFeatures.diagnosis !== 'unclear' &&
       contrastFeatures.confidence === 'medium'
     );
-    if (!contrastFeatures || contrastFeatures.contrastPhrases.length === 0 || contrastFeatures.diagnosis === 'unclear') {
+    const hasMissingCorrectEvidence = (contrastFeatures?.missingCorrectEvidence.length ?? 0) > 0;
+    const correctEvidenceAvailable = (contrastFeatures?.correctStrengths.length ?? 0) > 0;
+    const naturalButWorseDetected = Boolean(
+      contrastFeatures &&
+      (contrastFeatures.diagnosis === 'natural_but_worse' || plan?.primaryReason === 'wrong_natural_but_worse') &&
+      (contrastFeatures.ownCompensatingEvidence.some((item) => item.confidence !== 'low') || ownStrengths.length > 0) &&
+      (hasMissingCorrectEvidence || contrastFeatures.contrastUsablePhrases.length > 0 || contrastFeatures.missingComparedToCorrect.length > 0)
+    );
+    if (naturalButWorseDetected) {
+      addDiagnostic(diagnostics, 'wrong_natural_but_worse_detected', 'info', 'ownStrength と正解との差がある自然だが劣る不正解手');
+      if (hasNaturalButWorseShape(explanation, usesOwnStrength, usesMissingCorrectEvidence || usesContrast)) {
+        addDiagnostic(diagnostics, 'wrong_natural_but_worse_used_well', 'info', 'その手の良さ + 正解との差で説明できている');
+      }
+      if (!usesOwnStrength) {
+        addDiagnostic(diagnostics, 'wrong_natural_but_worse_missing_own_strength', 'warning', 'natural_but_worse の ownStrength が本文に出ていない');
+      }
+      if (!usesMissingCorrectEvidence && !usesContrast) {
+        addDiagnostic(diagnostics, 'wrong_natural_but_worse_missing_correct_difference', 'warning', 'natural_but_worse の正解との差が本文に出ていない');
+      }
+      if (genericWrongOnly || ((weakFallbackText || vagueText) && !usesOwnStrength)) {
+        addDiagnostic(diagnostics, 'wrong_natural_but_worse_too_generic', 'warning', 'natural_but_worse が一般比較だけになっている');
+      }
+    }
+    if (usesOwnStrength && usesMissingCorrectEvidence) {
+      addDiagnostic(diagnostics, 'wrong_choice_uses_own_strength_and_missing_correct_evidence', 'info', 'ownStrength と正解手との差分材料を同時に使えている');
+    }
+    if (correctEvidenceAvailable && !hasMissingCorrectEvidence && (contrastFeatures?.contrastUsablePhrases.length ?? 0) === 0) {
+      addDiagnostic(diagnostics, 'missing_correct_evidence_in_wrong_choice', 'warning', '正解手の具体材料が不正解手の差分featuresに使われていない');
+    }
+    if (hasMissingCorrectEvidence && !usesMissingCorrectEvidence) {
+      addDiagnostic(diagnostics, 'correct_evidence_available_but_unused_in_wrong_choice', 'warning', '正解手の差分材料があるのに本文に使われていない');
+    }
+    if (!contrastFeatures || (contrastFeatures.contrastPhrases.length === 0 && contrastFeatures.contrastUsablePhrases.length === 0) || contrastFeatures.diagnosis === 'unclear') {
       addDiagnostic(diagnostics, 'missing_contrast_feature', 'warning', '正解手との差分featuresが作られていない');
     } else if (!hasUsableContrastFeature && (!usesContrast || (!usesOwnEvidence && correctPhrases.length > 0))) {
       addDiagnostic(diagnostics, 'missing_contrast_feature', 'warning', '正解手との差分featuresが十分に本文へ出ていない');
@@ -917,7 +1253,6 @@ export async function diagnoseExplanationDebugDirectory(
   const llmOutput = await readJsonIfExists<LlmExplanationResponse>(debugDir, 'llm-output.json');
   const retryLlmOutput = await readJsonIfExists<LlmExplanationResponse>(debugDir, 'retry-llm-output.json');
   const fallbackOutput = await readJsonIfExists<FallbackDebugOutput>(debugDir, 'fallback-output.json');
-  const styleRepairOutput = await readJsonIfExists<StyleRepairOutput>(debugDir, 'style-repair-output.json');
   const validated = await readJsonIfExists<LlmExplanationResponse>(debugDir, 'validated.json');
   const validationIssues = await readJsonIfExists<ValidationIssue[]>(debugDir, 'validation-issues.json');
   const retryValidationIssues = await readJsonIfExists<ValidationIssue[]>(debugDir, 'retry-validation-issues.json');
@@ -937,7 +1272,6 @@ export async function diagnoseExplanationDebugDirectory(
     ...(validationIssues ?? []),
     ...(retryValidationIssues ?? []),
   ]);
-  const repairedChoiceIds = new Set(styleRepairOutput?.repairedChoiceIds ?? []);
   const correctChoiceId = input?.problem?.correct_choice_id;
   const correctMoveFacts = correctChoiceId === undefined ? undefined : moveFactsByChoiceId.get(correctChoiceId);
   const correctPositionFeatures = correctChoiceId === undefined ? undefined : positionFeaturesByChoiceId.get(correctChoiceId);
@@ -951,6 +1285,8 @@ export async function diagnoseExplanationDebugDirectory(
   const labelStartOverused = choices.length > 1 && labelStartCount >= Math.ceil(choices.length / 2);
   const fallbackChoiceIds = new Set(fallbackOutput?.replacedChoiceIds ?? []);
   const retryUsed = filesPresent.includes('retry-llm-output.json') || filesPresent.includes('retry-prompt.txt');
+  const llmByChoiceId = new Map(outputChoices(llmOutput).map((choice) => [choice.choiceId, choice.explanation]));
+  const retryByChoiceId = new Map(outputChoices(retryLlmOutput).map((choice) => [choice.choiceId, choice.explanation]));
 
   const report: ExplanationDiagnosticsReport = {
     problemId: input?.problem?.id ?? null,
@@ -970,10 +1306,13 @@ export async function diagnoseExplanationDebugDirectory(
       contrastFeatures: contrastFeaturesByChoiceId.get(choice.choiceId),
       plan: plansByChoiceId.get(choice.choiceId),
       correctPhrases,
-      validationIssues: (allValidationIssuesByChoiceId.get(choice.choiceId) ?? [])
-        .filter((issue) => !(issue.code === 'bad_phrase' && repairedChoiceIds.has(choice.choiceId))),
+      validationIssues: allValidationIssuesByChoiceId.get(choice.choiceId) ?? [],
       fallbackUsed: fallbackChoiceIds.has(choice.choiceId),
       retryUsed,
+      retryFailedSameOutput: retryUsed &&
+        (allValidationIssuesByChoiceId.get(choice.choiceId)?.length ?? 0) > 0 &&
+        retryByChoiceId.get(choice.choiceId) !== undefined &&
+        retryByChoiceId.get(choice.choiceId) === llmByChoiceId.get(choice.choiceId),
       repeatedWrongTemplate: repeatedWrongChoiceIds.has(choice.choiceId),
       labelStartOverused,
     })),

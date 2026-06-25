@@ -29,7 +29,7 @@ import {
 } from '../api/workspaces';
 import {
   evaluatePosition,
-  generateDraftChoiceExplanations,
+  generateExplanations,
   startAnalysisStream,
   stopAnalysis,
   type AnalysisLine,
@@ -62,6 +62,7 @@ const SLOT_LABELS: Record<SlotKey, string> = {
   incorrect1: '不正解手1',
   incorrect2: '不正解手2',
 };
+const AI_EXPLANATION_PREFIX = '[AI解説(試験的)]';
 
 function shuffledSlots(): SlotKey[] {
   const slots = [...SLOT_ORDER];
@@ -74,6 +75,13 @@ function shuffledSlots(): SlotKey[] {
 
 function normalizeCpToSentePerspective(cp: number, sideToMove: Side): number {
   return sideToMove === 'sente' ? cp : -cp;
+}
+
+function withAiExplanationPrefix(explanation: string): string {
+  const trimmed = explanation.trim();
+  return trimmed.startsWith(AI_EXPLANATION_PREFIX)
+    ? trimmed
+    : `${AI_EXPLANATION_PREFIX}${trimmed}`;
 }
 
 const EMPTY_CHOICE: ChoiceDraft = {
@@ -1483,42 +1491,65 @@ const PasteProblemCreator: React.FC = () => {
   // ---- Generate explanations via AI ----
 
   const handleGenerateExplanations = useCallback(async () => {
-    if (!workspaceId) {
-      setMessage('先に下書きをDBに途中保存してください');
+    if (!displaySfen || !parsed) {
+      setMessage('先に棋譜または局面を読み込んでください');
       return;
     }
-    const problemId = Number(workspaceId);
-    if (!Number.isInteger(problemId) || problemId <= 0) {
-      setMessage('下書きIDが不正です');
+
+    const filledSlots = SLOT_ORDER.filter((slot) => choices[slot].usi);
+    if (filledSlots.length === 0) {
+      setMessage('選択肢を1つ以上設定してください');
+      return;
+    }
+
+    const targetSlots = filledSlots.filter((slot) => !choices[slot].explanation.trim());
+    if (targetSlots.length === 0) {
+      setMessage('すべての選択肢に解説が入力済みです');
       return;
     }
 
     setGenerating(true);
     setMessage('');
     try {
-      const saved = await persistWorkspaceDraft();
-      if (!saved) return;
-
-      const result = await generateDraftChoiceExplanations(problemId, true);
-      const refreshed = await getWorkspace(workspaceId);
-      const refreshedChoices = refreshed?.draft?.choices;
-      if (refreshedChoices && typeof refreshedChoices === 'object') {
-        setChoices(refreshedChoices as Record<SlotKey, ChoiceDraft>);
-      } else {
-        const explanationByChoiceId = new Map(result.choices.map((choice) => [choice.choiceId, choice.explanation]));
-        setChoices((prev) => ({
-          correct: { ...prev.correct, explanation: "[AI解説]" + (explanationByChoiceId.get(1) ?? prev.correct.explanation) },
-          incorrect1: { ...prev.incorrect1, explanation: "[AI解説]" + (explanationByChoiceId.get(2) ?? prev.incorrect1.explanation) },
-          incorrect2: { ...prev.incorrect2, explanation: "[AI解説]" + (explanationByChoiceId.get(3) ?? prev.incorrect2.explanation) },
-        }));
+      if (workspaceId) {
+        const saved = await persistWorkspaceDraft();
+        if (!saved) return;
       }
-      setMessage(`解説を生成しました（${result.choices.length}件）`);
+
+      const choiceData = targetSlots.map((slot) => {
+        const choice = choices[slot];
+        const fullPv = [choice.usi, ...choice.line].filter(Boolean);
+        const labels = pvToJapanese(fullPv, displaySfen, fullPv.length);
+        return {
+          label: choice.label || labels[0] || choice.usi,
+          eval_cp: choice.eval_cp,
+          eval_percent: choice.eval_percent,
+          line_labels: labels.slice(1).join(' '),
+          is_correct: slot === 'correct',
+        };
+      });
+
+      const results = await generateExplanations(displaySfen, parsed.sideToMove, choiceData);
+
+      setChoices((prev) => {
+        const next = { ...prev };
+        results.forEach((result) => {
+          const slot = targetSlots[result.index];
+          if (!slot) return;
+          next[slot] = {
+            ...next[slot],
+            explanation: withAiExplanationPrefix(result.explanation),
+          };
+        });
+        return next;
+      });
+      setMessage(`解説を生成しました（${targetSlots.length}件）`);
     } catch (e: any) {
       setMessage(`解説生成エラー: ${e.message}`);
     } finally {
       setGenerating(false);
     }
-  }, [workspaceId, persistWorkspaceDraft]);
+  }, [choices, displaySfen, parsed, persistWorkspaceDraft, workspaceId]);
 
   // ---- Validation ----
 

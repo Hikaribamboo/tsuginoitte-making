@@ -62,7 +62,6 @@ function isPawnMove(plan: ExplanationPlan): boolean {
 }
 
 export function buildFallbackExplanation(plan: ExplanationPlan, feature: ChoiceEvalFeature): string {
-  const label = plainLabel(plan.label);
   const continuation = firstNonEmpty(plan.sourceSignals.lineContinuationFeatures?.continuationPhrases);
   const normalizedContinuation = continuation ? normalizeContinuationPhrase(continuation) : null;
   const moveFact = firstNonEmpty(plan.sourceSignals.moveFacts?.factPhrases);
@@ -70,19 +69,29 @@ export function buildFallbackExplanation(plan: ExplanationPlan, feature: ChoiceE
   const materialPhrase = firstNonEmpty(plan.sourceSignals.positionFeatures?.material.materialPhrases);
   const activityPhrase = firstNonEmpty(plan.sourceSignals.positionFeatures?.pieceActivity.activityPhrases);
   const contrastOwnStrength = firstNonEmpty(plan.sourceSignals.contrastFeatures?.ownStrengths);
+  const correctAttackPhrase = firstNonEmpty(
+    plan.sourceSignals.lineTrajectoryFeatures?.correctAttackContinuationEvidence.map((item) => item.usablePhrase),
+    plan.sourceSignals.lineTrajectoryFeatures?.correctAttackContinuationEvidence.map((item) => item.phrase),
+  );
 
   if (plan.isCorrect) {
+    if (correctAttackPhrase) {
+      return `${normalizeStrengthPhrase(correctAttackPhrase)}。`;
+    }
+    if (plan.reasonDetail && plan.reasonDetail !== '具体的な次の狙いが残る') {
+      return `${normalizeStrengthPhrase(plan.reasonDetail)}。`;
+    }
     const firstPhrase = moveFact ?? positionPhrase ?? materialPhrase ?? activityPhrase ?? contrastOwnStrength;
     if (firstPhrase && normalizedContinuation) {
-      return `${firstPhrase}。${normalizedContinuation}。`;
+      return `${firstPhrase}うえ，${normalizedContinuation}。`;
     }
     if (normalizedContinuation) {
       return `${normalizedContinuation}。`;
     }
     if (firstPhrase) {
-      return `${firstPhrase}。攻めが続く。`;
+      return `${firstPhrase}。`;
     }
-    return `${label}は攻めが続く。`;
+    return '具体的な狙いが残る。';
   }
 
   const contrastPhrase = firstNonEmpty(plan.sourceSignals.contrastFeatures?.contrastPhrases);
@@ -116,7 +125,7 @@ export function buildFallbackExplanation(plan: ExplanationPlan, feature: ChoiceE
   }
 
   if (plan.primaryReason === 'wrong_too_slow' || feature.quality === 'bad' || feature.quality === 'blunder' || isPawnMove(plan)) {
-    return `${label}は少し遅い。正解手と比べると攻め味が弱い。`;
+    return '手が遅い。正解手と比べると攻め味が弱い。';
   }
 
   return '正解手と比べると攻め味が弱い。';

@@ -194,6 +194,7 @@ export type DraftChoiceContrastDiagnosis =
   | 'weaker_material_gain'
   | 'promotion_or_capture_missing'
   | 'king_safety_risk'
+  | 'natural_but_worse'
   | 'unclear';
 
 export type DraftChoiceContrastFeatures = {
@@ -204,6 +205,32 @@ export type DraftChoiceContrastFeatures = {
   ownStrengths: string[];
 
   missingComparedToCorrect: string[];
+  missingCorrectEvidence: Array<{
+    category:
+      | 'material'
+      | 'pieceActivity'
+      | 'lineContinuation'
+      | 'threat'
+      | 'defense'
+      | 'kingSafety';
+    phrase: string;
+    evidenceLevel: 'direct' | 'line_observed' | 'heuristic' | 'eval_supported';
+    confidence: 'low' | 'medium' | 'high';
+    source: 'correct_usableEvidence' | 'correct_evidenceChain';
+    textUsefulness?: 'must_use' | 'useful' | 'optional' | 'low_value' | 'avoid';
+  }>;
+  ownCompensatingEvidence: Array<{
+    category:
+      | 'material'
+      | 'pieceActivity'
+      | 'lineContinuation'
+      | 'threat'
+      | 'defense'
+      | 'kingSafety';
+    phrase: string;
+    confidence: 'low' | 'medium' | 'high';
+  }>;
+  contrastUsablePhrases: string[];
 
   contrastPhrases: string[];
 
@@ -259,6 +286,8 @@ export type DraftEvidenceChainStep = {
     | 'king_safety'
     | 'other';
   fact: string;
+  candidateLabelAllowedInText?: boolean;
+  lineLabelsPreferred?: boolean;
 };
 
 export type DraftEvidenceChain = {
@@ -278,7 +307,42 @@ export type DraftEvidenceChain = {
   steps: DraftEvidenceChainStep[];
   resultPhrase: string;
   usablePhrase: string;
+  textUsefulness:
+    | 'must_use'
+    | 'useful'
+    | 'optional'
+    | 'low_value'
+    | 'avoid';
+  textUsefulnessReason: string[];
+  beneficiary:
+    | 'choice_side'
+    | 'opponent'
+    | 'both'
+    | 'unclear';
+  isGoodForChoice: boolean | null;
   limitations: string[];
+};
+
+export type DraftCorrectAttackContinuationEvidence = {
+  choiceId: number;
+  category:
+    | 'lineContinuation'
+    | 'threat'
+    | 'material'
+    | 'pieceActivity'
+    | 'promotion'
+    | 'kingPressure';
+  phrase: string;
+  usablePhrase: string;
+  confidence: 'low' | 'medium' | 'high';
+  evidenceLevel: 'direct' | 'line_observed' | 'heuristic';
+  source:
+    | 'move_facts'
+    | 'line_trajectory'
+    | 'evidence_chain'
+    | 'position_features';
+  lineLabels?: string[];
+  textUsefulness?: 'must_use' | 'useful' | 'optional' | 'low_value' | 'avoid';
 };
 
 export type DraftLineSnapshot = {
@@ -349,6 +413,7 @@ export type DraftLineTrajectoryFeatures = {
 
   usableEvidence: DraftUsableExplanationEvidence[];
   evidenceChains: DraftEvidenceChain[];
+  correctAttackContinuationEvidence: DraftCorrectAttackContinuationEvidence[];
 };
 
 export type ExplanationPlan = {

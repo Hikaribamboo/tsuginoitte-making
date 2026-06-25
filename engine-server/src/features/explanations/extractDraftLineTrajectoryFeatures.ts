@@ -9,6 +9,7 @@ import {
 } from '../kif-problem-generation/shogi/sfenEngine.js';
 import type {
   ChoiceEvalFeature,
+  DraftCorrectAttackContinuationEvidence,
   DraftEvidenceChain,
   DraftEvidenceChainStep,
   DraftFeatureCategory,
@@ -361,7 +362,7 @@ function labelMove(pos: Position, usi: string): string | null {
       ? pos.board[usiToIdx(endpoints.from).r]?.[usiToIdx(endpoints.from).f] ?? null
       : null;
   const name = pieceName(piece);
-  if (!name) return null;
+  if (!piece || !name) return null;
   const promotedName = endpoints.isPromotion ? pieceName({ base: piece.base, prom: true }) : null;
   return `${turnPrefix(pos.turn)}${destination}${promotedName ?? name}${endpoints.isDrop ? '打' : ''}`;
 }
@@ -472,13 +473,16 @@ function moveStep(
   role: DraftEvidenceChainStep['role'],
   fact: string,
 ): DraftEvidenceChainStep {
+  const side = event ? stepSide(event.ply) : 'unknown';
   return {
     ply: event?.ply ?? -1,
     usi: event?.usi ?? null,
     label: event?.label ?? null,
-    side: event ? stepSide(event.ply) : 'unknown',
+    side,
     role,
     fact,
+    candidateLabelAllowedInText: side === 'choice' ? false : undefined,
+    lineLabelsPreferred: side === 'opponent' || side === 'self' ? true : undefined,
   };
 }
 
@@ -489,22 +493,401 @@ function promotePhrase(piece: string | null): string | null {
   return `${piece}が残る`;
 }
 
-function chainUsablePhrase(resultPhrase: string, nextOwnEvent: LineMoveEvent | undefined): string {
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripCandidateLabelFromPhrase(phrase: string, candidateEvent: LineMoveEvent | undefined): string {
+  const labels = unique([
+    candidateEvent?.label,
+    candidateEvent?.label?.replace(/^([▲△])/, ''),
+  ]);
+  let current = phrase;
+  for (const label of labels) {
+    const escaped = escapeRegExp(label);
+    current = current
+      .replace(new RegExp(`^${escaped}(?:は|では|なら|で|に|を)?[、，]?`), '')
+      .replace(new RegExp(`^${escaped}`), '');
+  }
+  return current.trim();
+}
+
+function withLineResponseLabel(
+  phrase: string,
+  firstResponseEvent: LineMoveEvent | undefined,
+  nextOwnEvent: LineMoveEvent | undefined,
+): string {
+  if (firstResponseEvent?.label && nextOwnEvent?.label) {
+    return `${firstResponseEvent.label}には${phrase}`;
+  }
+  return phrase;
+}
+
+function chainUsablePhrase(
+  resultPhrase: string,
+  firstResponseEvent: LineMoveEvent | undefined,
+  nextOwnEvent: LineMoveEvent | undefined,
+): string {
   if (!nextOwnEvent?.label) return resultPhrase;
   if (resultPhrase.includes('飛車を逃げても') && resultPhrase.includes('角成')) {
-    return `飛車を逃げても${nextOwnEvent.label}が残る`;
+    return withLineResponseLabel(`${nextOwnEvent.label}が残る`, firstResponseEvent, nextOwnEvent);
   }
   if (resultPhrase === '角成が残る' || resultPhrase === '角が成れる') {
-    return `${nextOwnEvent.label}が残る`;
+    return withLineResponseLabel(`${nextOwnEvent.label}が残る`, firstResponseEvent, nextOwnEvent);
   }
   if (resultPhrase.includes('馬を作れる') || resultPhrase.includes('龍を作れる')) {
-    return `${nextOwnEvent.label}で${resultPhrase}`;
+    return withLineResponseLabel(`${nextOwnEvent.label}で${resultPhrase}`, firstResponseEvent, nextOwnEvent);
   }
   return resultPhrase;
 }
 
+type DraftEvidenceChainSeed = Omit<
+  DraftEvidenceChain,
+  'textUsefulness' | 'textUsefulnessReason' | 'beneficiary' | 'isGoodForChoice'
+>;
+
+function chainHasLineLabel(chain: Pick<DraftEvidenceChain, 'steps' | 'usablePhrase'>): boolean {
+  return chain.steps.some((step) =>
+    step.side !== 'choice' &&
+    step.label !== null &&
+    step.lineLabelsPreferred === true &&
+    chain.usablePhrase.includes(step.label)
+  );
+}
+
+function inferChainPerspective(chain: DraftEvidenceChainSeed): {
+  beneficiary: DraftEvidenceChain['beneficiary'];
+  isGoodForChoice: boolean | null;
+  reasons: string[];
+} {
+  const reasons: string[] = [];
+  const materialLikeRoles = new Set<DraftEvidenceChainStep['role']>(['capture', 'material_gain', 'promotion']);
+  const positiveRoles = new Set<DraftEvidenceChainStep['role']>(['next_own_move', 'defense', 'threat']);
+  const materialSteps = chain.steps.filter((step) => materialLikeRoles.has(step.role));
+
+  if (chain.category === 'kingSafety') {
+    if (chain.resultPhrase.includes('自玉周辺の相手利きが増える')) {
+      return {
+        beneficiary: 'opponent',
+        isGoodForChoice: false,
+        reasons: ['own_king_safety_worsens'],
+      };
+    }
+    if (chain.resultPhrase.includes('相手玉周辺への利きが増える')) {
+      return {
+        beneficiary: 'choice_side',
+        isGoodForChoice: true,
+        reasons: ['opponent_king_pressure_increases'],
+      };
+    }
+  }
+
+  if (materialSteps.length > 0) {
+    const hasChoiceGain = materialSteps.some((step) => step.side === 'choice' || step.side === 'self');
+    const hasOpponentGain = materialSteps.some((step) => step.side === 'opponent');
+    if (hasChoiceGain && hasOpponentGain) {
+      reasons.push('material_exchange_seen_for_both_sides');
+      return { beneficiary: 'both', isGoodForChoice: null, reasons };
+    }
+    if (hasChoiceGain) {
+      reasons.push('material_gain_for_choice_side');
+      return { beneficiary: 'choice_side', isGoodForChoice: true, reasons };
+    }
+    if (hasOpponentGain) {
+      reasons.push('material_gain_for_opponent');
+      return { beneficiary: 'opponent', isGoodForChoice: false, reasons };
+    }
+    reasons.push('material_gain_side_unclear');
+    return { beneficiary: 'unclear', isGoodForChoice: null, reasons };
+  }
+
+  const hasChoiceContinuation = chain.steps.some((step) =>
+    (step.side === 'choice' || step.side === 'self') &&
+    positiveRoles.has(step.role)
+  );
+  const hasOpponentContinuation = chain.steps.some((step) =>
+    step.side === 'opponent' &&
+    positiveRoles.has(step.role)
+  );
+  if (hasChoiceContinuation && hasOpponentContinuation) {
+    reasons.push('continuation_contains_both_sides');
+    return { beneficiary: 'both', isGoodForChoice: null, reasons };
+  }
+  if (hasChoiceContinuation) {
+    reasons.push('continuation_for_choice_side');
+    return { beneficiary: 'choice_side', isGoodForChoice: true, reasons };
+  }
+  if (hasOpponentContinuation) {
+    reasons.push('continuation_for_opponent');
+    return { beneficiary: 'opponent', isGoodForChoice: false, reasons };
+  }
+
+  if (chain.category === 'pieceActivity' && chain.steps.some((step) => step.side === 'choice' || step.side === 'self')) {
+    return {
+      beneficiary: 'choice_side',
+      isGoodForChoice: true,
+      reasons: ['piece_activity_for_choice_side'],
+    };
+  }
+
+  return {
+    beneficiary: 'unclear',
+    isGoodForChoice: null,
+    reasons: ['beneficiary_unclear'],
+  };
+}
+
+function classifyTextUsefulness(params: {
+  chain: DraftEvidenceChainSeed;
+  beneficiary: DraftEvidenceChain['beneficiary'];
+  isGoodForChoice: boolean | null;
+  isCorrectChoice: boolean;
+}): {
+  textUsefulness: DraftEvidenceChain['textUsefulness'];
+  textUsefulnessReason: string[];
+} {
+  const { chain, beneficiary, isGoodForChoice, isCorrectChoice } = params;
+  const reasons: string[] = [];
+  const hasLine = chainHasLineLabel(chain);
+  const isSmallPawnGain = chain.resultPhrase.includes('一歩取れる') || chain.usablePhrase.includes('一歩取れる');
+  const isCaptureOnly = chain.resultPhrase.includes('取れる') || chain.usablePhrase.includes('取れる');
+  const isMajorPieceCapture = chain.resultPhrase.includes('飛車を取れる') ||
+    chain.resultPhrase.includes('角を取れる') ||
+    chain.usablePhrase.includes('飛車を取れる') ||
+    chain.usablePhrase.includes('角を取れる');
+  const isHighValueAttack = chain.resultPhrase.includes('飛車取り') ||
+    chain.resultPhrase.includes('角に当たる') ||
+    chain.resultPhrase.includes('金に当たる') ||
+    chain.resultPhrase.includes('銀に当たる') ||
+    chain.resultPhrase.includes('大きな当たり') ||
+    chain.usablePhrase.includes('飛車取り') ||
+    chain.usablePhrase.includes('角に当たる') ||
+    chain.usablePhrase.includes('金に当たる') ||
+    chain.usablePhrase.includes('銀に当たる') ||
+    chain.usablePhrase.includes('大きな当たり');
+  const isImportantCategory = chain.category === 'lineContinuation' || chain.category === 'defense' || chain.category === 'threat';
+  const isHighOrMedium = chain.confidence === 'high' || chain.confidence === 'medium';
+
+  if (beneficiary === 'unclear') {
+    reasons.push('beneficiary_unclear');
+    return {
+      textUsefulness: chain.category === 'material' ? 'avoid' : 'optional',
+      textUsefulnessReason: reasons,
+    };
+  }
+  if (isGoodForChoice === false || beneficiary === 'opponent') {
+    reasons.push('good_for_opponent_or_bad_for_choice');
+    return { textUsefulness: 'avoid', textUsefulnessReason: reasons };
+  }
+  if (chain.confidence === 'low' || chain.evidenceLevel === 'heuristic') {
+    reasons.push('low_confidence_or_heuristic');
+    return { textUsefulness: 'optional', textUsefulnessReason: reasons };
+  }
+  if (isSmallPawnGain) {
+    reasons.push('small_pawn_gain_only');
+    return {
+      textUsefulness: isCorrectChoice ? 'optional' : 'low_value',
+      textUsefulnessReason: reasons,
+    };
+  }
+  if (!isCorrectChoice && chain.category === 'material' && chain.priority < 90) {
+    reasons.push('wrong_choice_material_detail_less_important_than_contrast');
+    return { textUsefulness: 'low_value', textUsefulnessReason: reasons };
+  }
+  if (!isCorrectChoice && chain.category === 'lineContinuation' && isCaptureOnly && !isMajorPieceCapture) {
+    reasons.push('wrong_choice_minor_capture_line_less_important_than_contrast');
+    return { textUsefulness: 'low_value', textUsefulnessReason: reasons };
+  }
+  if (isCorrectChoice && isHighOrMedium && (chain.category === 'lineContinuation' || chain.category === 'threat')) {
+    reasons.push('correct_attack_continuation_chain');
+    return {
+      textUsefulness: chain.priority >= 90 ? 'must_use' : 'useful',
+      textUsefulnessReason: reasons,
+    };
+  }
+  if (isCorrectChoice && isHighOrMedium && chain.category === 'material' && !isSmallPawnGain) {
+    reasons.push('correct_material_continuation');
+    return {
+      textUsefulness: isMajorPieceCapture || chain.steps.some((step) => step.role === 'promotion') ? 'must_use' : 'useful',
+      textUsefulnessReason: reasons,
+    };
+  }
+  if (isCorrectChoice && isHighOrMedium && chain.category === 'pieceActivity' && isHighValueAttack) {
+    reasons.push('correct_high_value_piece_activity');
+    return { textUsefulness: 'useful', textUsefulnessReason: reasons };
+  }
+  if (isImportantCategory && hasLine && isHighOrMedium && chain.priority >= 90) {
+    reasons.push(isCorrectChoice ? 'important_line_continuation_for_correct_choice' : 'important_line_contrast_material');
+    return {
+      textUsefulness: isCorrectChoice ? 'must_use' : 'useful',
+      textUsefulnessReason: reasons,
+    };
+  }
+  if (chain.steps.some((step) => step.role === 'promotion') && isHighOrMedium) {
+    reasons.push('promotion_result_is_textworthy');
+    return {
+      textUsefulness: isCorrectChoice ? 'must_use' : 'useful',
+      textUsefulnessReason: reasons,
+    };
+  }
+  if (chain.category === 'pieceActivity' && chain.priority >= 85 && isHighOrMedium) {
+    reasons.push('high_value_piece_activity');
+    return { textUsefulness: 'useful', textUsefulnessReason: reasons };
+  }
+  if (hasLine && isHighOrMedium && chain.priority >= 80) {
+    reasons.push('line_observed_but_not_mandatory');
+    return { textUsefulness: 'useful', textUsefulnessReason: reasons };
+  }
+
+  reasons.push('supporting_detail_only');
+  return { textUsefulness: 'optional', textUsefulnessReason: reasons };
+}
+
+function makeEvidenceChain(seed: DraftEvidenceChainSeed, isCorrectChoice: boolean): DraftEvidenceChain {
+  const perspective = inferChainPerspective(seed);
+  const usefulness = classifyTextUsefulness({
+    chain: seed,
+    beneficiary: perspective.beneficiary,
+    isGoodForChoice: perspective.isGoodForChoice,
+    isCorrectChoice,
+  });
+  return {
+    ...seed,
+    beneficiary: perspective.beneficiary,
+    isGoodForChoice: perspective.isGoodForChoice,
+    textUsefulness: usefulness.textUsefulness,
+    textUsefulnessReason: [...perspective.reasons, ...usefulness.textUsefulnessReason],
+  };
+}
+
+function correctAttackCategoryFromChain(chain: DraftEvidenceChain): DraftCorrectAttackContinuationEvidence['category'] {
+  if (
+    chain.steps.some((step) => step.role === 'promotion') ||
+    chain.resultPhrase.includes('馬を作れる') ||
+    chain.resultPhrase.includes('龍を作れる') ||
+    chain.usablePhrase.includes('角成') ||
+    chain.usablePhrase.includes('成が')
+  ) {
+    return 'promotion';
+  }
+  if (chain.category === 'threat') return 'threat';
+  if (chain.category === 'lineContinuation') return 'lineContinuation';
+  if (chain.category === 'material') return 'material';
+  if (chain.category === 'pieceActivity') return 'pieceActivity';
+  if (chain.category === 'kingSafety' || chain.usablePhrase.includes('相手玉周辺')) return 'kingPressure';
+  return 'lineContinuation';
+}
+
+function concreteAttackPhrase(phrase: string): boolean {
+  return phrase.includes('取れる') ||
+    phrase.includes('当たる') ||
+    phrase.includes('当たり') ||
+    phrase.includes('飛車取り') ||
+    phrase.includes('角成') ||
+    phrase.includes('成が') ||
+    phrase.includes('馬を作れる') ||
+    phrase.includes('龍を作れる') ||
+    phrase.includes('狙い') ||
+    phrase.includes('相手玉周辺');
+}
+
+function lineLabelsFromChain(chain: DraftEvidenceChain): string[] {
+  return unique(chain.steps
+    .filter((step) => step.side !== 'choice' && step.label !== null && step.lineLabelsPreferred === true)
+    .map((step) => step.label));
+}
+
+function continuationEvidenceLevel(level: DraftFeatureEvidenceLevel): DraftCorrectAttackContinuationEvidence['evidenceLevel'] {
+  if (level === 'direct' || level === 'line_observed' || level === 'heuristic') return level;
+  return 'heuristic';
+}
+
+function continuationSource(source: DraftUsableExplanationEvidence['source']): DraftCorrectAttackContinuationEvidence['source'] | null {
+  if (source === 'move_facts' || source === 'position_features' || source === 'line_trajectory') return source;
+  return null;
+}
+
+function categoryFromUsableEvidence(item: DraftUsableExplanationEvidence): DraftCorrectAttackContinuationEvidence['category'] | null {
+  if (item.category === 'lineContinuation') return 'lineContinuation';
+  if (item.category === 'threat') return 'threat';
+  if (item.category === 'material') {
+    return item.phrase.includes('馬を作れる') || item.phrase.includes('龍を作れる') || item.phrase.includes('成')
+      ? 'promotion'
+      : 'material';
+  }
+  if (item.category === 'pieceActivity') return item.phrase.includes('相手玉周辺') ? 'kingPressure' : 'pieceActivity';
+  if (item.category === 'kingSafety' && item.phrase.includes('相手玉周辺')) return 'kingPressure';
+  return null;
+}
+
+function buildCorrectAttackContinuationEvidence(params: {
+  choiceId: number;
+  isCorrectChoice: boolean;
+  usableEvidence: DraftUsableExplanationEvidence[];
+  evidenceChains: DraftEvidenceChain[];
+}): DraftCorrectAttackContinuationEvidence[] {
+  if (!params.isCorrectChoice) return [];
+
+  const result: DraftCorrectAttackContinuationEvidence[] = [];
+  for (const chain of params.evidenceChains) {
+    if (chain.isGoodForChoice === false || chain.beneficiary === 'opponent' || chain.textUsefulness === 'avoid') continue;
+    if (!concreteAttackPhrase(chain.usablePhrase) && !concreteAttackPhrase(chain.resultPhrase)) continue;
+    const useful = chain.textUsefulness === 'must_use' ||
+      chain.textUsefulness === 'useful' ||
+      chain.category === 'lineContinuation' ||
+      chain.category === 'threat';
+    if (!useful && chain.confidence === 'low') continue;
+    result.push({
+      choiceId: params.choiceId,
+      category: correctAttackCategoryFromChain(chain),
+      phrase: chain.resultPhrase,
+      usablePhrase: chain.usablePhrase,
+      confidence: chain.confidence,
+      evidenceLevel: continuationEvidenceLevel(chain.evidenceLevel),
+      source: 'evidence_chain',
+      lineLabels: lineLabelsFromChain(chain),
+      textUsefulness: chain.textUsefulness,
+    });
+  }
+
+  for (const item of params.usableEvidence) {
+    const source = continuationSource(item.source);
+    const category = categoryFromUsableEvidence(item);
+    if (!source || !category) continue;
+    if (item.confidence === 'low' || !concreteAttackPhrase(item.phrase)) continue;
+    result.push({
+      choiceId: params.choiceId,
+      category,
+      phrase: item.phrase,
+      usablePhrase: item.phrase,
+      confidence: item.confidence,
+      evidenceLevel: continuationEvidenceLevel(item.evidenceLevel),
+      source,
+      textUsefulness: item.confidence === 'high' ? 'useful' : 'optional',
+    });
+  }
+
+  const seen = new Set<string>();
+  return result.filter((item) => {
+    const key = `${item.category}:${item.usablePhrase}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((a, b) => {
+    const usefulness = (item: DraftCorrectAttackContinuationEvidence): number => {
+      if (item.textUsefulness === 'must_use') return 4;
+      if (item.textUsefulness === 'useful') return 3;
+      if (item.confidence === 'high') return 2;
+      if (item.confidence === 'medium') return 1;
+      return 0;
+    };
+    return usefulness(b) - usefulness(a);
+  });
+}
+
 function buildEvidenceChains(params: {
   choiceId: number;
+  isCorrectChoice: boolean;
   moveFacts?: DraftMoveFacts;
   lineContinuationFeatures?: { continuationPhrases: string[]; nextOwnMoveFacts: string[] };
   events: LineMoveEvent[];
@@ -512,7 +895,7 @@ function buildEvidenceChains(params: {
   pieceActivityPhrases: string[];
   kingSafetyPhrases: string[];
 }): DraftEvidenceChain[] {
-  const chains: DraftEvidenceChain[] = [];
+  const chains: DraftEvidenceChainSeed[] = [];
   const candidate = params.events[0];
   const firstResponse = params.events[1];
   const nextOwn = params.events[2];
@@ -555,7 +938,7 @@ function buildEvidenceChains(params: {
       priority: 100,
       steps,
       resultPhrase: phrase,
-      usablePhrase: chainUsablePhrase(phrase, nextOwn),
+      usablePhrase: stripCandidateLabelFromPhrase(chainUsablePhrase(phrase, firstResponse, nextOwn), candidate),
       limitations: [],
     });
   }
@@ -574,7 +957,7 @@ function buildEvidenceChains(params: {
         ...(firstResponse ? [moveStep(firstResponse, 'opponent_response', '応手')] : []),
       ],
       resultPhrase,
-      usablePhrase: candidate.label ? `${candidate.label}で${resultPhrase}` : resultPhrase,
+      usablePhrase: stripCandidateLabelFromPhrase(resultPhrase, candidate),
       limitations: ['line上で確認できる範囲の駒得'],
     });
   }
@@ -591,7 +974,7 @@ function buildEvidenceChains(params: {
         moveStep(candidate, 'candidate_move', candidateActivityFact),
       ],
       resultPhrase: candidateActivityFact,
-      usablePhrase: candidate.label ? `${candidate.label}で${candidateActivityFact}` : candidateActivityFact,
+      usablePhrase: stripCandidateLabelFromPhrase(candidateActivityFact, candidate),
       limitations: [],
     });
   }
@@ -613,7 +996,9 @@ function buildEvidenceChains(params: {
         moveStep(nextOwn, nextRole, nextResult),
       ],
       resultPhrase: nextResult,
-      usablePhrase: nextOwn.label ? `line上では${nextOwn.label}で${nextResult}` : `line上では${nextResult}`,
+      usablePhrase: nextOwn.label
+        ? withLineResponseLabel(`${nextOwn.label}で${nextResult}`, firstResponse, nextOwn)
+        : `line上では${nextResult}`,
       limitations: ['line上で確認できる範囲'],
     });
     chains.push({
@@ -629,7 +1014,9 @@ function buildEvidenceChains(params: {
         moveStep(nextOwn, 'next_own_move', nextResult),
       ],
       resultPhrase: nextResult,
-      usablePhrase: nextOwn.label ? `${nextOwn.label}で${nextResult}` : nextResult,
+      usablePhrase: nextOwn.label
+        ? (nextOwn.isDrop ? `次の${nextOwn.label}が狙い` : withLineResponseLabel(`${nextOwn.label}で${nextResult}`, firstResponse, nextOwn))
+        : nextResult,
       limitations: ['line上の応手に対する確認'],
     });
   }
@@ -649,7 +1036,9 @@ function buildEvidenceChains(params: {
         ...(trendEvent && trendEvent !== candidate ? [moveStep(trendEvent, 'material_gain', materialTrendPhrase)] : []),
       ],
       resultPhrase: materialTrendPhrase,
-      usablePhrase: trendEvent?.label ? `line上では${trendEvent.label}まで進んで駒得を主張できる` : materialTrendPhrase,
+      usablePhrase: trendEvent?.label && trendEvent !== candidate
+        ? `${trendEvent.label}まで進んで駒得を主張できる`
+        : stripCandidateLabelFromPhrase(materialTrendPhrase, candidate),
       limitations: ['line上で確認できる範囲'],
     });
   }
@@ -672,7 +1061,9 @@ function buildEvidenceChains(params: {
         ...(trendEvent && trendEvent !== candidate ? [moveStep(trendEvent, 'threat', activityTrendPhrase)] : []),
       ],
       resultPhrase: activityTrendPhrase,
-      usablePhrase: trendEvent?.label ? `line上では${trendEvent.label}まで進んで${activityTrendPhrase}` : activityTrendPhrase,
+      usablePhrase: trendEvent?.label && trendEvent !== candidate
+        ? `${trendEvent.label}まで進んで${activityTrendPhrase}`
+        : stripCandidateLabelFromPhrase(activityTrendPhrase, candidate),
       limitations: activityTrendPhrase.includes('相手玉周辺') ? ['簡易特徴量による推定'] : ['line上で確認できる範囲'],
     });
   }
@@ -701,7 +1092,8 @@ function buildEvidenceChains(params: {
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  }).sort((a, b) => b.priority - a.priority);
+  }).map((chain) => makeEvidenceChain(chain, params.isCorrectChoice))
+    .sort((a, b) => b.priority - a.priority);
 }
 
 export function extractDraftLineTrajectoryFeatures(params: {
@@ -796,8 +1188,9 @@ export function extractDraftLineTrajectoryFeatures(params: {
     : null;
   if ((attackNearOpponentKingDeltaPly5 ?? 0) >= 2) pieceActivityPhrases.push('相手玉周辺への利きが増える');
 
-  const ownKingSafetyDeltaPly5 = afterPly5?.kingSafety.ownKingNearbyDefenders !== null &&
-    afterPly5?.kingSafety.opponentAttacksNearOwnKing !== null &&
+  const ownKingSafetyDeltaPly5 = afterPly5 !== undefined &&
+    afterPly5.kingSafety.ownKingNearbyDefenders !== null &&
+    afterPly5.kingSafety.opponentAttacksNearOwnKing !== null &&
     base.kingSafety.ownKingNearbyDefenders !== null &&
     base.kingSafety.opponentAttacksNearOwnKing !== null
     ? (afterPly5.kingSafety.ownKingNearbyDefenders - afterPly5.kingSafety.opponentAttacksNearOwnKing) -
@@ -857,20 +1250,31 @@ export function extractDraftLineTrajectoryFeatures(params: {
       category: 'kingSafety',
       phrase,
       evidenceLevel: 'heuristic',
-      confidence: 'low',
+      confidence: phrase.includes('相手玉周辺') ? 'medium' : 'low',
       source: 'line_trajectory',
       ply: 5,
       evalSupport: support,
     })),
   );
+  const isCorrectChoice = params.feature?.isCorrect ?? params.choice.choice_id === params.problem.correct_choice_id;
+  const dedupedUsableEvidence = unique(usableEvidence.map((item) => item.phrase)).map((phrase) =>
+    usableEvidence.find((item) => item.phrase === phrase) as DraftUsableExplanationEvidence
+  );
   const evidenceChains = buildEvidenceChains({
     choiceId: params.choice.choice_id,
+    isCorrectChoice,
     moveFacts: params.moveFacts,
     lineContinuationFeatures: params.lineContinuationFeatures,
     events,
     materialPhrases: unique(materialPhrases),
     pieceActivityPhrases: unique(pieceActivityPhrases),
     kingSafetyPhrases: unique(kingSafetyPhrases),
+  });
+  const correctAttackContinuationEvidence = buildCorrectAttackContinuationEvidence({
+    choiceId: params.choice.choice_id,
+    isCorrectChoice,
+    usableEvidence: dedupedUsableEvidence,
+    evidenceChains,
   });
 
   return {
@@ -897,10 +1301,9 @@ export function extractDraftLineTrajectoryFeatures(params: {
       phrases: unique(kingSafetyPhrases),
       confidence: kingSafetyPhrases.length > 0 ? 'low' : 'none',
     },
-    usableEvidence: unique(usableEvidence.map((item) => item.phrase)).map((phrase) =>
-      usableEvidence.find((item) => item.phrase === phrase) as DraftUsableExplanationEvidence
-    ),
+    usableEvidence: dedupedUsableEvidence,
     evidenceChains,
+    correctAttackContinuationEvidence,
   };
 }
 

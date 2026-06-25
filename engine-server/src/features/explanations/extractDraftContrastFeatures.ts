@@ -2,6 +2,8 @@ import type {
   ChoiceEvalFeature,
   DraftChoiceContrastDiagnosis,
   DraftChoiceContrastFeatures,
+  DraftFeatureCategory,
+  DraftFeatureEvidenceLevel,
   DraftLineContinuationFeatures,
   DraftLineTrajectoryFeatures,
   DraftMoveFacts,
@@ -59,11 +61,265 @@ function trajectoryStrengthPhrases(lineTrajectoryFeatures?: DraftLineTrajectoryF
   ]);
 }
 
+type ContrastEvidenceCategory = DraftChoiceContrastFeatures['missingCorrectEvidence'][number]['category'];
+type OwnCompensatingEvidence = DraftChoiceContrastFeatures['ownCompensatingEvidence'][number];
+
+function contrastCategory(category: DraftFeatureCategory): ContrastEvidenceCategory | null {
+  if (category === 'contrast') return null;
+  return category;
+}
+
+function contrastEvidenceLevel(evidenceLevel: DraftFeatureEvidenceLevel): DraftChoiceContrastFeatures['missingCorrectEvidence'][number]['evidenceLevel'] | null {
+  if (
+    evidenceLevel === 'direct' ||
+    evidenceLevel === 'line_observed' ||
+    evidenceLevel === 'heuristic' ||
+    evidenceLevel === 'eval_supported'
+  ) return evidenceLevel;
+  return null;
+}
+
+function usefulCorrectEvidence(lineTrajectoryFeatures?: DraftLineTrajectoryFeatures): DraftChoiceContrastFeatures['missingCorrectEvidence'] {
+  const result: DraftChoiceContrastFeatures['missingCorrectEvidence'] = [];
+  for (const chain of lineTrajectoryFeatures?.evidenceChains ?? []) {
+    const category = contrastCategory(chain.category);
+    const evidenceLevel = contrastEvidenceLevel(chain.evidenceLevel);
+    if (!category || !evidenceLevel) continue;
+    if (chain.confidence === 'low') continue;
+    if (chain.textUsefulness === 'avoid' || chain.textUsefulness === 'low_value') continue;
+    result.push({
+      category,
+      phrase: normalizePhrase(chain.usablePhrase || chain.resultPhrase),
+      evidenceLevel,
+      confidence: chain.confidence,
+      source: 'correct_evidenceChain',
+      textUsefulness: chain.textUsefulness,
+    });
+  }
+  for (const item of lineTrajectoryFeatures?.usableEvidence ?? []) {
+    const category = contrastCategory(item.category);
+    const evidenceLevel = contrastEvidenceLevel(item.evidenceLevel);
+    if (!category || !evidenceLevel) continue;
+    if (item.confidence === 'low') continue;
+    if (result.some((existing) => existing.phrase === normalizePhrase(item.phrase))) continue;
+    result.push({
+      category,
+      phrase: normalizePhrase(item.phrase),
+      evidenceLevel,
+      confidence: item.confidence,
+      source: 'correct_usableEvidence',
+    });
+  }
+  return result.filter((item) => item.phrase.length > 0);
+}
+
 function hasChainCategory(lineTrajectoryFeatures: DraftLineTrajectoryFeatures | undefined, category: DraftLineTrajectoryFeatures['evidenceChains'][number]['category']): boolean {
   return Boolean(lineTrajectoryFeatures?.evidenceChains.some((chain) =>
     chain.category === category &&
     chain.confidence !== 'low'
   ));
+}
+
+function ownEvidenceCategories(params: {
+  moveFacts?: DraftMoveFacts;
+  positionFeatures?: DraftPositionFeatures;
+  lineContinuationFeatures?: DraftLineContinuationFeatures;
+  lineTrajectoryFeatures?: DraftLineTrajectoryFeatures;
+}): Set<ContrastEvidenceCategory> {
+  const categories = new Set<ContrastEvidenceCategory>();
+  if (params.moveFacts?.capturedPiece || (params.positionFeatures?.material.materialPhrases.length ?? 0) > 0) {
+    categories.add('material');
+  }
+  if ((params.moveFacts?.factPhrases.length ?? 0) > 0 || (params.positionFeatures?.pieceActivity.activityPhrases.length ?? 0) > 0) {
+    categories.add('pieceActivity');
+  }
+  if (hasContinuation(params.lineContinuationFeatures)) categories.add('lineContinuation');
+  if ((params.positionFeatures?.kingSafety.kingSafetyPhrases.length ?? 0) > 0) categories.add('kingSafety');
+  for (const item of params.lineTrajectoryFeatures?.usableEvidence ?? []) {
+    const category = contrastCategory(item.category);
+    if (category && item.confidence !== 'low' && item.evidenceLevel !== 'weak' && item.evidenceLevel !== 'none') {
+      categories.add(category);
+    }
+  }
+  for (const chain of params.lineTrajectoryFeatures?.evidenceChains ?? []) {
+    const category = contrastCategory(chain.category);
+    if (category && chain.confidence !== 'low' && chain.evidenceLevel !== 'weak' && chain.evidenceLevel !== 'none') {
+      categories.add(category);
+    }
+  }
+  return categories;
+}
+
+function missingCorrectEvidence(params: {
+  correctLineTrajectoryFeatures?: DraftLineTrajectoryFeatures;
+  ownMoveFacts?: DraftMoveFacts;
+  ownPositionFeatures?: DraftPositionFeatures;
+  ownLineContinuationFeatures?: DraftLineContinuationFeatures;
+  ownLineTrajectoryFeatures?: DraftLineTrajectoryFeatures;
+}): DraftChoiceContrastFeatures['missingCorrectEvidence'] {
+  const ownCategories = ownEvidenceCategories({
+    moveFacts: params.ownMoveFacts,
+    positionFeatures: params.ownPositionFeatures,
+    lineContinuationFeatures: params.ownLineContinuationFeatures,
+    lineTrajectoryFeatures: params.ownLineTrajectoryFeatures,
+  });
+  return usefulCorrectEvidence(params.correctLineTrajectoryFeatures)
+    .filter((item) => !ownCategories.has(item.category))
+    .slice(0, 4);
+}
+
+function categoryFromPhrase(phrase: string): ContrastEvidenceCategory {
+  if (phrase.includes('取れる') || phrase.includes('駒得') || phrase.includes('得') || phrase.includes('成')) return 'material';
+  if (phrase.includes('当たる') || phrase.includes('取り') || phrase.includes('利き')) return 'pieceActivity';
+  if (phrase.includes('受け') || phrase.includes('守')) return 'defense';
+  if (phrase.includes('玉') || phrase.includes('王')) return 'kingSafety';
+  return 'lineContinuation';
+}
+
+function ownStrengthConfidence(phrase: string): OwnCompensatingEvidence['confidence'] {
+  if (
+    phrase.includes('飛車取り') ||
+    phrase.includes('飛車を取れる') ||
+    phrase.includes('角を取れる') ||
+    phrase.includes('馬を作れる') ||
+    phrase.includes('龍を作れる')
+  ) return 'high';
+  if (
+    phrase.includes('一歩取れる') ||
+    phrase.includes('取れる') ||
+    phrase.includes('当たる') ||
+    phrase.includes('当たり') ||
+    phrase.includes('成') ||
+    phrase.includes('相手玉周辺への利きが増える') ||
+    phrase.includes('受け')
+  ) return 'medium';
+  return 'low';
+}
+
+function isUsefulOwnStrengthPhrase(phrase: string): boolean {
+  return ownStrengthConfidence(phrase) !== 'low' &&
+    !phrase.includes('優勢') &&
+    !phrase.includes('有利') &&
+    !phrase.includes('必ず') &&
+    !phrase.includes('攻め味が弱い') &&
+    !phrase.includes('攻めが続かない');
+}
+
+function inferredOwnStrengthPhrases(params: {
+  moveFacts?: DraftMoveFacts;
+  positionFeatures?: DraftPositionFeatures;
+  lineContinuationFeatures?: DraftLineContinuationFeatures;
+  lineTrajectoryFeatures?: DraftLineTrajectoryFeatures;
+}): string[] {
+  const result: string[] = [];
+  const capturedPiece = params.moveFacts?.capturedPiece ?? params.positionFeatures?.material.capturedPiece;
+  if (capturedPiece === '歩') result.push('一歩取れる');
+  else if (capturedPiece) result.push(`${capturedPiece}を取れる`);
+
+  for (const attacked of params.positionFeatures?.material.attackedPieces ?? []) {
+    if (['飛車', '角', '金', '銀'].includes(attacked.piece)) {
+      result.push(attacked.piece === '飛車' ? '飛車取りになる' : `${attacked.piece}に当たる`);
+    }
+  }
+  for (const attacked of params.moveFacts?.attacksAfterMove ?? []) {
+    if (['飛車', '角', '金', '銀'].includes(attacked.piece)) {
+      result.push(attacked.piece === '飛車' ? '飛車取りになる' : `${attacked.piece}に当たる`);
+    }
+  }
+  if (params.moveFacts?.isPromotion || params.positionFeatures?.pieceActivity.isPromotion) {
+    result.push('成りがある');
+  }
+  for (const phrase of [
+    ...(params.lineContinuationFeatures?.continuationPhrases ?? []),
+    ...(params.lineContinuationFeatures?.nextOwnMoveFacts ?? []),
+    ...(params.lineTrajectoryFeatures?.materialTrend.phrases ?? []),
+    ...(params.lineTrajectoryFeatures?.pieceActivityTrend.phrases ?? []),
+    ...(params.lineTrajectoryFeatures?.kingSafetyTrend.phrases ?? []),
+    ...(params.lineTrajectoryFeatures?.usableEvidence ?? []).map((item) => item.phrase),
+  ]) {
+    if (
+      phrase.includes('一歩取れる') ||
+      phrase.includes('取れる') ||
+      phrase.includes('当たる') ||
+      phrase.includes('当たり') ||
+      phrase.includes('飛車取り') ||
+      phrase.includes('馬を作れる') ||
+      phrase.includes('龍を作れる') ||
+      phrase.includes('角成') ||
+      phrase.includes('成り') ||
+      phrase.includes('相手玉周辺への利きが増える') ||
+      phrase.includes('受け')
+    ) {
+      result.push(phrase);
+    }
+  }
+  return unique(result).filter(isUsefulOwnStrengthPhrase);
+}
+
+function ownCompensatingEvidence(ownStrengths: string[]): DraftChoiceContrastFeatures['ownCompensatingEvidence'] {
+  return unique(ownStrengths)
+    .filter(isUsefulOwnStrengthPhrase)
+    .slice(0, 6)
+    .map((phrase) => ({
+      category: categoryFromPhrase(phrase),
+      phrase,
+      confidence: ownStrengthConfidence(phrase),
+    }));
+}
+
+function missingEvidencePhrase(evidence: DraftChoiceContrastFeatures['missingCorrectEvidence'][number]): string {
+  const phrase = evidence.phrase;
+  if (phrase.includes('角成') || phrase.includes('角が成') || phrase.includes('馬を作')) {
+    return '正解手のような角成が残らない';
+  }
+  if (phrase.includes('龍を作') || phrase.includes('竜を作') || phrase.includes('飛車成')) {
+    return '正解手のような飛車成が残らない';
+  }
+  if (phrase.includes('飛車取り') || phrase.includes('角取り') || phrase.includes('当たる') || phrase.includes('当たり')) {
+    return '正解手ほど大きな当たりではない';
+  }
+  if (evidence.category === 'material' || phrase.includes('取れる') || phrase.includes('駒得')) {
+    return '正解手ほど駒得につながる手順がない';
+  }
+  if (evidence.category === 'defense') return '正解手ほど受けの手順が見えない';
+  if (evidence.category === 'kingSafety') return '正解手ほど玉まわりが安定しない';
+  if (evidence.category === 'threat') return '正解手のような厳しい狙いがない';
+  return '正解手のような手順付きの継続がない';
+}
+
+function concreteMissingEvidencePhrase(evidence: DraftChoiceContrastFeatures['missingCorrectEvidence'][number]): string {
+  if (evidence.source !== 'correct_evidenceChain') return missingEvidencePhrase(evidence);
+  if (evidence.phrase.length > 36) return missingEvidencePhrase(evidence);
+  if (!/[▲△]/.test(evidence.phrase)) return missingEvidencePhrase(evidence);
+  return `正解手は${evidence.phrase}が，後続の攻めが弱い`;
+}
+
+function contrastUsablePhrases(params: {
+  ownCompensatingEvidence: DraftChoiceContrastFeatures['ownCompensatingEvidence'];
+  missingCorrectEvidence: DraftChoiceContrastFeatures['missingCorrectEvidence'];
+  contrastPhrases: string[];
+  missingComparedToCorrect: string[];
+}): string[] {
+  const missing = unique([
+    ...params.missingCorrectEvidence.map(missingEvidencePhrase),
+    ...params.missingCorrectEvidence.map(concreteMissingEvidencePhrase),
+    ...params.missingComparedToCorrect,
+    ...params.contrastPhrases,
+  ]);
+  const result: string[] = [];
+  const own = params.ownCompensatingEvidence.find((item) => item.confidence !== 'low')?.phrase;
+  if (own && missing.length > 0) {
+    const missingWithoutOwnPrefix = missing.find((phrase) => !phrase.startsWith(`${own}が，`)) ?? missing[0];
+    result.push(`${own}が，${missingWithoutOwnPrefix}`);
+    if (own.includes('飛車取り')) result.push('飛車取りにはなるが，正解手ほど厳しくない');
+    if (own.includes('馬を作れる')) result.push('馬は作れるが，正解手のような継続がない');
+    if (own.includes('龍を作れる')) result.push('龍は作れるが，正解手のような継続がない');
+    if (own.includes('銀に当たる') || own.includes('金に当たる') || own.includes('角に当たる')) {
+      result.push(`${own}が，正解手ほど大きな当たりではない`);
+    }
+  }
+  result.push(...missing);
+  return unique(result).slice(0, 6);
 }
 
 function hasHighValueAttack(moveFacts?: DraftMoveFacts, positionFeatures?: DraftPositionFeatures): boolean {
@@ -116,6 +372,26 @@ function largeGap(feature?: ChoiceEvalFeature): boolean {
   return feature?.quality === 'bad' ||
     feature?.quality === 'blunder' ||
     (feature?.gapFromBest !== null && feature?.gapFromBest !== undefined && feature.gapFromBest >= 250);
+}
+
+function naturalButWorseGap(feature?: ChoiceEvalFeature): boolean {
+  return feature?.quality === 'worse' ||
+    feature?.quality === 'bad' ||
+    feature?.quality === 'blunder' ||
+    (feature?.gapFromBest !== null && feature?.gapFromBest !== undefined && feature.gapFromBest >= 120);
+}
+
+function correctHasStrongerEvidence(params: {
+  correctLineTrajectoryFeatures?: DraftLineTrajectoryFeatures;
+  missingComparedToCorrect: string[];
+}): boolean {
+  if (params.missingComparedToCorrect.length > 0) return true;
+  return usefulCorrectEvidence(params.correctLineTrajectoryFeatures).some((item) =>
+    item.category === 'material' ||
+    item.category === 'pieceActivity' ||
+    item.category === 'lineContinuation' ||
+    item.category === 'threat'
+  );
 }
 
 function hasPromotionOrCaptureContinuation(lineContinuationFeatures?: DraftLineContinuationFeatures): boolean {
@@ -207,6 +483,8 @@ function missingPhrases(params: {
 
 function diagnose(params: {
   feature?: ChoiceEvalFeature;
+  ownStrengths?: string[];
+  missingComparedToCorrect?: string[];
   correctMoveFacts?: DraftMoveFacts;
   ownMoveFacts?: DraftMoveFacts;
   correctPositionFeatures?: DraftPositionFeatures;
@@ -233,6 +511,18 @@ function diagnose(params: {
   const ownHasLineChain = hasChainCategory(params.ownLineTrajectoryFeatures, 'lineContinuation');
   const correctHasMaterialChain = hasChainCategory(params.correctLineTrajectoryFeatures, 'material');
   const ownHasMaterialChain = hasChainCategory(params.ownLineTrajectoryFeatures, 'material');
+  const naturalOwnStrengths = (params.ownStrengths ?? []).filter(isUsefulOwnStrengthPhrase);
+
+  if (
+    naturalOwnStrengths.length > 0 &&
+    naturalButWorseGap(params.feature) &&
+    correctHasStrongerEvidence({
+      correctLineTrajectoryFeatures: params.correctLineTrajectoryFeatures,
+      missingComparedToCorrect: params.missingComparedToCorrect ?? [],
+    })
+  ) {
+    return 'natural_but_worse';
+  }
 
   if (isSmallGain(params.ownMoveFacts, params.ownPositionFeatures) && correctHasHighValueAttack && !ownHasHighValueAttack) {
     return 'low_value_gain_vs_major_piece_attack';
@@ -308,6 +598,9 @@ function contrastPhrases(params: {
     result.push('正解手のような成りや駒得が残らない');
   } else if (params.diagnosis === 'king_safety_risk') {
     result.push('自玉が危なく，正解手ほど安全に進まない');
+  } else if (params.diagnosis === 'natural_but_worse') {
+    result.push(`${own ?? '自然に見える'}が，正解手ほど攻めが続かない`);
+    result.push(`${own ?? '狙いはある'}が，正解手ほど厳しくない`);
   }
 
   if (params.missingComparedToCorrect.includes('正解手のような角成が残らない')) {
@@ -350,11 +643,20 @@ export function extractDraftContrastFeaturesForChoices(params: {
     const ownPositionFeatures = params.positionFeaturesByChoiceId.get(choice.choice_id);
     const ownLineContinuationFeatures = params.lineContinuationFeaturesByChoiceId.get(choice.choice_id);
     const ownLineTrajectoryFeatures = params.lineTrajectoryFeaturesByChoiceId?.get(choice.choice_id);
-    const ownStrengths = strengthPhrases({
-      moveFacts: ownMoveFacts,
-      positionFeatures: ownPositionFeatures,
-      lineContinuationFeatures: ownLineContinuationFeatures,
-    }).concat(trajectoryStrengthPhrases(ownLineTrajectoryFeatures));
+    const ownStrengths = unique([
+      ...strengthPhrases({
+        moveFacts: ownMoveFacts,
+        positionFeatures: ownPositionFeatures,
+        lineContinuationFeatures: ownLineContinuationFeatures,
+      }),
+      ...trajectoryStrengthPhrases(ownLineTrajectoryFeatures),
+      ...inferredOwnStrengthPhrases({
+        moveFacts: ownMoveFacts,
+        positionFeatures: ownPositionFeatures,
+        lineContinuationFeatures: ownLineContinuationFeatures,
+        lineTrajectoryFeatures: ownLineTrajectoryFeatures,
+      }),
+    ]);
     const missingComparedToCorrect = feature?.isCorrect
       ? []
       : missingPhrases({
@@ -369,6 +671,8 @@ export function extractDraftContrastFeaturesForChoices(params: {
         });
     const diagnosis = diagnose({
       feature,
+      ownStrengths,
+      missingComparedToCorrect,
       correctMoveFacts,
       ownMoveFacts,
       correctPositionFeatures,
@@ -384,6 +688,24 @@ export function extractDraftContrastFeaturesForChoices(params: {
       missingComparedToCorrect,
       ownMoveFacts,
     });
+    const missingEvidence = feature?.isCorrect
+      ? []
+      : missingCorrectEvidence({
+          correctLineTrajectoryFeatures,
+          ownMoveFacts,
+          ownPositionFeatures,
+          ownLineContinuationFeatures,
+          ownLineTrajectoryFeatures,
+        });
+    const compensatingEvidence = feature?.isCorrect ? [] : ownCompensatingEvidence(ownStrengths);
+    const usableContrastPhrases = feature?.isCorrect
+      ? []
+      : contrastUsablePhrases({
+          ownCompensatingEvidence: compensatingEvidence,
+          missingCorrectEvidence: missingEvidence,
+          contrastPhrases: phrases,
+          missingComparedToCorrect,
+        });
 
     return {
       choiceId: choice.choice_id,
@@ -391,9 +713,12 @@ export function extractDraftContrastFeaturesForChoices(params: {
       correctStrengths,
       ownStrengths,
       missingComparedToCorrect,
+      missingCorrectEvidence: missingEvidence,
+      ownCompensatingEvidence: compensatingEvidence,
+      contrastUsablePhrases: usableContrastPhrases,
       contrastPhrases: phrases,
       diagnosis,
-      confidence: confidence(diagnosis, phrases.length),
+      confidence: confidence(diagnosis, phrases.length + usableContrastPhrases.length),
     };
   });
 }
