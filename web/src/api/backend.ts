@@ -96,7 +96,6 @@ export async function stopAnalysis(): Promise<void> {
 
 export interface ExplanationChoice {
   label: string;
-  eval_cp: number | null;
   eval_percent: number | null;
   line_labels: string;
   is_correct: boolean;

@@ -16,25 +16,25 @@ app.get('/api/health', (_req, res) => {
 });
 
 const FEW_SHOT_EXAMPLES = [
-  { label: '△３三金', eval_cp: 1254, eval_percent: 17, line_labels: '▲２二銀不成 △４一玉 ▲３三銀成 △２一飛 ▲２六飛成', explanation: '▲２二銀不成が厳しい。そこに金を逃げても助からない。' },
-  { label: '△４六桂打', eval_cp: 893, eval_percent: 25, line_labels: '▲５九玉 △２五歩 ▲２五同歩 △３八桂成', explanation: '特に強い狙いのない手。同飛車なら２三の銀を取れるが，同歩で何もない。' },
-  { label: '△３二金', eval_cp: 312, eval_percent: 40, line_labels: '▲２二歩打 △３三飛 ▲２二歩成 △３一玉', explanation: 'シンプルに金取りに同銀とできる形にするのが最善手。少し意外な手だが，意外とこれで耐えている。' },
-  { label: '▲９五角打', eval_cp: 513, eval_percent: 66, line_labels: '△９四飛 ▲７三角成 △７三同銀 ▲３四桂', explanation: '83飛には74歩ととって+1080 最善は94飛だが、角成同銀に34桂と打てば相手の飛車は働かず、一方的に攻めれる。' },
-  { label: '▲７四歩', eval_cp: 46, eval_percent: 51, line_labels: '△７四同飛 ▲７五歩打 △９四飛 ▲９六歩', explanation: '相手の飛車が自然に良い位置に行くので良くない。' },
-  { label: '▲１五歩', eval_cp: 46, eval_percent: 51, line_labels: '', explanation: 'チャンスを逃している' },
-  { label: '▲６四歩', eval_cp: -73, eval_percent: 48, line_labels: '△６四同歩 ▲６四同飛車 △９九角成 ▲６五飛', explanation: '同歩が最善だが、同飛車99角成に飛車まわりが絶品。持ち駒は少ないが互角' },
-  { label: '▲８八銀', eval_cp: -1003, eval_percent: 22, line_labels: '△３三飛成 ▲２九飛 △２八歩打 ▲２八同飛', explanation: '相手の手は多いが、こちらは持ち駒が少なく手が少ない。' },
-  { label: '▲７三飛成', eval_cp: -413, eval_percent: 37, line_labels: '△９五角打 ▲７三同龍 △６四同歩 ▲６三歩成', explanation: '95角と打たれ龍を逃げても99角なりとされ劣勢。' },
-  { label: '▲４九金', eval_cp: 723, eval_percent: 71, line_labels: '△３六歩打 ▲９六角打 △３七桂打 ▲９六同飛', explanation: '悪くはないが、なんの為に将棋を指しているのか分からない。' },
-  { label: '▲７四香', eval_cp: 1616, eval_percent: 88, line_labels: '△７四同飛 ▲８三龍 △７四香打 ▲２五歩', explanation: '飛車を逃げると44桂打ちが激痛 詰めろなので香車を取る一択だが、冷静に同銀と取られて下手よし。' },
-  { label: '▲７二歩打', eval_cp: 1022, eval_percent: 78, line_labels: '△８一玉 ▲７三桂打 △６二金 ▲７二角打', explanation: '次善手だが、駒を大量に渡してしまうので実践的には危うい。' },
+  { label: '△３三金', eval_percent: 17, line_labels: '▲２二銀不成 △４一玉 ▲３三銀成 △２一飛 ▲２六飛成', explanation: '▲２二銀不成が厳しい。そこに金を逃げても助からない。' },
+  { label: '△４六桂打', eval_percent: 25, line_labels: '▲５九玉 △２五歩 ▲２五同歩 △３八桂成', explanation: '特に強い狙いのない手。同飛車なら２三の銀を取れるが，同歩で何もない。' },
+  { label: '△３二金', eval_percent: 40, line_labels: '▲２二歩打 △３三飛 ▲２二歩成 △３一玉', explanation: 'シンプルに金取りに同銀とできる形にするのが最善手。少し意外な手だが，意外とこれで耐えている。' },
+  { label: '▲９五角打', eval_percent: 66, line_labels: '△９四飛 ▲７三角成 △７三同銀 ▲３四桂', explanation: '△８三飛には▲７四歩と取れる。△９四飛が最善だが、角成同銀に▲３四桂と打てば相手の飛車は働かず、攻めの主導権を握れる。' },
+  { label: '▲７四歩', eval_percent: 51, line_labels: '△７四同飛 ▲７五歩打 △９四飛 ▲９六歩', explanation: '相手の飛車が自然に良い位置に行くので良くない。' },
+  { label: '▲１五歩', eval_percent: 51, line_labels: '', explanation: 'チャンスを逃している' },
+  { label: '▲６四歩', eval_percent: 48, line_labels: '△６四同歩 ▲６四同飛車 △９九角成 ▲６五飛', explanation: '同歩が最善だが、同飛車99角成に飛車まわりが絶品。持ち駒は少ないが互角' },
+  { label: '▲８八銀', eval_percent: 22, line_labels: '△３三飛成 ▲２九飛 △２八歩打 ▲２八同飛', explanation: '相手の手は多いが、こちらは持ち駒が少なく手が少ない。' },
+  { label: '▲７三飛成', eval_percent: 37, line_labels: '△９五角打 ▲７三同龍 △６四同歩 ▲６三歩成', explanation: '95角と打たれ龍を逃げても99角なりとされ劣勢。' },
+  { label: '▲４九金', eval_percent: 71, line_labels: '△３六歩打 ▲９六角打 △３七桂打 ▲９六同飛', explanation: '悪くはないが、なんの為に将棋を指しているのか分からない。' },
+  { label: '▲７四香', eval_percent: 88, line_labels: '△７四同飛 ▲８三龍 △７四香打 ▲２五歩', explanation: '飛車を逃げると44桂打ちが激痛 詰めろなので香車を取る一択だが、冷静に同銀と取られて下手よし。' },
+  { label: '▲７二歩打', eval_percent: 78, line_labels: '△８一玉 ▲７三桂打 △６二金 ▲７二角打', explanation: '次善手だが、駒を大量に渡してしまうので実践的には危うい。' },
 ];
 
 const STYLE_EXAMPLES: string[] = [
   '飛車を取っても敵陣に打つ場所がないので疑問手。',
   '玉頭の歩を伸ばすのが好手。どんどん桂跳ねや銀交換をして攻めをつなぐことができる。',
   '勝勢の局面で自玉頭を弱くする必要がない。',
-  '83飛には74歩ととって+1080 最善は94飛だが、角成同銀に34桂と打てば相手の飛車は働かず、一方的に攻めれる。',
+  '△８三飛には▲７四歩と取れる。△９四飛が最善だが、角成同銀に▲３四桂と打てば相手の飛車は働かず、攻めの主導権を握れる。',
   '相手の飛車が自然に良い位置に行くので良くない。',
   'チャンスを逃している',
   '△７八桂成で角が詰み，△１五香からの王手金取りが痛い。',
@@ -59,7 +59,7 @@ const STYLE_EXAMPLES: string[] = [
   '香取りは受けがないので４五の桂馬を自分から精算しに行くのが好手。',
   '相手の端は弱点ではないのでスジが悪い。',
   'たらしの歩が厳しい。次に打ち込む銀を取られても取られなくても相手は歩成りが受けられない。',
-  '角を直接打ち込むのは少し重たい。1000点悪くして敗勢となる。',
+  '角を直接打ち込むのは少し重たい。形勢を大きく損ねて敗勢となる。',
   '歩を回収されて終わる。',
   '飛車先を通しておく',
   '角出の時２五に飛車を引けないため飛車を止められ攻めが重くなる',
@@ -112,7 +112,6 @@ const STYLE_EXAMPLES: string[] = [
 
 type ExplanationChoice = {
   label: string;
-  eval_cp: number | null;
   eval_percent: number | null;
   line_labels: string;
   is_correct: boolean;
@@ -121,13 +120,13 @@ type ExplanationChoice = {
 function buildPrompt(sfen: string, sideToMove: 'sente' | 'gote', choices: ExplanationChoice[]): string {
   const examplesText = FEW_SHOT_EXAMPLES.map(
     (ex) =>
-      `指し手: ${ex.label} | 評価値: ${ex.eval_cp}cp (${ex.eval_percent}%) | 読み筋: ${ex.line_labels || 'なし'}\n解説: ${ex.explanation}`,
+      `指し手: ${ex.label} | 勝率: ${ex.eval_percent}% | 読み筋: ${ex.line_labels || 'なし'}\n解説: ${ex.explanation}`,
   ).join('\n\n');
 
   const choicesList = choices
     .map(
       (c, i) =>
-        `${i + 1}. 指し手: ${c.label} | 評価値: ${c.eval_cp ?? '不明'}cp (${c.eval_percent ?? '不明'}%) | 読み筋: ${c.line_labels || 'なし'}${c.is_correct ? ' [正解手]' : ''}`,
+        `${i + 1}. 指し手: ${c.label} | 勝率: ${c.eval_percent ?? '不明'}% | 読み筋: ${c.line_labels || 'なし'}${c.is_correct ? ' [正解手]' : ''}`,
     )
     .join('\n');
 
@@ -139,7 +138,7 @@ function buildPrompt(sfen: string, sideToMove: 'sente' | 'gote', choices: Explan
 以下の点を守ってください：
 - 読み筋の具体的な手順に言及しながら、なぜその手が良い/悪いのかを説明する
 - 1〜3文程度の簡潔な解説にする
-- 評価値や勝率も参考にして、その手の優劣を伝える
+- 勝率を参考にして、その手の優劣を伝える
 - 正解手は「なぜ良いか」、不正解手は「なぜダメか」を中心に書く
 - 将棋ファンに向けた自然な口語調で書く
 - 文体は常体（だ・である調）に統一し、「です」「ます」「でしょう」「のようです」などの敬体は使わない
@@ -147,11 +146,11 @@ function buildPrompt(sfen: string, sideToMove: 'sente' | 'gote', choices: Explan
 - 符号を解説に入れるときは「△２九飛成」「▲３一角打」のように、先手は▲、後手は△、全角数字＋漢数字＋駒名の形式にすること
 - 文頭で「▲５六歩は」「△２九飛成は」のように、選択肢の手を主語にしないこと（局面の狙い・形勢判断から書き始める）
 - 「一方的に攻められる」のような強い断定は多用せず、同程度の意味なら「攻めの主導権を握られる」を優先すること
-- 断定の強さは評価値差で調整すること（各候補の評価値を比較して判断）:
-  - 差が小さい（目安 0〜150cp）: 「やや」「少し」「互角に近い」など穏やかな表現
-  - 中差（目安 151〜400cp）: 「指しにくい」「主導権を握られる」など中程度の表現
-  - 大差（目安 401〜900cp）: 「悪手寄り」「形勢を損ねる」など強めの表現
-  - 極大差（目安 901cp以上）: 「敗勢」「決定的」など明確な表現
+- 断定の強さは勝率差で調整すること（各候補の勝率を比較して判断）:
+  - 差が小さい（目安 0〜5%）: 「やや」「少し」「互角に近い」など穏やかな表現
+  - 中差（目安 6〜15%）: 「指しにくい」「主導権を握られる」など中程度の表現
+  - 大差（目安 16〜30%）: 「悪手寄り」「形勢を損ねる」など強めの表現
+  - 極大差（目安 31%以上）: 「敗勢」「決定的」など明確な表現
 
 ## 入出力の例
 

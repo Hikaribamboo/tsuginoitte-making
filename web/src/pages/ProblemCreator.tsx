@@ -620,7 +620,6 @@ const ProblemCreator: React.FC = () => {
         const labels = pvToJapanese(fullPv, rootSfen, fullPv.length);
         return {
           label: c.label,
-          eval_cp: c.eval_cp,
           eval_percent: c.eval_percent,
           line_labels: labels.slice(1).join(" "),
           is_correct: slot === "correct",

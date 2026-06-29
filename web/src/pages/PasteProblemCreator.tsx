@@ -1522,7 +1522,6 @@ const PasteProblemCreator: React.FC = () => {
         const labels = pvToJapanese(fullPv, displaySfen, fullPv.length);
         return {
           label: choice.label || labels[0] || choice.usi,
-          eval_cp: choice.eval_cp,
           eval_percent: choice.eval_percent,
           line_labels: labels.slice(1).join(' '),
           is_correct: slot === 'correct',
