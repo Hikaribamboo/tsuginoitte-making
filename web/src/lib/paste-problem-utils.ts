@@ -1,5 +1,6 @@
 import { applyUsiMove, boardToSfen, parseSfen, parseUsiSquare } from './sfen';
 import { getValidDestinations, getValidDropSquares } from './legal-moves';
+import { pvToJapanese } from './usi-to-label';
 import type { ChoiceDraft } from '../types/problem';
 import type { HandPieceType } from '../types/shogi';
 
@@ -26,6 +27,12 @@ export function buildReplayLine(draft: ChoiceDraft, introMoveUsi = ''): string[]
   if (!draft.usi) return draft.line;
   const line = draft.line[0] === draft.usi ? draft.line : [draft.usi, ...draft.line];
   return [...introMoves, ...line];
+}
+
+export function buildChoiceLineLabels(draft: ChoiceDraft, sfen: string, maxMoves = 13): string {
+  const line = buildReplayLine(draft).filter(Boolean);
+  if (line.length === 0) return '';
+  return pvToJapanese(line, sfen, Math.min(line.length, maxMoves)).join(' ');
 }
 
 export function buildLegalChoicePv(args: {

@@ -39,6 +39,7 @@ import { saveLastNewModeTags } from '../lib/new-mode-tags';
 import { getValidDestinations, getValidDropSquares } from '../lib/legal-moves';
 import {
   buildReplayLine,
+  buildChoiceLineLabels,
   buildSfenAfterMoves,
   formatMoveValidationError,
   pickChoiceFields,
@@ -1518,12 +1519,10 @@ const PasteProblemCreator: React.FC = () => {
 
       const choiceData = targetSlots.map((slot) => {
         const choice = choices[slot];
-        const fullPv = [choice.usi, ...choice.line].filter(Boolean);
-        const labels = pvToJapanese(fullPv, displaySfen, fullPv.length);
         return {
-          label: choice.label || labels[0] || choice.usi,
+          label: choice.label || choice.usi,
           eval_percent: choice.eval_percent,
-          line_labels: labels.slice(1).join(' '),
+          line_labels: buildChoiceLineLabels(choice, displaySfen),
           is_correct: slot === 'correct',
         };
       });

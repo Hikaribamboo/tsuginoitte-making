@@ -16,18 +16,18 @@ app.get('/api/health', (_req, res) => {
 });
 
 const FEW_SHOT_EXAMPLES = [
-  { label: '△３三金', eval_percent: 17, line_labels: '▲２二銀不成 △４一玉 ▲３三銀成 △２一飛 ▲２六飛成', explanation: '▲２二銀不成が厳しい。そこに金を逃げても助からない。' },
-  { label: '△４六桂打', eval_percent: 25, line_labels: '▲５九玉 △２五歩 ▲２五同歩 △３八桂成', explanation: '特に強い狙いのない手。同飛車なら２三の銀を取れるが，同歩で何もない。' },
-  { label: '△３二金', eval_percent: 40, line_labels: '▲２二歩打 △３三飛 ▲２二歩成 △３一玉', explanation: 'シンプルに金取りに同銀とできる形にするのが最善手。少し意外な手だが，意外とこれで耐えている。' },
-  { label: '▲９五角打', eval_percent: 66, line_labels: '△９四飛 ▲７三角成 △７三同銀 ▲３四桂', explanation: '△８三飛には▲７四歩と取れる。△９四飛が最善だが、角成同銀に▲３四桂と打てば相手の飛車は働かず、攻めの主導権を握れる。' },
-  { label: '▲７四歩', eval_percent: 51, line_labels: '△７四同飛 ▲７五歩打 △９四飛 ▲９六歩', explanation: '相手の飛車が自然に良い位置に行くので良くない。' },
-  { label: '▲１五歩', eval_percent: 51, line_labels: '', explanation: 'チャンスを逃している' },
-  { label: '▲６四歩', eval_percent: 48, line_labels: '△６四同歩 ▲６四同飛車 △９九角成 ▲６五飛', explanation: '同歩が最善だが、同飛車99角成に飛車まわりが絶品。持ち駒は少ないが互角' },
-  { label: '▲８八銀', eval_percent: 22, line_labels: '△３三飛成 ▲２九飛 △２八歩打 ▲２八同飛', explanation: '相手の手は多いが、こちらは持ち駒が少なく手が少ない。' },
-  { label: '▲７三飛成', eval_percent: 37, line_labels: '△９五角打 ▲７三同龍 △６四同歩 ▲６三歩成', explanation: '95角と打たれ龍を逃げても99角なりとされ劣勢。' },
-  { label: '▲４九金', eval_percent: 71, line_labels: '△３六歩打 ▲９六角打 △３七桂打 ▲９六同飛', explanation: '悪くはないが、なんの為に将棋を指しているのか分からない。' },
-  { label: '▲７四香', eval_percent: 88, line_labels: '△７四同飛 ▲８三龍 △７四香打 ▲２五歩', explanation: '飛車を逃げると44桂打ちが激痛 詰めろなので香車を取る一択だが、冷静に同銀と取られて下手よし。' },
-  { label: '▲７二歩打', eval_percent: 78, line_labels: '△８一玉 ▲７三桂打 △６二金 ▲７二角打', explanation: '次善手だが、駒を大量に渡してしまうので実践的には危うい。' },
+  { label: '△３三金', eval_percent: 17, line_labels: '△３三金 ▲２二銀不成 △４一玉 ▲３三銀成 △２一飛 ▲２六飛成', explanation: '▲２二銀不成が厳しい。そこに金を逃げても助からない。' },
+  { label: '△４六桂打', eval_percent: 25, line_labels: '△４六桂打 ▲５九玉 △２五歩 ▲２五同歩 △３八桂成', explanation: '特に強い狙いのない手。同飛車なら２三の銀を取れるが，同歩で何もない。' },
+  { label: '△３二金', eval_percent: 40, line_labels: '△３二金 ▲２二歩打 △３三飛 ▲２二歩成 △３一玉', explanation: 'シンプルに金取りに同銀とできる形にするのが最善手。少し意外な手だが，意外とこれで耐えている。' },
+  { label: '▲９五角打', eval_percent: 66, line_labels: '▲９五角打 △９四飛 ▲７三角成 △７三同銀 ▲３四桂', explanation: '△８三飛には▲７四歩と取れる。△９四飛が最善だが、角成同銀に▲３四桂と打てば相手の飛車は働かず、攻めの主導権を握れる。' },
+  { label: '▲７四歩', eval_percent: 51, line_labels: '▲７四歩 △７四同飛 ▲７五歩打 △９四飛 ▲９六歩', explanation: '相手の飛車が自然に良い位置に行くので良くない。' },
+  { label: '▲１五歩', eval_percent: 51, line_labels: '▲１五歩', explanation: 'チャンスを逃している' },
+  { label: '▲６四歩', eval_percent: 48, line_labels: '▲６四歩 △６四同歩 ▲６四同飛車 △９九角成 ▲６五飛', explanation: '同歩が最善だが、同飛車99角成に飛車まわりが絶品。持ち駒は少ないが互角' },
+  { label: '▲８八銀', eval_percent: 22, line_labels: '▲８八銀 △３三飛成 ▲２九飛 △２八歩打 ▲２八同飛', explanation: '相手の手は多いが、こちらは持ち駒が少なく手が少ない。' },
+  { label: '▲７三飛成', eval_percent: 37, line_labels: '▲７三飛成 △９五角打 ▲７三同龍 △６四同歩 ▲６三歩成', explanation: '95角と打たれ龍を逃げても99角なりとされ劣勢。' },
+  { label: '▲４九金', eval_percent: 71, line_labels: '▲４九金 △３六歩打 ▲９六角打 △３七桂打 ▲９六同飛', explanation: '悪くはないが、なんの為に将棋を指しているのか分からない。' },
+  { label: '▲７四香', eval_percent: 88, line_labels: '▲７四香 △７四同飛 ▲８三龍 △７四香打 ▲２五歩', explanation: '飛車を逃げると44桂打ちが激痛 詰めろなので香車を取る一択だが、冷静に同銀と取られて下手よし。' },
+  { label: '▲７二歩打', eval_percent: 78, line_labels: '▲７二歩打 △８一玉 ▲７三桂打 △６二金 ▲７二角打', explanation: '次善手だが、駒を大量に渡してしまうので実践的には危うい。' },
 ];
 
 const STYLE_EXAMPLES: string[] = [

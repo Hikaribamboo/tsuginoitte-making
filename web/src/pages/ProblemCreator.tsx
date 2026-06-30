@@ -10,7 +10,7 @@ import type { BestMove } from "../components/AnalysisPanel";
 import Toggle from "../components/Toggle";
 import { useBoardStore } from "../hooks/useBoardStore";
 import { parseSfen, toUsiSquare } from "../lib/sfen";
-import { usiToLabel, pvToJapanese } from "../lib/usi-to-label";
+import { usiToLabel } from "../lib/usi-to-label";
 import { cpToWinRatePercentFromRootSfen } from "../lib/eval-percent";
 import { evaluatePosition, generateExplanations } from "../api/backend";
 import { getNextDisplayNoByMode, saveLearningProblem } from "../api/problems";
@@ -22,6 +22,7 @@ import {
 } from "../api/favorites";
 import { DEFAULT_PROMPT } from "../lib/constants";
 import { getValidDestinations, getValidDropSquares } from "../lib/legal-moves";
+import { buildChoiceLineLabels } from "../lib/paste-problem-utils";
 import type { ChoiceDraft, LearningMode } from "../types/problem";
 import type { ProblemCreatorDraft } from "../lib/problem-draft";
 import type {
@@ -616,12 +617,10 @@ const ProblemCreator: React.FC = () => {
     try {
       const choiceData = targetSlots.map((slot) => {
         const c = choices[slot];
-        const fullPv = [c.usi, ...c.line];
-        const labels = pvToJapanese(fullPv, rootSfen, fullPv.length);
         return {
           label: c.label,
           eval_percent: c.eval_percent,
-          line_labels: labels.slice(1).join(" "),
+          line_labels: buildChoiceLineLabels(c, rootSfen),
           is_correct: slot === "correct",
         };
       });
