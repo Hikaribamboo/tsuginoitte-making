@@ -92,20 +92,27 @@ export function normalizeChoicesForSave(choices: SaveChoiceInput[]): SaveChoiceI
 // ---- Display No allocation ----
 
 export async function getNextDisplayNoByMode(mode: LearningMode): Promise<number> {
-  const { data, error } = await supabase.rpc('allocate_problem_display_no', {
-    p_mode: mode,
-  });
-
-  if (error) {
-    throw error;
+  if (mode === 'new_mode') {
+    throw new Error('new_mode does not use production display_no allocation');
   }
 
-  const displayNo = Number(data);
-  if (!Number.isInteger(displayNo) || displayNo <= 0) {
-    throw new Error(`invalid display_no allocated by database: ${String(data)}`);
+  const { data, error } = await supabase
+    .from('problems')
+    .select('display_no')
+    .eq('mode', mode)
+    .not('display_no', 'is', null)
+    .order('display_no', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const currentMax = data?.display_no == null ? 0 : Number(data.display_no);
+  if (!Number.isFinite(currentMax) || currentMax < 0) {
+    throw new Error(`invalid display_no found in problems: ${String(data?.display_no)}`);
   }
 
-  return displayNo;
+  return Math.floor(currentMax) + 1;
 }
 
 function isDisplayNoUniqueViolation(error: unknown): boolean {
@@ -154,83 +161,23 @@ export async function saveLearningProblem(
   const normalizedProblem = normalizeProblemForSave(problem);
   const normalizedChoices = normalizeChoicesForSave(choices);
 
-  if (mode === 'next_move') {
-    // Save to next_move_problems / next_move_choices
-    return saveProblemToNextMoveTable(normalizedProblem, normalizedChoices);
-  } else if (mode === 'joseki') {
+  if (mode === 'next_move' || mode === 'joseki') {
     // Save directly to problems / problem_choices
     return saveProblemToProblemsTable(normalizedProblem, normalizedChoices);
-  } else {
-    throw new Error(`unknown mode: ${mode}`);
-  }
-}
-
-async function saveProblemToNextMoveTable(
-  problem: SaveLearningProblemInput,
-  choices: SaveChoiceInput[],
-): Promise<SaveProblemResult> {
-  const displayNoToUse = problem.display_no ?? await getNextDisplayNoByMode('next_move');
-  const { data: problemData, error } = await supabase
-    .from('next_move_problems')
-    .insert({
-      prompt: problem.prompt,
-      root_sfen: problem.root_sfen,
-      correct_choice_id: problem.correct_choice_id,
-      intro_moves_usi: problem.intro_moves_usi,
-      root_eval_cp: problem.root_eval_cp,
-      root_eval_percent: problem.root_eval_percent,
-      problem_rating: problem.problem_rating,
-      problem_rating_games: problem.problem_rating_games,
-      display_no: displayNoToUse,
-      tags: problem.tags,
-    })
-    .select('id')
-    .single();
-
-  if (error) {
-    if (isDisplayNoUniqueViolation(error)) {
-      throw createDisplayNoDuplicateError(displayNoToUse, 'next_move');
-    }
-    throw error;
   }
 
-  if (!problemData) {
-    throw new Error('failed to insert problem');
-  }
-
-  const problemId = problemData.id as number;
-
-  const choiceRows = choices.map((choice) => ({
-    problem_id: problemId,
-    choice_id: choice.choice_id,
-    usi: choice.usi,
-    label: choice.label,
-    explanation: choice.explanation,
-    line: choice.line,
-    eval_cp: choice.eval_cp,
-    eval_percent: choice.eval_percent,
-  }));
-
-  const { error: choicesError } = await supabase
-    .from('next_move_choices')
-    .insert(choiceRows);
-
-  if (choicesError) {
-    throw choicesError;
-  }
-
-  return { problemId };
+  throw new Error(`unknown mode: ${mode}`);
 }
 
 async function saveProblemToProblemsTable(
   problem: SaveLearningProblemInput,
   choices: SaveChoiceInput[],
 ): Promise<SaveProblemResult> {
-  // Save directly to problems / problem_choices (joseki mode)
+  // Save directly to problems / problem_choices
   const problemRating = problem.problem_rating ?? 1500;
   const problemRatingGames = problem.problem_rating_games ?? 0;
   const status = problem.status ?? 'active';
-  const displayNoToUse = problem.display_no ?? await getNextDisplayNoByMode('joseki');
+  const displayNoToUse = problem.display_no ?? await getNextDisplayNoByMode(problem.mode);
 
   const { data: problemData, error } = await supabase
     .from('problems')
@@ -245,7 +192,7 @@ async function saveProblemToProblemsTable(
       problem_rating_games: problemRatingGames,
       display_no: displayNoToUse,
       tags: problem.tags,
-      mode: 'joseki',
+      mode: problem.mode,
       status,
     })
     .select('id')
@@ -253,7 +200,7 @@ async function saveProblemToProblemsTable(
 
   if (error) {
     if (isDisplayNoUniqueViolation(error)) {
-      throw createDisplayNoDuplicateError(displayNoToUse, 'joseki');
+      throw createDisplayNoDuplicateError(displayNoToUse, problem.mode);
     }
     throw error;
   }

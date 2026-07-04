@@ -9,10 +9,9 @@ import type {
 } from '../types/production';
 import { normalizeStringArray } from '../lib/data-normalize';
 
-const PROBLEM_SELECT =
-  'id, display_no, prompt, root_sfen, root_eval_cp, root_eval_percent, problem_rating, problem_rating_games, tags, correct_choice_id, intro_moves_usi, created_at, updated_at';
 const PROBLEM_SELECT_WITH_MODE_STATUS = `id, mode, status, display_no, prompt, root_sfen, root_eval_cp, root_eval_percent, problem_rating, problem_rating_games, tags, correct_choice_id, intro_moves_usi, created_at, updated_at`;
 const CHOICE_SELECT = 'problem_id, choice_id, usi, label, explanation, line, eval_cp, eval_percent';
+const CHOICE_SELECT_WITH_PROBLEM_MODE = 'problem_id, choice_id, usi, label, explanation, line, eval_cp, eval_percent, problems!inner(mode)';
 const DRAFT_PROBLEM_SELECT = `id, mode, status, display_no, prompt, root_sfen, root_eval_cp, root_eval_percent, problem_rating, problem_rating_games, tags, correct_choice_id, intro_moves_usi, created_at, updated_at`;
 const DRAFT_CHOICE_SELECT = 'draft_problem_id, choice_id, usi, label, explanation, line, eval_cp, eval_percent';
 
@@ -47,8 +46,11 @@ function normalizeProblemRow(row: Record<string, unknown>, fallbackMode: Product
 }
 
 function normalizeChoiceRow(row: Record<string, unknown>, mode: ProductionProblemMode): ProductionChoice {
+  const relatedProblem = row.problems as { mode?: unknown } | Array<{ mode?: unknown }> | undefined;
+  const relatedMode = Array.isArray(relatedProblem) ? relatedProblem[0]?.mode : relatedProblem?.mode;
+
   return {
-    mode,
+    mode: relatedMode == null ? mode : normalizeMode(relatedMode),
     problem_id: Number(row.problem_id ?? row.draft_problem_id),
     choice_id: Number(row.choice_id),
     usi: typeof row.usi === 'string' ? row.usi : '',
@@ -73,29 +75,15 @@ async function listNewModeDraftProblems(limit: number): Promise<ProductionProble
 }
 
 async function listNextMoveProblems(limit: number): Promise<ProductionProblem[]> {
-  const query = supabase
-    .from('next_move_problems')
+  const { data, error } = await supabase
+    .from('problems')
     .select(PROBLEM_SELECT_WITH_MODE_STATUS)
+    .eq('mode', 'next_move')
     .order('updated_at', { ascending: false })
     .limit(limit);
 
-  const { data, error } = await query;
-  if (!error) {
-    return (data ?? []).map((row) => normalizeProblemRow(row as Record<string, unknown>, 'next_move'));
-  }
-
-  if (!isMissingColumnError(error, 'mode') && !isMissingColumnError(error, 'status')) {
-    throw error;
-  }
-
-  const retry = await supabase
-    .from('next_move_problems')
-    .select(PROBLEM_SELECT)
-    .order('updated_at', { ascending: false })
-    .limit(limit);
-
-  if (retry.error) throw retry.error;
-  return (retry.data ?? []).map((row) => normalizeProblemRow(row as Record<string, unknown>, 'next_move'));
+  if (error) throw error;
+  return (data ?? []).map((row) => normalizeProblemRow(row as Record<string, unknown>, 'next_move'));
 }
 
 async function listJosekiProblems(limit: number): Promise<ProductionProblem[]> {
@@ -126,28 +114,15 @@ async function getProblemRow(
     return normalizeProblemRow(data as Record<string, unknown>, 'new_mode');
   }
 
-  const table = mode === 'next_move' ? 'next_move_problems' : 'problems';
-  const select = mode === 'next_move' ? PROBLEM_SELECT_WITH_MODE_STATUS : PROBLEM_SELECT_WITH_MODE_STATUS;
-  const query = supabase.from(table).select(select).eq('id', problemId);
-  const problemQuery = mode === 'joseki' ? query.eq('mode', 'joseki') : query;
+  const problemQuery = supabase
+    .from('problems')
+    .select(PROBLEM_SELECT_WITH_MODE_STATUS)
+    .eq('id', problemId)
+    .eq('mode', mode);
   const { data, error } = await problemQuery.single();
 
-  if (!error) {
-    return normalizeProblemRow(data as Record<string, unknown>, mode);
-  }
-
-  if (mode !== 'next_move' || (!isMissingColumnError(error, 'mode') && !isMissingColumnError(error, 'status'))) {
-    throw error;
-  }
-
-  const retry = await supabase
-    .from('next_move_problems')
-    .select(PROBLEM_SELECT)
-    .eq('id', problemId)
-    .single();
-
-  if (retry.error) throw retry.error;
-  return normalizeProblemRow(retry.data as Record<string, unknown>, 'next_move');
+  if (error) throw error;
+  return normalizeProblemRow(data as Record<string, unknown>, mode);
 }
 
 async function listChoices(problemIds: number[], mode: ProductionProblemMode): Promise<ProductionChoice[]> {
@@ -165,9 +140,8 @@ async function listChoices(problemIds: number[], mode: ProductionProblemMode): P
     return (data ?? []).map((row) => normalizeChoiceRow(row as Record<string, unknown>, 'new_mode'));
   }
 
-  const table = mode === 'next_move' ? 'next_move_choices' : 'problem_choices';
   const { data, error } = await supabase
-    .from(table)
+    .from('problem_choices')
     .select(CHOICE_SELECT)
     .in('problem_id', problemIds)
     .order('problem_id', { ascending: true })
@@ -207,7 +181,6 @@ async function upsertChoices(
     return;
   }
 
-  const table = mode === 'next_move' ? 'next_move_choices' : 'problem_choices';
   const updatedAt = new Date().toISOString();
   const rows = choices.map((choice) => ({
     problem_id: problemId,
@@ -227,7 +200,7 @@ async function upsertChoices(
         ? { ...choiceFields, updated_at: updatedAt }
         : choiceFields;
       const { data, error } = await supabase
-        .from(table)
+        .from('problem_choices')
         .update(updatePayload)
         .eq('problem_id', problemId)
         .eq('choice_id', choiceId)
@@ -238,7 +211,7 @@ async function upsertChoices(
 
       if (!data) {
         const { error: upsertError } = await supabase
-          .from(table)
+          .from('problem_choices')
           .upsert(
             includeUpdatedAt
               ? { ...row, updated_at: updatedAt }
@@ -324,11 +297,15 @@ export async function listProductionChoicesByProblemIds(
   if (mode === 'joseki') return listChoices(problemIds, 'joseki');
   if (mode === 'new_mode') return listChoices(problemIds, 'new_mode');
 
-  const [nextMoveChoices, josekiChoices] = await Promise.all([
-    listChoices(problemIds, 'next_move'),
-    listChoices(problemIds, 'joseki'),
-  ]);
-  return [...nextMoveChoices, ...josekiChoices];
+  const { data, error } = await supabase
+    .from('problem_choices')
+    .select(CHOICE_SELECT_WITH_PROBLEM_MODE)
+    .in('problem_id', problemIds)
+    .order('problem_id', { ascending: true })
+    .order('choice_id', { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []).map((row) => normalizeChoiceRow(row as Record<string, unknown>, 'next_move'));
 }
 
 export interface DailyProblemCreationCount {
@@ -380,8 +357,9 @@ export async function listDailyProblemCreationCounts(days = 20): Promise<DailyPr
 
   const [nextMoveResult, josekiResult, newModeResult] = await Promise.all([
     supabase
-      .from('next_move_problems')
+      .from('problems')
       .select('id, created_at')
+      .eq('mode', 'next_move')
       .gte('created_at', start.toISOString())
       .order('created_at', { ascending: true })
       .range(0, 9999),
@@ -468,7 +446,6 @@ export async function updateProductionProblemById(
     return getProductionProblemById(problemId, mode);
   }
 
-  const table = mode === 'next_move' ? 'next_move_problems' : 'problems';
   const updatedAt = new Date().toISOString();
   const basePayload = {
     prompt: problem.prompt,
@@ -477,16 +454,20 @@ export async function updateProductionProblemById(
     intro_moves_usi: problem.introMovesUsi,
     root_eval_cp: problem.rootEvalCp,
     root_eval_percent: problem.rootEvalPercent,
-    problem_rating: problem.problemRating,
-    problem_rating_games: problem.problemRatingGames,
+    problem_rating: problem.problemRating ?? 1500,
+    problem_rating_games: problem.problemRatingGames ?? 0,
     tags: problem.tags,
   };
 
   const updateProblem = async (includeUpdatedAt: boolean) => {
     const payload = includeUpdatedAt ? { ...basePayload, updated_at: updatedAt } : basePayload;
-    const query = supabase.from(table).update(payload).eq('id', problemId);
-    const problemQuery = mode === 'joseki' ? query.eq('mode', 'joseki') : query;
-    return problemQuery.select('id').maybeSingle();
+    return supabase
+      .from('problems')
+      .update(payload)
+      .eq('id', problemId)
+      .eq('mode', mode)
+      .select('id')
+      .maybeSingle();
   };
 
   let problemResult = await updateProblem(true);
@@ -498,13 +479,15 @@ export async function updateProductionProblemById(
   if (problemResult.error) throw problemResult.error;
 
   if (!problemResult.data) {
-    const upsertPayload = mode === 'joseki'
-      ? { id: problemId, mode: 'joseki', ...basePayload, updated_at: updatedAt }
-      : { id: problemId, ...basePayload, updated_at: updatedAt };
-
     const { error: upsertError } = await supabase
-      .from(table)
-      .upsert(upsertPayload, { onConflict: 'id' });
+      .from('problems')
+      .upsert({
+        id: problemId,
+        mode,
+        status: 'draft',
+        ...basePayload,
+        updated_at: updatedAt,
+      }, { onConflict: 'id' });
 
     if (upsertError) throw upsertError;
   }
@@ -534,31 +517,16 @@ export async function deleteProductionProblemEverywhere(
     return;
   }
 
-  if (mode === 'joseki') {
-    const { error: choicesError } = await supabase
-      .from('problem_choices')
-      .delete()
-      .eq('problem_id', problemId);
-    if (choicesError) throw choicesError;
+  const { error: choicesError } = await supabase
+    .from('problem_choices')
+    .delete()
+    .eq('problem_id', problemId);
+  if (choicesError) throw choicesError;
 
-    const { error } = await supabase
-      .from('problems')
-      .delete()
-      .eq('id', problemId)
-      .eq('mode', 'joseki');
-    if (error) throw error;
-    return;
-  }
-
-  const { error } = await supabase.rpc('delete_next_move_problem_everywhere', {
-    p_problem_id: problemId,
-  });
-
-  if (!error) return;
-
-  const retry = await supabase.rpc('delete_next_move_problem_everywhere', {
-    problem_id: problemId,
-  });
-
-  if (retry.error) throw retry.error;
+  const { error } = await supabase
+    .from('problems')
+    .delete()
+    .eq('id', problemId)
+    .eq('mode', mode);
+  if (error) throw error;
 }
