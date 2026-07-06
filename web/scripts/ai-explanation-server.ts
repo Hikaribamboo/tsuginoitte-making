@@ -1,6 +1,9 @@
 import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import OpenAI from 'openai';
 
 const app = express();
@@ -15,100 +18,30 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-const FEW_SHOT_EXAMPLES = [
-  { label: '△３三金', eval_percent: 17, line_labels: '△３三金 ▲２二銀不成 △４一玉 ▲３三銀成 △２一飛 ▲２六飛成', explanation: '▲２二銀不成が厳しい。そこに金を逃げても助からない。' },
-  { label: '△４六桂打', eval_percent: 25, line_labels: '△４六桂打 ▲５九玉 △２五歩 ▲２五同歩 △３八桂成', explanation: '特に強い狙いのない手。同飛車なら２三の銀を取れるが，同歩で何もない。' },
-  { label: '△３二金', eval_percent: 40, line_labels: '△３二金 ▲２二歩打 △３三飛 ▲２二歩成 △３一玉', explanation: 'シンプルに金取りに同銀とできる形にするのが最善手。少し意外な手だが，意外とこれで耐えている。' },
-  { label: '▲９五角打', eval_percent: 66, line_labels: '▲９五角打 △９四飛 ▲７三角成 △７三同銀 ▲３四桂', explanation: '△８三飛には▲７四歩と取れる。△９四飛が最善だが、角成同銀に▲３四桂と打てば相手の飛車は働かず、攻めの主導権を握れる。' },
-  { label: '▲７四歩', eval_percent: 51, line_labels: '▲７四歩 △７四同飛 ▲７五歩打 △９四飛 ▲９六歩', explanation: '相手の飛車が自然に良い位置に行くので良くない。' },
-  { label: '▲１五歩', eval_percent: 51, line_labels: '▲１五歩', explanation: 'チャンスを逃している' },
-  { label: '▲６四歩', eval_percent: 48, line_labels: '▲６四歩 △６四同歩 ▲６四同飛車 △９九角成 ▲６五飛', explanation: '同歩が最善だが、同飛車99角成に飛車まわりが絶品。持ち駒は少ないが互角' },
-  { label: '▲８八銀', eval_percent: 22, line_labels: '▲８八銀 △３三飛成 ▲２九飛 △２八歩打 ▲２八同飛', explanation: '相手の手は多いが、こちらは持ち駒が少なく手が少ない。' },
-  { label: '▲７三飛成', eval_percent: 37, line_labels: '▲７三飛成 △９五角打 ▲７三同龍 △６四同歩 ▲６三歩成', explanation: '95角と打たれ龍を逃げても99角なりとされ劣勢。' },
-  { label: '▲４九金', eval_percent: 71, line_labels: '▲４九金 △３六歩打 ▲９六角打 △３七桂打 ▲９六同飛', explanation: '悪くはないが、なんの為に将棋を指しているのか分からない。' },
-  { label: '▲７四香', eval_percent: 88, line_labels: '▲７四香 △７四同飛 ▲８三龍 △７四香打 ▲２五歩', explanation: '飛車を逃げると44桂打ちが激痛 詰めろなので香車を取る一択だが、冷静に同銀と取られて下手よし。' },
-  { label: '▲７二歩打', eval_percent: 78, line_labels: '▲７二歩打 △８一玉 ▲７三桂打 △６二金 ▲７二角打', explanation: '次善手だが、駒を大量に渡してしまうので実践的には危うい。' },
-];
+type SideToMove = 'sente' | 'gote';
 
-const STYLE_EXAMPLES: string[] = [
-  '飛車を取っても敵陣に打つ場所がないので疑問手。',
-  '玉頭の歩を伸ばすのが好手。どんどん桂跳ねや銀交換をして攻めをつなぐことができる。',
-  '勝勢の局面で自玉頭を弱くする必要がない。',
-  '△８三飛には▲７四歩と取れる。△９四飛が最善だが、角成同銀に▲３四桂と打てば相手の飛車は働かず、攻めの主導権を握れる。',
-  '相手の飛車が自然に良い位置に行くので良くない。',
-  'チャンスを逃している',
-  '△７八桂成で角が詰み，△１五香からの王手金取りが痛い。',
-  '金取りは無視して良い。左側の広さを生かしつつ豊富な持ち駒で攻めれば優勢。',
-  '角を取られると△１五香からの王手金取りが痛い。',
-  '相手玉は左側を受けづらいが、右側がまだ広い。',
-  '相手の△２九飛成が先手となり悪手。',
-  '銀と角を捨ててでも自玉を安全にする。どんどん自玉を固め大優勢になる。',
-  '桂馬で相手玉を圧迫しつつ金を狙う。相手は金を逃げると狭くなる。',
-  '相手の大駒である飛車から逃げる一手だが，自玉の左側は全く安全ではない。▲３七歩成を受けるのが難しいため悪手。',
-  '飛車に当てつつ相手の玉を狙っているが，相手は意外と広い。',
-  '自玉を固くする一手だが，角銀両取りを狙った相手の桂跳ねの味が良い。六５の地点を継続的に攻められて悪くなる。',
-  'ここは相手の弱点の玉頭を狙うのが好手。',
-  '相手が桂馬を打つ場所を自ら作りに行く手で悪手。',
-  'シンプルに金取りに同銀とできる形にするのが最善手。少し意外な手だが，意外とこれで耐えている。',
-  '特に強い狙いのない手。同飛車なら２三の銀を取れるが，同歩で何もない。',
-  '▲２二銀不成が厳しい。そこに金を逃げても助からない。',
-  '銀が玉頭から離れ少し左側が薄くなる。完封を目指すには甘い手。',
-  '相手の玉頭に角を通す筋が抜群に良い。',
-  '桂馬がはねて勢いがあるが，角道が止まってしまい自玉も狭くなるため疑問手。',
-  '△２八桂成とされ飛車を走られて十字飛車をくらう。',
-  '香取りは受けがないので４五の桂馬を自分から精算しに行くのが好手。',
-  '相手の端は弱点ではないのでスジが悪い。',
-  'たらしの歩が厳しい。次に打ち込む銀を取られても取られなくても相手は歩成りが受けられない。',
-  '角を直接打ち込むのは少し重たい。形勢を大きく損ねて敗勢となる。',
-  '歩を回収されて終わる。',
-  '飛車先を通しておく',
-  '角出の時２五に飛車を引けないため飛車を止められ攻めが重くなる',
-  '馬と飛車の交換では相手が得をする。相手玉が広くなり飛車打ちには強い陣形となる。',
-  '馬を引くと相手玉を固められ、攻めもうるさくて不利となる。',
-  '歩成から桂馬を捕まえられるのを読み切れば踏み込める。',
-  '相手の角は意外と広く，銀を打つのは勿体無い。一歩取られてしまう。',
-  '棒銀を狙っているが，攻めが重たく相手にされない。相手の角の位置が良いので先行して攻められる。',
-  '持ち駒に香があるため相手の飛車は捕まっている。落ち着いて捕まえに行く。',
-  '攻防の角となっているが８四の地点にコマを足しても強い攻めにならない。',
-  '先に銀の頭に歩を打つ手が好手。',
-  '先手を取られ▲２二歩が後の▲３一角打を狙った手で厳しい。',
-  '自分の銀をどかして桂馬を捕まえに行ってよい。銀交換して相手からの△３八銀打は問題ない。',
-  '相手の８筋からの攻めが少しうるさくなる。',
-  '先手を取られて△２七金とされると一気に厳しくなる。',
-  '△１六桂に▲同角とできないので角を打った意味があまりない。香取りは変に受けない方が良い。',
-  'ただ銀を交換しても相手は厳しくない。',
-  '先に歩を打つが、相手の銀がくっつきいい形になってしまう。',
-  '自玉がかなり危険になる。',
-  '馬を切っても持ち駒が豊富なため攻めがつながる。相手は浮きゴマが多く、大ゴマを捨てられない。',
-  '両取りの桂馬を打たれて後手ペースとなる。',
-  '▲２三歩と垂らすのが相手の弱点。△同金には▲４二桂馬成が厳しく，放置すると相手の金が捕まっている。',
-  '相手の大駒を狙に行くが，△同飛車とされて飛車を３筋に回られ大悪手となる。',
-  '飛車を逃げると44桂打ちが激痛 詰めろなので香車を取る一択だが、冷静に同銀と取られて下手よし。',
-  '悪くはないが、なんの為に将棋を指しているのか分からない。',
-  '次善手だが、駒を大量に渡してしまうので実践的には危うい。',
-  '少し悪いが飛車角交換をして攻めるのが最善手。',
-  '桂馬を取られて▲５三桂打が厳しく後手敗勢。',
-  '相手の角が狭いので誘導し技をかける。形勢は互角。',
-  '先手の角と飛車の位置が良いため，角出を無視すると攻めがうるさい。',
-  '桂打から一見危なく見えるが、相手玉は詰まない。',
-  '同歩が最善だが、同飛車99角成に飛車まわりが絶品。持ち駒は少ないが互角',
-  '95角と打たれ龍を逃げても99角なりとされ劣勢。',
-  '相手の手は多いが、こちらは持ち駒が少なく手が少ない。',
-  '銀をとられても２六の金を取る手の筋が抜群で先手大優勢。',
-  '４五の角が相手の飛車を見ているため、銀をどかしてからの▲５五歩をとれず相手が厳しい。',
-  '次の▲２五桂をねらっているが、そこまで厳しい攻めにならない。',
-  '自玉の右側が狭いので左に逃げたくなるが、馬に左側も制圧されてしまう。',
-  '左右から攻める心意気は良いが，緩手のため無視される。',
-  '相手の端が弱いのは確かだが，相手玉に逃げ道がある盤面では少し重たい攻め。',
-  'ここは急がず確実な弱点である端を攻める。',
-  '５筋のコマの数が負けており，角も詰まされてしまうため厳しくなる。',
-  '一手パスすると飛車や桂馬を足され５筋が厳しくなる。',
-  '５筋にコマを足し飛車回りに備える好手。',
-  '相手の△２九飛成が先手となり悪手。',
-  '△６一銀で守られるためここでは緩手。',
-  '角を切られて相手が一気に固くなる。',
-  '自玉が固くみえるが，意外と弱い。△４五桂打と△５七角成の両方を消す一手。',
-];
+type TrainingExample = {
+  label: string;
+  eval_percent: number;
+  line_labels: string;
+  explanation: string;
+};
+
+type TrainingExamplesBySide = Record<SideToMove, TrainingExample[]>;
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TRAINING_EXAMPLES_PATH = path.join(__dirname, 'explanation-training-examples.json');
+
+function loadTrainingExamples(): TrainingExamplesBySide {
+  const raw = fs.readFileSync(TRAINING_EXAMPLES_PATH, 'utf8');
+  const parsed = JSON.parse(raw) as Partial<TrainingExamplesBySide>;
+  return {
+    sente: Array.isArray(parsed.sente) ? parsed.sente : [],
+    gote: Array.isArray(parsed.gote) ? parsed.gote : [],
+  };
+}
+
+const TRAINING_EXAMPLES = loadTrainingExamples();
 
 type ExplanationChoice = {
   label: string;
@@ -117,8 +50,19 @@ type ExplanationChoice = {
   is_correct: boolean;
 };
 
-function buildPrompt(sfen: string, sideToMove: 'sente' | 'gote', choices: ExplanationChoice[]): string {
-  const examplesText = FEW_SHOT_EXAMPLES.map(
+function inferExampleSide(sideToMove: SideToMove, choices: ExplanationChoice[]): SideToMove {
+  const senteLabels = choices.filter((choice) => choice.label.trim().startsWith('▲')).length;
+  const goteLabels = choices.filter((choice) => choice.label.trim().startsWith('△')).length;
+
+  if (senteLabels > goteLabels) return 'sente';
+  if (goteLabels > senteLabels) return 'gote';
+  return sideToMove;
+}
+
+function buildPrompt(sfen: string, sideToMove: SideToMove, choices: ExplanationChoice[]): string {
+  const exampleSide = inferExampleSide(sideToMove, choices);
+  const examples = TRAINING_EXAMPLES[exampleSide];
+  const examplesText = examples.map(
     (ex) =>
       `指し手: ${ex.label} | 勝率: ${ex.eval_percent}% | 読み筋: ${ex.line_labels || 'なし'}\n解説: ${ex.explanation}`,
   ).join('\n\n');
@@ -130,12 +74,21 @@ function buildPrompt(sfen: string, sideToMove: 'sente' | 'gote', choices: Explan
     )
     .join('\n');
 
-  const sideLabel = sideToMove === 'sente' ? '先手' : '後手';
-  const styleExamplesText = STYLE_EXAMPLES.map((ex, i) => `${i + 1}. ${ex}`).join('\n');
+  const sideLabel = exampleSide === 'sente' ? '先手' : '後手';
+  const sideMarker = exampleSide === 'sente' ? '▲' : '△';
+  const opponentMarker = exampleSide === 'sente' ? '△' : '▲';
+  const styleExamplesText = examples
+    .slice(0, 16)
+    .map((ex, i) => `${i + 1}. ${ex.explanation}`)
+    .join('\n');
 
   return `あなたは将棋の解説者です。次の一手問題の各選択肢に対して、簡潔な解説文を生成してください。
 
 以下の点を守ってください：
+- 今回の問題は${sideLabel}目線で解説する。${sideLabel}側を「こちら」、相手側を「相手」として扱う
+- 今回の選択肢は${sideMarker}の手である。解説の主語・評価・攻め筋は${sideLabel}側から見たものにする
+- ${opponentMarker}側の狙いを説明するときは「相手からの」「相手に」など、相手側の手として書く
+- 入出力例は${sideLabel}番の例だけを使用している。反対側の目線や言い回しに引っ張られない
 - 読み筋の具体的な手順に言及しながら、なぜその手が良い/悪いのかを説明する
 - 1〜3文程度の簡潔な解説にする
 - 勝率を参考にして、その手の優劣を伝える
